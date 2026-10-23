@@ -35,6 +35,13 @@ enum MenuActions {
         NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
     }
 
+    static func desqueeze(state: AppState) {
+        Task {
+            guard let result = await state.desqueezeInResolve() else { return }
+            showDetail(result.text, style: result.isError ? .warning : .informational) {}
+        }
+    }
+
     static func showDNGsInFinder() {
         let root = MountPaths.defaultRoot
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -110,6 +117,8 @@ struct MenuContent: View {
         Button("Choose Folder…") { MenuActions.chooseFolder(state: state) }
         Button("Open Resolve") { MenuActions.openResolve() }
             .disabled(MenuActions.resolveURL == nil)
+        Button("Desqueeze in Resolve") { MenuActions.desqueeze(state: state) }
+            .disabled(state.desqueezing || state.desqueezeTargets.isEmpty || MenuActions.resolveURL == nil)
         Button("Show DNGs in Finder") { MenuActions.showDNGsInFinder() }
         Picker("Dual ISO", selection: Binding(get: { state.mode }, set: { m in Task { await state.setMode(m) } })) {
             Text("Smooth Editing").tag(DualISOMode.montageFluide)

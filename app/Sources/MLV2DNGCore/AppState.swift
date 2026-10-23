@@ -21,7 +21,15 @@ public final class AppState: ObservableObject {
     @Published public private(set) var folder: URL?
     @Published public private(set) var shoots: [Shoot] = []
     /// Folder paths of the shoots currently mounted.
-    @Published public private(set) var mounted: Set<String> = []
+    @Published public private(set) var mounted: Set<String> = [] {
+        didSet { updateDesqueezeTargets() }
+    }
+    /// Mounted anamorphic shoots (mount path + squeeze factor), for « Desqueeze in Resolve ».
+    @Published public private(set) var desqueezeTargets: [ResolveDesqueeze.Target] = []
+    /// A « Desqueeze in Resolve » run is in flight.
+    @Published public private(set) var desqueezing = false
+    /// Whether the last « Desqueeze in Resolve » of this session reached Resolve Studio (nil: not tried yet).
+    public private(set) var resolveReachable: Bool?
     @Published public private(set) var mode: DualISOMode
     @Published public private(set) var alert: String?
     /// FUSE-T is missing or outdated: the app is not started yet (menu shows the alert icon
@@ -52,11 +60,23 @@ public final class AppState: ObservableObject {
     /// Consecutive crashes per shoot key, with the time of the last one.
     private var crashes: [String: (count: Int, last: ContinuousClock.Instant)] = [:]
     private var restartTasks: [String: Task<Void, Never>] = [:]
+    /// Per folder key: squeeze factor (nil = not anamorphic) and last mount point.
+    private var squeezeFactors: [String: Int?] = [:]
+    private var mountPoints: [String: URL] = [:]
+    private let resolveRunner: ResolveDesqueeze.Runner?
+    /// Where the Resolve menu script is written (nil: never written, e.g. in tests).
+    private let resolveScriptsDir: URL?
+    private let prepareResolvePresets: (([Int]) -> ResolvePresets.Preparation)?
 
     public init(manager: MountManager, defaults: UserDefaults, scan: @escaping (URL) throws -> [Shoot],
                 restartDelays: [Duration] = [.seconds(1), .seconds(5)],
-                restartWindow: Duration = .seconds(60)) {
+                restartWindow: Duration = .seconds(60),
+                resolveRunner: ResolveDesqueeze.Runner? = nil, resolveScriptsDir: URL? = nil,
+                prepareResolvePresets: (([Int]) -> ResolvePresets.Preparation)? = nil) {
         self.manager = manager
+        self.resolveRunner = resolveRunner
+        self.resolveScriptsDir = resolveScriptsDir
+        self.prepareResolvePresets = prepareResolvePresets
         self.defaults = defaults
         self.scan = scan
         self.restartDelays = restartDelays
@@ -139,6 +159,44 @@ public final class AppState: ObservableObject {
             let names = failed.map(\.name).sorted().joined(separator: ", ")
             alert = String(localized: "Dual ISO mode couldn't be applied to: \(names).", bundle: L10n.bundle)
         }
+    }
+
+    /// « Desqueeze in Resolve »: applies the « mlv2dng 1x<N> » Input Sizing preset to the clips of the mounted
+    /// anamorphic shoots in Resolve's open project. Returns the alert text; nil if a run is already in flight.
+    public func desqueezeInResolve() async -> (text: String, isError: Bool)? {
+        guard !desqueezing else { return nil }
+        desqueezing = true
+        defer { desqueezing = false }
+        let targets = desqueezeTargets
+        let factors = Array(Set(targets.map(\.factor))).sorted()
+        let preparation = prepareResolvePresets?(factors)
+        if preparation == .created {
+            return (ResolvePresets.createdMessage(), false)
+        }
+        if preparation == .manual && !ResolvePresets.isResolveRunning() && !factors.isEmpty {
+            return (ResolvePresets.manualMessage() + "\n\n" + factors.map {
+                ResolveDesqueeze.missingStepText(factor: "\($0)", preset: ResolveDesqueeze.presetName($0))
+            }.joined(separator: "\n\n"), true)
+        }
+        let outcome: ResolveDesqueeze.Outcome
+        if let resolveRunner {
+            outcome = await ResolveDesqueeze.run(targets: targets, runner: resolveRunner)
+        } else {
+            outcome = .notInstalled
+        }
+        resolveReachable = outcome.reachedResolve
+        let message = ResolveDesqueeze.message(for: outcome, targets: targets)
+        if case .failed = outcome { return message }
+        if case .report(let report) = outcome, !report.missingPreset.isEmpty {
+            return (ResolvePresets.manualMessage() + "\n\n" + message.text, message.isError)
+        }
+        if preparation == .manual && message.isError && !factors.isEmpty {
+            let steps = factors.map {
+                ResolveDesqueeze.missingStepText(factor: "\($0)", preset: ResolveDesqueeze.presetName($0))
+            }.joined(separator: "\n\n")
+            return (message.text + "\n\n" + ResolvePresets.manualMessage() + "\n\n" + steps, true)
+        }
+        return message
     }
 
     /// Launch: clears stale mounts, rescans the last folder, then remounts
@@ -247,6 +305,7 @@ public final class AppState: ObservableObject {
         do {
             let url = try await manager.mount(shoot, mode: mode, fixBadPixels: fixBadPixels,
                                               fixFocusPixels: fixFocusPixels)
+            noteMountPoint(shoot, url)
             mounted.insert(Self.key(shoot.folder))
             noteSqueeze(shoot)
             noteCollision(shoot, mountedAt: url)
@@ -269,10 +328,39 @@ public final class AppState: ObservableObject {
 
     private func noteSqueeze(_ shoot: Shoot) {
         let k = Self.key(shoot.folder)
-        guard !infoShown.contains(k), let file = shoot.clips.first?.files.first,
-              let n = MLVHeader.horizontalSqueeze(of: file) else { return }
+        guard !infoShown.contains(k), let n = squeezeFactor(shoot) else { return }
         infoShown.insert(k)
-        info = String(localized: "Anamorphic shoot 1x\(n): in Resolve, go to the Color page → Sizing → Input Sizing and set Width to \(n).", bundle: L10n.bundle)
+        var hint = String(localized: "Anamorphic shoot 1x\(n): in Resolve, go to the Color page → Sizing → Input Sizing and set Width to \(n).", bundle: L10n.bundle)
+        // The manual advice stays (free version); Studio users who already got through get the shortcut too.
+        if resolveReachable == true { hint += " " + ResolveDesqueeze.hintSuffix() }
+        info = hint
+    }
+
+    /// Squeeze factor of a shoot, read once from its first MLV header.
+    private func squeezeFactor(_ shoot: Shoot) -> Int? {
+        let k = Self.key(shoot.folder)
+        if let cached = squeezeFactors[k] { return cached }
+        let n = shoot.clips.first?.files.first.flatMap(MLVHeader.horizontalSqueeze(of:))
+        squeezeFactors[k] = .some(n)
+        return n
+    }
+
+    private func noteMountPoint(_ shoot: Shoot, _ url: URL) {
+        let k = Self.key(shoot.folder)
+        _ = squeezeFactor(shoot)
+        mountPoints[k] = url
+    }
+
+    private func updateDesqueezeTargets() {
+        let targets = mounted.compactMap { k -> ResolveDesqueeze.Target? in
+            guard let url = mountPoints[k], let f = squeezeFactors[k] ?? nil else { return nil }
+            return ResolveDesqueeze.Target(prefix: url.standardizedFileURL.path, factor: f)
+        }.sorted { ($0.prefix, $0.factor) < ($1.prefix, $1.factor) }
+        guard targets != desqueezeTargets else { return }
+        desqueezeTargets = targets
+        if let dir = resolveScriptsDir {
+            ResolveDesqueeze.installMenuScript(targets: targets, in: dir)
+        }
     }
 
     private func handle(_ event: MountEvent) {
@@ -319,7 +407,8 @@ public final class AppState: ObservableObject {
         guard saved.contains(k), !mounted.contains(k) else { return }
         guard FileManager.default.fileExists(atPath: k) else { crashes[k] = nil; return }
         do {
-            try await manager.mount(shoot, mode: mode, fixBadPixels: fixBadPixels, fixFocusPixels: fixFocusPixels)
+            let url = try await manager.mount(shoot, mode: mode, fixBadPixels: fixBadPixels, fixFocusPixels: fixFocusPixels)
+            noteMountPoint(shoot, url)
             mounted.insert(k)
         } catch {
             if case let .exitedDuringStartup(status)? = error as? MountError {

@@ -34,6 +34,19 @@ final class AppStateTests: XCTestCase {
 
     // MARK: Helpers
 
+    func testCreatedResolvePresetsPromptToOpenResolveWithoutRunningScript() async throws {
+        let state = AppState(manager: makeManager(), defaults: defaults, scan: ShootScanner.scan,
+                             resolveRunner: { _ in
+                                 XCTFail("Resolve is closed while presets are created")
+                                 return ""
+                             }, prepareResolvePresets: { _ in .created })
+        let result = await state.desqueezeInResolve()
+        XCTAssertEqual(result?.text, ResolvePresets.createdMessage())
+        XCTAssertEqual(result?.isError, false)
+        XCTAssertFalse(state.desqueezing)
+        XCTAssertNil(state.resolveReachable)
+    }
+
     func makeManager(readinessTimeout: Duration = .seconds(2)) -> MountManager {
         MountManager(mlvfs: URL(fileURLWithPath: "/opt/engine/mlvfs"),
                             fpmDir: URL(fileURLWithPath: "/opt/engine/fpm", isDirectory: true),
@@ -312,6 +325,64 @@ extension AppStateTests {
         await state.toggle(s)
         await state.toggle(s)
         XCTAssertNil(state.info)
+    }
+
+    func testDesqueezeTargetsMenuScriptAndHint() async throws {
+        let ana = try makeShootFolder("Ana")
+        try SyntheticMLV.data(sampling: (1, 2, 1, 0)).write(to: ana.appendingPathComponent("A001.MLV"))
+        let ana2 = try makeShootFolder("Ana2")
+        try SyntheticMLV.data(sampling: (1, 2, 1, 0)).write(to: ana2.appendingPathComponent("A001.MLV"))
+        try makeShootFolder("Plain")
+        let scripts = tmp.appendingPathComponent("Scripts/Utility", isDirectory: true)
+        let scriptsSeen = Locked<[String]>([])
+        let runner: ResolveDesqueeze.Runner = { script in
+            scriptsSeen.mutate { $0.append(script) }
+            return "RESULT applied=2 already=0 other_preset=0 missing_preset= no_resolve=0 no_project=0 dry_run=0 product=DaVinci Resolve Studio"
+        }
+        let state = AppState(manager: makeManager(), defaults: defaults, scan: ShootScanner.scan,
+                             resolveRunner: runner, resolveScriptsDir: scripts)
+        await state.choose(folder: volume)
+        await state.toggle(try shoot(state, "Plain"))
+        XCTAssertEqual(state.desqueezeTargets, [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: scripts.path), "nothing squeezed: no script yet")
+
+        await state.toggle(try shoot(state, "Ana"))
+        let prefix = mountRoot.appendingPathComponent("Ana").standardizedFileURL.path
+        XCTAssertEqual(state.desqueezeTargets, [ResolveDesqueeze.Target(prefix: prefix, factor: 3)])
+        let menu = try String(contentsOf: scripts.appendingPathComponent(ResolveDesqueeze.menuScriptName), encoding: .utf8)
+        XCTAssertTrue(menu.contains(prefix))
+        XCTAssertFalse(state.info?.contains("Desqueeze in Resolve") ?? true, "unknown: manual hint only")
+
+        XCTAssertNil(state.resolveReachable)
+        let result = await state.desqueezeInResolve()
+        XCTAssertEqual(result?.text, "2 clips desqueezed in Resolve (Input Sizing preset “mlv2dng 1x3”).")
+        XCTAssertEqual(result?.isError, false)
+        XCTAssertEqual(state.resolveReachable, true)
+        XCTAssertFalse(state.desqueezing)
+        XCTAssertTrue(scriptsSeen.get().first?.contains(prefix) ?? false)
+
+        await state.toggle(try shoot(state, "Ana2"))
+        XCTAssertEqual(state.info, "Anamorphic shoot 1x3: in Resolve, go to the Color page → Sizing → Input Sizing and set Width to 3. Or use Desqueeze in Resolve.")
+        XCTAssertEqual(state.desqueezeTargets.count, 2)
+
+        await state.toggle(try shoot(state, "Ana"))
+        await state.toggle(try shoot(state, "Ana2"))
+        XCTAssertEqual(state.desqueezeTargets, [])
+        let emptied = try String(contentsOf: scripts.appendingPathComponent(ResolveDesqueeze.menuScriptName), encoding: .utf8)
+        XCTAssertFalse(emptied.contains(prefix))
+    }
+
+    func testFailedDesqueezeKeepsManualHint() async throws {
+        let ana = try makeShootFolder("Ana")
+        try SyntheticMLV.data(sampling: (1, 2, 1, 0)).write(to: ana.appendingPathComponent("A001.MLV"))
+        let state = AppState(manager: makeManager(), defaults: defaults, scan: ShootScanner.scan,
+                             resolveRunner: { _ in "RESULT applied=0 already=0 other_preset=0 missing_preset= no_resolve=1 no_project=0 dry_run=0 product=" })
+        let result = await state.desqueezeInResolve()
+        XCTAssertEqual(result?.isError, true)
+        XCTAssertEqual(state.resolveReachable, false)
+        await state.choose(folder: volume)
+        await state.toggle(try shoot(state, "Ana"))
+        XCTAssertEqual(state.info, "Anamorphic shoot 1x3: in Resolve, go to the Color page → Sizing → Input Sizing and set Width to 3.")
     }
 
     func testNoInfoForPlainShootAndClearAlert() async throws {

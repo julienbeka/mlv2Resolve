@@ -35,7 +35,10 @@ final class AppCore {
                                logDir: EngineLog.defaultDirectory,
                                paths: MountPaths(root: Self.mountRoot),
                                launcher: FoundationLauncher(), unmounter: UmountUnmounter())
-        state = AppState(manager: manager, defaults: .standard, scan: ShootScanner.scan)
+        state = AppState(manager: manager, defaults: .standard, scan: ShootScanner.scan,
+                         resolveRunner: ResolveDesqueeze.fuscriptRunner(),
+                         resolveScriptsDir: ResolveDesqueeze.menuScriptsDirectory,
+                         prepareResolvePresets: { ResolvePresets.prepare(factors: $0) })
     }
 
     /// Once FUSE-T is ready: observe disks, then restore the previous session.

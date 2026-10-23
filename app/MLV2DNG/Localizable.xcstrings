@@ -120,6 +120,13 @@
         }
       }
     },
+    "Desqueeze in Resolve": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Desqueeze in Resolve" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Désqueezer dans Resolve" } }
+      }
+    },
     "Open Resolve": {
       "extractionState": "manual",
       "localizations": {

@@ -51,6 +51,8 @@ struct MainWindowView: View {
             Divider()
             HStack {
                 Button("Open Resolve") { MenuActions.openResolve() }.disabled(MenuActions.resolveURL == nil)
+                Button("Desqueeze in Resolve") { MenuActions.desqueeze(state: state) }
+                    .disabled(state.desqueezing || state.desqueezeTargets.isEmpty || MenuActions.resolveURL == nil)
                 Button("Show DNGs in Finder") { MenuActions.showDNGsInFinder() }
                 Spacer()
             }

@@ -8,3 +8,6 @@ build/
 poc/out/
 .DS_Store
 *.bin
+*.gyroflow
+fichiers tests/
+__pycache__/

@@ -194,6 +194,41 @@ final class MountManagerTests: XCTestCase {
         XCTAssertEqual(launcher.processes.map(\.signals), [[], []])
     }
 
+    /// Starts mounting `s` with a mount that only appears when the test says so.
+    private func startMount(_ m: MountManager, _ s: Shoot, mode: DualISOMode) async -> Task<URL, Error> {
+        launcher.mountsAppear.set(false)
+        let task = Task { try await m.mount(s, mode: mode) }
+        while launcher.processes.isEmpty { try? await Task.sleep(for: .milliseconds(2)) }
+        try? await Task.sleep(for: .milliseconds(20)) // inside awaitReady's polling
+        return task
+    }
+
+    func testSetModeDuringStartupDoesNotSignalAndAppliesOnceReady() async throws {
+        let m = makeManager()
+        let mounting = await startMount(m, shoot("A"), mode: .montageFluide)
+        let p = launcher.processes[0]
+        let failed = await m.setMode(.qualiteEtalonnage)
+        XCTAssertEqual(failed, [])
+        XCTAssertEqual(p.signals, [], "a starting engine has no handler yet: a signal would kill it")
+        unmounter.markMounted(URL(fileURLWithPath: p.args[0]))
+        _ = try await mounting.value
+        XCTAssertEqual(p.signals, [SIGUSR2], "once ready it receives the current mode, once")
+        XCTAssertTrue(p.isRunning)
+        _ = try await m.mount(shoot("A"), mode: .qualiteEtalonnage) // already mounted: no extra signal
+        XCTAssertEqual(p.signals, [SIGUSR2])
+    }
+
+    func testModeBackToLaunchFlagDuringStartupSendsNothing() async throws {
+        let m = makeManager()
+        let mounting = await startMount(m, shoot("A"), mode: .montageFluide)
+        let p = launcher.processes[0]
+        await m.setMode(.qualiteEtalonnage)
+        await m.setMode(.montageFluide)
+        unmounter.markMounted(URL(fileURLWithPath: p.args[0]))
+        _ = try await mounting.value
+        XCTAssertEqual(p.signals, [], "the launch flag already matches the current mode")
+    }
+
     func testFoundationProcessSignalsRealProcess() throws {
         let p = try FoundationLauncher().launch(URL(fileURLWithPath: "/bin/sleep"), ["30"], log: nil)
         let exited = expectation(description: "exit")

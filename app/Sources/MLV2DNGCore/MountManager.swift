@@ -68,10 +68,16 @@ public actor MountManager {
         let process: any RunningProcess
         let exitStatus: ExitBox
         var unmountTask: Task<Void, Error>?
+        /// The mount appeared: the engine has installed its signal handlers
+        /// (before then SIGUSR1/SIGUSR2 would kill it).
+        var isReady = false
+        /// Mode the engine runs in: the launch flag, then each delivered signal.
+        var mode: DualISOMode
 
-        init(id: UUID, shoot: Shoot, url: URL, process: any RunningProcess, exitStatus: ExitBox) {
+        init(id: UUID, shoot: Shoot, url: URL, process: any RunningProcess, exitStatus: ExitBox,
+             mode: DualISOMode) {
             self.id = id; self.shoot = shoot; self.url = url
-            self.process = process; self.exitStatus = exitStatus
+            self.process = process; self.exitStatus = exitStatus; self.mode = mode
         }
 
         var isLive: Bool { process.isRunning }
@@ -87,6 +93,9 @@ public actor MountManager {
     private let readinessTimeout: Duration
     private let pollInterval: Duration
     private var entries: [UUID: Entry] = [:]
+    /// Last mode passed to `setMode`; engines that become ready in another
+    /// mode are switched to it.
+    private var currentMode: DualISOMode?
     /// Post-crash cleanups in flight, by mount-point path.
     private var cleanups: [String: Task<Void, Never>] = [:]
 
@@ -161,7 +170,8 @@ public actor MountManager {
         }
         let id = UUID()
         let box = ExitBox()
-        entries[id] = Entry(id: id, shoot: shoot, url: url, process: process, exitStatus: box)
+        entries[id] = Entry(id: id, shoot: shoot, url: url, process: process, exitStatus: box,
+                             mode: mode)
         process.onExit = { [weak self] status in
             box.set(status)
             guard let self else { return }
@@ -188,14 +198,20 @@ public actor MountManager {
         for e in Array(entries.values) { try? await unmount(e.shoot, force: force) }
     }
 
-    /// Switches the dual ISO mode of every running mlvfs live by signalling
+    /// Switches the dual ISO mode of every ready mlvfs live by signalling
     /// it (SIGUSR1 = montage fluide, SIGUSR2 = qualité étalonnage). Returns
     /// the shoots whose engine could not be signalled (process gone).
+    /// Engines still starting are not signalled (that would kill them): they
+    /// receive the mode once their mount is up.
     @discardableResult
     public func setMode(_ mode: DualISOMode) async -> [Shoot] {
+        currentMode = mode
         var failed: [Shoot] = []
-        for e in entries.values where e.isLive && e.unmountTask == nil {
-            do { try e.process.signal(mode.signal) } catch { failed.append(e.shoot) }
+        for e in entries.values where e.isReady && e.isLive && e.unmountTask == nil {
+            do {
+                try e.process.signal(mode.signal)
+                e.mode = mode
+            } catch { failed.append(e.shoot) }
         }
         return failed
     }
@@ -269,7 +285,10 @@ public actor MountManager {
                 if let current, current.unmountTask == nil { await reap(id) }
                 throw MountError.exitedDuringStartup(status: box.get() ?? -1)
             }
-            if unmounter.isMountPoint(url) { return }
+            if unmounter.isMountPoint(url) {
+                markReady(id)
+                return
+            }
             if clock.now >= deadline {
                 if let current, current.unmountTask == nil {
                     let task = Task { try await self.performUnmount(id, force: true) } // our own failed start
@@ -279,6 +298,17 @@ public actor MountManager {
                 throw MountError.startupTimedOut(url)
             }
             try? await Task.sleep(for: pollInterval)
+        }
+    }
+
+    /// Marks the entry ready and, if `setMode` chose another mode while it was
+    /// starting, switches it now. A failed signal means the engine died: its
+    /// exit is handled by the exit callback.
+    private func markReady(_ id: UUID) {
+        guard let e = entries[id], e.unmountTask == nil else { return }
+        e.isReady = true
+        if let mode = currentMode, mode != e.mode, (try? e.process.signal(mode.signal)) != nil {
+            e.mode = mode
         }
     }
 

@@ -162,7 +162,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let model = OnboardingModel()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        guard model.state != .ready else { return }
+        guard model.state != .ready else { return AppCore.shared.start() }
         let hosting = NSHostingController(rootView: OnboardingView(model: model))
         let w = NSWindow(contentViewController: hosting)
         w.title = "MLV Switch"
@@ -174,10 +174,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let vf = screen.visibleFrame
         w.setFrameOrigin(NSPoint(x: vf.midX - w.frame.width / 2, y: vf.midY - w.frame.height / 2))
         window = w
-        model.onReady = { [weak self] in self?.window?.close() }
+        model.onReady = { [weak self] in
+            self?.window?.close()
+            AppCore.shared.start()
+        }
         model.startPolling()
         w.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        AppCore.shared.shutdown()
     }
 
     func windowWillClose(_ notification: Notification) {

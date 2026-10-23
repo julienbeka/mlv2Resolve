@@ -1,0 +1,29 @@
+# Build MLVFS for Apple Silicon against FUSE-T. Run from engine/ (see scripts/build-engine.sh).
+CC = clang
+ARCH = -arch arm64
+GIT_VERSION := $(shell git describe --long --dirty --always --tags 2>/dev/null || echo unknown)
+
+SRC = mlvfs
+FUSE_INC ?= /usr/local/include/fuse
+FUSE_LIB ?= /usr/local/lib
+
+CFLAGS = $(ARCH) -O2 -Wall -Wno-deprecated-declarations -Wno-unused-function -Wno-unused-variable \
+  -D_FILE_OFFSET_BITS=64 -DFUSE_USE_VERSION=26 -DVERSION="\"$(GIT_VERSION)\"" \
+  -std=gnu99 -I$(FUSE_INC) -I$(SRC)
+LIBS = -L$(FUSE_LIB) -lfuse-t -pthread -Wl,-rpath,$(FUSE_LIB)
+
+LZMA_SRCS = 7zAlloc 7zBuf 7zBuf2 7zCrc 7zCrcOpt 7zDec 7zFile 7zIn 7zStream Alloc Bcj2 Bra Bra86 BraIA64 CpuArch Delta LzFind Lzma2Dec Lzma2Enc Lzma86Dec Lzma86Enc LzmaDec LzmaEnc LzmaLib Ppmd7 Ppmd7Dec Ppmd7Enc Sha256 Xz XzCrc64
+OBJS = $(addprefix $(SRC)/, dng.o index.o wav.o stripes.o cs.o amaze_demosaic_RT.o hdr.o histogram.o \
+  mongoose/mongoose.o webgui.o resource_manager.o lj92.o gif.o patternnoise.o slre/slre.o) \
+  $(addprefix $(SRC)/LZMA/, $(addsuffix .o, $(LZMA_SRCS)))
+
+default: mlvfs-bin
+
+mlvfs-bin: $(SRC)/main.c $(OBJS)
+	$(CC) $(CFLAGS) $^ $(LIBS) -o mlvfs-bin
+
+$(SRC)/%.o: $(SRC)/%.c
+	$(CC) -c $(CFLAGS) $< -o $@
+
+clean:
+	rm -f mlvfs-bin $(OBJS)

@@ -11,3 +11,5 @@ poc/out/
 *.gyroflow
 fichiers tests/
 __pycache__/
+engine/mlvfs-bin
+*.o

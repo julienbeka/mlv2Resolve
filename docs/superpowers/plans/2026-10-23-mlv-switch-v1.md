@@ -85,6 +85,23 @@
 - [ ] **Step 5:** Run: `python3 engine/tests/mount_test.py M29-0615.MLV --expect-frames 320 --expect-scale 3,1 --expect-fpm`. Expected: PASS. Also run on `M23-1246.MLV --expect-frames 539`.
 - [ ] **Step 6:** Commit `feat(engine): 1x3 squeeze from RAWC and EOS M focus pixel fix`.
 
+### Task 3b: Lossless decoding of Magic Lantern compressed clips (added during execution)
+
+Added by controller ruling: the 2016 MLVFS LJ92 decoder produces noise on current Magic Lantern in-camera lossless clips (the test clips), so the DNGs are unusable although Tasks 2–3 pass.
+
+**Files:**
+- Modify: `engine/mlvfs/lj92.c`, `engine/mlvfs/lj92.h`, `engine/mlvfs/main.c` (decode path around the `lj92_compressed` branch, ~line 572–640)
+- Create: `engine/tests/make_reference.py` (dev-only: needs numpy + imagecodecs), extend `engine/tests/mount_test.py`
+
+**Interfaces:**
+- Consumes: `build/engine/mlvfs`, harness from Tasks 2–3.
+- Produces: `mount_test.py --expect-raw <ref_dir>` — compares the raw pixel values of DNG frames 0 and 160 (decoded per BitsPerSample/strip layout) with `<ref_dir>/<clip>_<frame>.u16` written by `make_reference.py <clip.MLV> <ref_dir> 0 160` (decodes the VIDF payload with `imagecodecs.ljpeg_decode`, reshapes `(h, w/2, 2)` → `(h, w)`, writes little-endian uint16). Mount for this check with `--no-focus-pixels` and without `--bad-pix`.
+
+- [ ] **Step 1:** Write `make_reference.py` and the `--expect-raw` check; generate references for `M29-0615.MLV`; run the harness on the current binary. Expected: FAIL (pixel mismatch).
+- [ ] **Step 2:** Port the lossless decoder used by MLV App (`ilia3101/MLV-App`, its current lj92 / "lossless" decode including the frame layout/untiling it applies) into MLVFS, replacing the old path for LJ92 clips; keep LZMA and uncompressed paths unchanged.
+- [ ] **Step 3:** Run `mount_test.py M29-0615.MLV --expect-frames 320 --expect-raw build/ref` and the same for `M23-1246.MLV` (frames 0 and 160). Expected: PASS, exact match. Re-run Task 3's `--expect-scale 3,1 --expect-fpm` checks and the ≥25 fps check. Expected: PASS.
+- [ ] **Step 4:** Commit `fix(engine): decode current Magic Lantern lossless clips`.
+
 ### Task 4: Resolve validation and go/no-go gate
 
 **Files:**

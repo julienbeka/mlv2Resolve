@@ -60,24 +60,15 @@ static struct image_buffer * get_image_buffer(const char * dng_filename, unsigne
 
 static void free_image_buffer(struct image_buffer * image_buffer);
 
-/* Frees buffers of an older dual ISO mode generation that nobody uses (caller holds image_buffer_mutex). */
+/* Frees buffers of an older dual ISO mode generation that no handle references.
+   Caller holds image_buffer_mutex, which guards every ref_count. */
 static void purge_stale_image_buffers(unsigned generation)
 {
     struct image_buffer * current = image_buffers;
     while(current != NULL)
     {
         struct image_buffer * next = current->next;
-        if(current->generation != generation)
-        {
-            /* trylock: a buffer still being decoded is busy, never wait for it while holding the list lock */
-            int in_use = 1;
-            if(pthread_mutex_trylock(&current->mutex) == 0)
-            {
-                in_use = current->in_use;
-                UNLOCK(current->mutex)
-            }
-            if(!in_use) free_image_buffer(current);
-        }
+        if(current->generation != generation && current->ref_count == 0) free_image_buffer(current);
         current = next;
     }
 }
@@ -126,26 +117,28 @@ struct image_buffer * get_or_create_image_buffer(const char * path, int(*new_buf
 
     RELOCK(image_buffer_mutex)
     {
-        purge_stale_image_buffers(generation);
+        /* only when the generation is still current: never purge on behalf of a lookup that is already stale */
+        if(generation == dual_iso_generation()) purge_stale_image_buffers(generation);
         image_buffer = get_image_buffer(path, generation);
-        if(image_buffer)
-        {
-            image_buffer->in_use = 1; /* so a purge/cleanup in another thread does not free it under us */
-        }
-        else
+        if(!image_buffer)
         {
             image_buffer = new_image_buffer(path, generation);
-            if(image_buffer)
-            {
-                image_buffer->in_use = 1;
-                *was_created = 1;
-            }
+            if(image_buffer) *was_created = 1;
         }
+        /* the caller's reference: nothing frees the buffer until release_image_buffer() */
+        if(image_buffer) image_buffer->ref_count++;
     }
     UNLOCK(image_buffer_mutex)
     
     if(!image_buffer) return NULL;
     
+    if(new_buffer_cbr) ensure_image_buffer_data(image_buffer, new_buffer_cbr);
+    
+    return image_buffer;
+}
+
+void ensure_image_buffer_data(struct image_buffer * image_buffer, int(*new_buffer_cbr)(struct image_buffer *))
+{
     RELOCK(image_buffer->mutex)
     {
         if(!image_buffer->data)
@@ -154,8 +147,6 @@ struct image_buffer * get_or_create_image_buffer(const char * path, int(*new_buf
         }
     }
     UNLOCK(image_buffer->mutex)
-    
-    return image_buffer;
 }
 
 static void free_image_buffer(struct image_buffer * image_buffer)
@@ -187,24 +178,24 @@ static void free_image_buffer(struct image_buffer * image_buffer)
 
 void release_image_buffer(struct image_buffer * image_buffer)
 {
-    RELOCK(image_buffer->mutex)
-    {
-        image_buffer->in_use = 0;
-    }
-    UNLOCK(image_buffer->mutex)
-}
-
-void release_image_buffer_by_path(const char * path)
-{
+    if(!image_buffer) return;
     RELOCK(image_buffer_mutex)
     {
-        /* every generation: a stale buffer may still be held by an open handle */
-        for(struct image_buffer * current = image_buffers; current != NULL; current = current->next)
-        {
-            if(!strcmp(current->dng_filename, path)) current->in_use = 0;
-        }
+        if(image_buffer->ref_count > 0) image_buffer->ref_count--;
+        else err_printf("image buffer %s released more often than acquired\n", image_buffer->dng_filename);
     }
     UNLOCK(image_buffer_mutex)
+}
+
+int get_image_buffer_ref_count(struct image_buffer * image_buffer)
+{
+    int n = 0;
+    RELOCK(image_buffer_mutex)
+    {
+        n = image_buffer->ref_count;
+    }
+    UNLOCK(image_buffer_mutex)
+    return n;
 }
 
 void free_all_image_buffers()
@@ -228,39 +219,25 @@ int get_image_buffer_count()
 }
 
 /*
- * Try and cleanup any potentially unused image_buffers
+ * Frees unreferenced image_buffers, oldest first (appearing first in the linked list), down to
+ * MAX_UNUSED_IMAGE_BUFFER_COUNT. A referenced buffer is never freed: a handle may be reading it.
+ * Caller holds image_buffer_mutex.
  */
 static void image_buffer_cleanup()
 {
     while (get_image_buffer_count() > MAX_UNUSED_IMAGE_BUFFER_COUNT)
     {
-        //cleanup no longer in use image buffers starting with the oldest (appearing first in the linked list)
-        int any_in_use = 0;
+        struct image_buffer * victim = NULL;
         for(struct image_buffer * current = image_buffers; current != NULL; current = current->next)
         {
-            int in_use = 0;
-            RELOCK(current->mutex)
-            {
-                in_use = current->in_use;
-            }
-            UNLOCK(current->mutex)
-            if(!in_use)
-            {
-                any_in_use = 1;
-                free_image_buffer(current);
-                //freeing the buffer modifies our linked list, so we better exit the loop or screwy things could happen
-                //TODO: figure out how to cleanup everything in one pass
-                break;
-            }
+            if(current->ref_count == 0) { victim = current; break; }
         }
-        if (!any_in_use) break;
+        if(!victim) break;
+        free_image_buffer(victim);
     }
-    
-    //just in case programs don't close a file, limit the total number of buffers we can have
-    while (get_image_buffer_count() > MAX_TOTAL_IMAGE_BUFFER_COUNT)
+    if (get_image_buffer_count() > MAX_TOTAL_IMAGE_BUFFER_COUNT)
     {
-        if(!image_buffers) break;
-        free_image_buffer(image_buffers);
+        err_printf("%d image buffers still referenced (open handles)\n", get_image_buffer_count());
     }
 }
 

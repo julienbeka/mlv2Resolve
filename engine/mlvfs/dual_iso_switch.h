@@ -4,8 +4,8 @@
  *   SIGUSR1 -> dual ISO mode 1 (--dual-iso-preview, fast)
  *   SIGUSR2 -> dual ISO mode 2 (--dual-iso, high quality)
  *
- * The signal handler only stores the requested mode into a volatile
- * sig_atomic_t. Normal threads apply it (dual_iso_poll / dual_iso_mode /
+ * The signal handler only stores the requested mode into a lock-free
+ * _Atomic int (relaxed store). Normal threads apply it (dual_iso_poll / dual_iso_mode /
  * dual_iso_generation): the mode changes, a generation counter is bumped and
  * "dual iso mode: N" is logged. The image buffer cache drops buffers whose
  * generation is not the current one, so frames decoded in the old mode are

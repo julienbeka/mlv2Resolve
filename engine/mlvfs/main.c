@@ -1319,6 +1319,22 @@ static int mlvfs_open(const char *path, struct fuse_file_info *fi)
 
         return 0;
     }
+
+    /* virtual DNG: the handle holds one reference on its image buffer until release (decoded at the
+       first read). It keeps serving that buffer even across a dual ISO switch, so one file never
+       mixes two modes, and it can never be freed under the handle. */
+    if (string_ends_with(path, ".dng"))
+    {
+        char *mlv_filename = NULL;
+        char *path_in_mlv = NULL;
+        if (mlvfs_resolve_path(path, &mlv_filename, &path_in_mlv) && string_ends_with(path_in_mlv, ".dng"))
+        {
+            int was_created = 0;
+            fi->fh = (uint64_t)get_or_create_image_buffer(path, NULL, &was_created);
+        }
+        free(mlv_filename);
+        free(path_in_mlv);
+    }
     
     #ifndef ALLOW_WRITEABLE_DNGS
     if ((fi->flags & O_ACCMODE) != O_RDONLY) /* Only reading allowed. */
@@ -1511,12 +1527,17 @@ static int mlvfs_read(const char *path, char *buf, size_t size, FUSE_OFF_T offse
             off_t image_offset = 0;
             int was_created = 0;
 
+            /* the handle's buffer (referenced at open), else a reference for this read only */
             struct image_buffer * image_buffer = (struct image_buffer *)fi->fh;
+            struct image_buffer * temporary = NULL;
             
-            /* was the image buffer already cached? */
-            if (!image_buffer)
+            if (image_buffer)
             {
-                image_buffer = get_or_create_image_buffer(path, &process_frame, &was_created);
+                ensure_image_buffer_data(image_buffer, &process_frame);
+            }
+            else
+            {
+                image_buffer = temporary = get_or_create_image_buffer(path, &process_frame, &was_created);
             }
 
             if (!image_buffer)
@@ -1526,23 +1547,14 @@ static int mlvfs_read(const char *path, char *buf, size_t size, FUSE_OFF_T offse
                 free(path_in_mlv);
                 return -EIO;
             }
-            if (!image_buffer->header)
+            if (!image_buffer->header || !image_buffer->data)
             {
-                err_printf("DNG image_buffer->header is NULL\n");
+                err_printf("DNG image_buffer->%s is NULL\n", image_buffer->header ? "data" : "header");
+                release_image_buffer(temporary);
                 free(mlv_filename);
                 free(path_in_mlv);
                 return -EIO;
             }
-            if (!image_buffer->data)
-            {
-                err_printf("DNG image_buffer->data is NULL\n");
-                free(mlv_filename);
-                free(path_in_mlv);
-                return -EIO;
-            }
-
-            /* cache the expensive locking/lookup for a potential next read */
-            fi->fh = (uint64_t)image_buffer;
 
             /* sanitize parameters to prevent errors by accesses beyond end */
             long file_size = image_buffer->header_size + image_buffer->size;
@@ -1570,6 +1582,7 @@ static int mlvfs_read(const char *path, char *buf, size_t size, FUSE_OFF_T offse
                 memcpy(image_output_buf, ((uint8_t*)image_buffer->data) + image_offset, MIN(read_size - remaining, image_buffer->size - image_offset));
             }
             
+            release_image_buffer(temporary);
             free(mlv_filename);
             free(path_in_mlv);
             return (int)read_size;
@@ -1595,6 +1608,7 @@ static int mlvfs_read(const char *path, char *buf, size_t size, FUSE_OFF_T offse
             if (!image_buffer->data)
             {
                 err_printf("GIF image_buffer->data is NULL\n");
+                release_image_buffer(image_buffer);
                 free(mlv_filename);
                 free(path_in_mlv);
                 return 0;
@@ -1605,6 +1619,7 @@ static int mlvfs_read(const char *path, char *buf, size_t size, FUSE_OFF_T offse
             long read_size = MAX(0, MIN(size, image_buffer->size - read_offset));
 
             memcpy(buf, ((uint8_t*)image_buffer->data) + read_offset, read_size);
+            release_image_buffer(image_buffer);
             free(mlv_filename);
             free(path_in_mlv);
             return (int)read_size;
@@ -1657,13 +1672,9 @@ static int mlvfs_mkdir(const char *path, mode_t mode)
 
 static int mlvfs_release(const char *path, struct fuse_file_info *fi)
 {
-    /* reset the cached image buffer pointer, if any */
+    /* drop this handle's reference only: other handles of the same path keep theirs */
+    release_image_buffer((struct image_buffer *)fi->fh);
     fi->fh = 0;
-
-    if (string_ends_with(path, ".dng") || string_ends_with(path, ".gif"))
-    {
-        release_image_buffer_by_path(path);
-    }
     return 0;
 }
 

@@ -9,14 +9,17 @@
  */
 
 #include <signal.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 #include <pthread.h>
 #include <unistd.h>
 #include "dual_iso_switch.h"
 
-/* Written only by the signal handler (after init); -1 = no request. */
-static volatile sig_atomic_t requested_mode = -1;
+/* Written only by the signal handler; -1 = no request. Lock-free (checked below), so the
+   handler's relaxed store is async-signal-safe. */
+static _Atomic int requested_mode = -1;
+_Static_assert(ATOMIC_INT_LOCK_FREE == 2, "atomic int must be lock-free for use in a signal handler");
 
 static pthread_mutex_t state_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int current_mode = 0;      /* guarded by state_mutex */
@@ -24,8 +27,8 @@ static unsigned generation = 0;   /* guarded by state_mutex */
 
 static void dual_iso_signal_handler(int sig)
 {
-    /* async-signal-safe: a single store to a volatile sig_atomic_t */
-    requested_mode = (sig == SIGUSR2) ? 2 : 1;
+    /* async-signal-safe: a single relaxed store to a lock-free atomic */
+    atomic_store_explicit(&requested_mode, (sig == SIGUSR2) ? 2 : 1, memory_order_relaxed);
 }
 
 void dual_iso_switch_init(int initial_mode)
@@ -46,7 +49,7 @@ void dual_iso_switch_init(int initial_mode)
 /* Caller holds state_mutex. */
 static int apply_pending_locked(void)
 {
-    int req = requested_mode;
+    int req = atomic_load_explicit(&requested_mode, memory_order_relaxed);
     if (req < 0 || req == current_mode) return 0;
     current_mode = req;
     generation++;

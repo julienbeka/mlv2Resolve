@@ -24,7 +24,7 @@ CACHE_TEST_BIN = ../build/engine/dual_iso_cache_test
 
 default: mlvfs-bin
 
-.PHONY: default clean lj92-test resolve-name-test dual-iso-cache-test
+.PHONY: default clean lj92-test resolve-name-test dual-iso-cache-test dual-iso-cache-test-asan
 
 mlvfs-bin: $(SRC)/main.c $(OBJS) $(HDRS)
 	$(CC) $(CFLAGS) $(SRC)/main.c $(OBJS) $(LIBS) -o mlvfs-bin
@@ -49,12 +49,27 @@ $(RESOLVE_TEST_BIN): tests/resolve_name_test.c $(SRC)/resolve_name.c $(SRC)/reso
 	$(CC) $(ARCH) -O1 -g -Wall -std=gnu99 -fsanitize=undefined -I$(SRC) tests/resolve_name_test.c $(SRC)/resolve_name.c -o $@
 
 # Live dual ISO switch (signals) + image buffer cache generation test: make -f Makefile.arm64 dual-iso-cache-test
-dual-iso-cache-test: $(CACHE_TEST_BIN)
-	$(CACHE_TEST_BIN)
+# Runs the UBSan build, then the same binary under Guard Malloc (freed memory unmapped: a use-after-free
+# crashes). Every run is bounded by a 60 s alarm.
+TIMEOUT = perl -e 'alarm 60; exec @ARGV'
+CACHE_TEST_SRCS = tests/dual_iso_cache_test.c $(SRC)/resource_manager.c $(SRC)/dual_iso_switch.c
+CACHE_TEST_ASAN_BIN = ../build/engine/dual_iso_cache_test_asan
 
-$(CACHE_TEST_BIN): tests/dual_iso_cache_test.c $(SRC)/resource_manager.c $(SRC)/dual_iso_switch.c $(HDRS)
+dual-iso-cache-test: $(CACHE_TEST_BIN)
+	$(TIMEOUT) $(CACHE_TEST_BIN)
+	$(TIMEOUT) env DYLD_INSERT_LIBRARIES=/usr/lib/libgmalloc.dylib $(CACHE_TEST_BIN) 2>/dev/null
+
+$(CACHE_TEST_BIN): $(CACHE_TEST_SRCS) $(HDRS)
 	mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -O1 -g -fsanitize=undefined tests/dual_iso_cache_test.c $(SRC)/resource_manager.c $(SRC)/dual_iso_switch.c -pthread -o $@
+	$(CC) $(CFLAGS) -O1 -g -fsanitize=undefined $(CACHE_TEST_SRCS) -pthread -o $@
+
+# Same test under AddressSanitizer (60 s alarm: on macOS 26 / Xcode 17 the ASan runtime can hang at startup).
+dual-iso-cache-test-asan: $(CACHE_TEST_ASAN_BIN)
+	$(TIMEOUT) $(CACHE_TEST_ASAN_BIN)
+
+$(CACHE_TEST_ASAN_BIN): $(CACHE_TEST_SRCS) $(HDRS)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -O1 -g -fsanitize=address,undefined $(CACHE_TEST_SRCS) -pthread -o $@
 
 clean:
-	rm -f mlvfs-bin $(OBJS) $(TEST_BIN) $(RESOLVE_TEST_BIN) $(CACHE_TEST_BIN)
+	rm -f mlvfs-bin $(OBJS) $(TEST_BIN) $(RESOLVE_TEST_BIN) $(CACHE_TEST_BIN) $(CACHE_TEST_ASAN_BIN)

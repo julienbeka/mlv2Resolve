@@ -108,6 +108,20 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(launcher.processes.count, 1)
     }
 
+    func testConcurrentTogglesMountOnce() async throws {
+        try makeShootFolder("A")
+        let manager = makeManager()
+        let state = makeState(manager)
+        await state.choose(folder: volume)
+        let a = try shoot(state, "A")
+        async let t1: Void = state.toggle(a)
+        async let t2: Void = state.toggle(a)
+        _ = await (t1, t2)
+        XCTAssertEqual(launcher.processes.count, 1)
+        XCTAssertEqual(state.mounted.count, 1)
+        XCTAssertTrue(state.busy.isEmpty)
+    }
+
     func testUnplugUnmountsAndAlerts() async throws {
         try makeShootFolder("A")
         let manager = makeManager()

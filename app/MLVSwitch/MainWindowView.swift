@@ -24,9 +24,14 @@ struct MainWindowView: View {
             if !state.shoots.isEmpty {
                 let list = VStack(alignment: .leading, spacing: 6) {
                     ForEach(state.shoots, id: \.folder) { shoot in
-                        Toggle(shootTitle(shoot), isOn: Binding(
-                            get: { state.mounted.contains(shoot.folder.standardizedFileURL.path) },
-                            set: { _ in Task { await state.toggle(shoot) } }))
+                        let key = shoot.folder.standardizedFileURL.path
+                        HStack(spacing: 6) {
+                            Toggle(shootTitle(shoot), isOn: Binding(
+                                get: { state.mounted.contains(key) },
+                                set: { _ in Task { await state.toggle(shoot) } }))
+                            .disabled(state.busy.contains(key))
+                            if state.busy.contains(key) { ProgressView().controlSize(.small) }
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

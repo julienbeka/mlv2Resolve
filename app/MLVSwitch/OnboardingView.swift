@@ -204,7 +204,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// First launch ever: show the main window (deferred while the onboarding window is up).
     private func showMainWindowIfFirstLaunch() {
         guard !UserDefaults.standard.bool(forKey: Self.mainWindowShownKey) else { return }
-        guard window == nil else { return } // onboarding showing; windowWillClose / becomeReady retries
+        guard window == nil else { return } // onboarding showing: becomeReady() shows it once FUSE-T is ready; closing onboarding alone does not
         showMainWindow()
     }
 

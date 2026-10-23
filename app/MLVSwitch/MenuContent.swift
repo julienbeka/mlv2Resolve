@@ -101,6 +101,7 @@ struct MenuContent: View {
                 if on { Label(shootTitle(shoot), systemImage: "circle.fill").foregroundStyle(.green) }
                 else { Text(shootTitle(shoot)) }
             }
+            .disabled(state.busy.contains(shoot.folder.standardizedFileURL.path))
         }
         Divider()
         Button("Choisir un dossier…") { MenuActions.chooseFolder(state: state) }

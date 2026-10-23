@@ -27,6 +27,8 @@ public final class AppState: ObservableObject {
     /// FUSE-T is missing or outdated: the app is not started yet (menu shows the alert icon
     /// and « Installer FUSE-T… »). Set by the app shell.
     @Published public var needsFuseT = false
+    /// Folder keys with a mount/unmount from `toggle` in flight.
+    @Published public private(set) var busy: Set<String> = []
     /// Non-error hint (e.g. anamorphic pixel aspect), shown once per shoot per session.
     @Published public private(set) var info: String?
     /// Applied on the next mount.
@@ -89,6 +91,9 @@ public final class AppState: ObservableObject {
 
     public func toggle(_ shoot: Shoot) async {
         let k = Self.key(shoot.folder)
+        guard !busy.contains(k) else { return }
+        busy.insert(k)
+        defer { busy.remove(k) }
         cancelRestart(k)
         if mounted.contains(k) {
             do {

@@ -40,7 +40,6 @@
 #include "stripes.h"
 #include "cs.h"
 #include "hdr.h"
-#include "webgui.h"
 #include "resource_manager.h"
 #include "mlvfs.h"
 #include "LZMA/LzmaLib.h"
@@ -49,7 +48,8 @@
 #include "histogram.h"
 #include "patternnoise.h"
 #include "focus_pixels.h"
-#include "slre/slre.h"
+#include "resolve_name.h"
+#include "dual_iso_switch.h"
 
 static struct mlvfs mlvfs;
 
@@ -732,14 +732,6 @@ static int get_mlv_basename(const char *path, char ** mlv_basename)
     return 1;
 }
 
-static char * get_capture(struct slre_cap cap)
-{
-    if (!cap.ptr) return NULL;
-    char * result = copy_string(cap.ptr);
-    if(result) result[cap.len] = 0;
-    return result;
-}
-
 /**
  * Generates a customizable virtual name for the MLV file (for the virtual directory)
  * Make sure you free() the result!!!
@@ -751,12 +743,10 @@ static int get_mlv_name_from_basename(const char *path, char ** mlv_name)
 {
     if(mlvfs.name_scheme == 1)
     {
-        struct slre_cap caps[2];
-        memset(caps, 0, sizeof(caps));
-        if(slre_match("(.+)(MLV|mlv)_1_\\d+-\\d+-\\d+_\\d+_[C|c]\\d+", path, (int)strlen(path), caps, 2, 0) >= 0)
+        char * result = NULL;
+        char * ext = NULL;
+        if(resolve_name_match(path, &result, &ext))
         {
-            char * result = get_capture(caps[0]);
-            char * ext = get_capture(caps[1]);
             *mlv_name = concat_string3(result, ".", ext);
             free(ext);
             free(result);
@@ -926,6 +916,9 @@ static int process_frame(struct image_buffer * image_buffer)
                 return 0;
             }
             
+            /* one snapshot per frame: a live switch (SIGUSR1/SIGUSR2) never mixes modes within a frame */
+            int dual_iso = dual_iso_mode();
+
             image_buffer->size = dng_get_image_size(&frame_headers);
             image_buffer->data = (uint16_t*)malloc(image_buffer->size);
             image_buffer->header_size = dng_get_header_size();
@@ -957,7 +950,7 @@ static int process_frame(struct image_buffer * image_buffer)
             }
             
             if(mlvfs.deflicker) deflicker(&frame_headers, mlvfs.deflicker, image_buffer->data, image_buffer->size);
-            dng_get_header_data(&frame_headers, image_buffer->header, 0, image_buffer->header_size, mlvfs.fps, mlv_basename);
+            dng_get_header_data(&frame_headers, image_buffer->header, 0, image_buffer->header_size, 0, mlv_basename);
             
             if(mlvfs.fix_pattern_noise)
             {
@@ -971,7 +964,7 @@ static int process_frame(struct image_buffer * image_buffer)
                 int fpm_count = fpm_fix(image_buffer->data, frame_headers.rawi_hdr.xRes, frame_headers.rawi_hdr.yRes,
                                         frame_headers.idnt_hdr.cameraModel, frame_headers.vidf_hdr.panPosX, frame_headers.vidf_hdr.panPosY,
                                         mlvfs.fpm_dir, frame_headers.rawi_hdr.raw_info.width, frame_headers.rawi_hdr.raw_info.height,
-                                        frame_headers.rawi_hdr.raw_info.black_level, mlvfs.dual_iso != 0);
+                                        frame_headers.rawi_hdr.raw_info.black_level, dual_iso != 0);
                 if(fpm_first_time(mlv_filename))
                 {
                     fprintf(stderr, "%s: focus pixels: %d corrected\n", mlv_filename, fpm_count);
@@ -979,11 +972,11 @@ static int process_frame(struct image_buffer * image_buffer)
             }
 
             int is_dual_iso = 0;
-            if(mlvfs.dual_iso == 1)
+            if(dual_iso == 1)
             {
                 is_dual_iso = hdr_convert_data(&frame_headers, image_buffer->data, 0, image_buffer->size);
             }
-            else if(mlvfs.dual_iso == 2)
+            else if(dual_iso == 2)
             {
                 is_dual_iso = cr2hdr20_convert_data(&frame_headers, image_buffer->data, mlvfs.hdr_interpolation_method, !mlvfs.hdr_no_fullres, !mlvfs.hdr_no_alias_map, mlvfs.chroma_smooth, mlvfs.fix_bad_pixels);
             }
@@ -991,14 +984,14 @@ static int process_frame(struct image_buffer * image_buffer)
             if(is_dual_iso)
             {
                 //redo the dng header b/c white and black levels will be different
-                dng_get_header_data(&frame_headers, image_buffer->header, 0, image_buffer->size, mlvfs.fps, mlv_basename);
+                dng_get_header_data(&frame_headers, image_buffer->header, 0, image_buffer->size, 0, mlv_basename);
             }
             else if(mlvfs.fix_bad_pixels)
             {
                 fix_bad_pixels(&frame_headers, image_buffer->data, mlvfs.fix_bad_pixels == 2, is_dual_iso);
             }
             
-            if(mlvfs.chroma_smooth && mlvfs.dual_iso != 2)
+            if(mlvfs.chroma_smooth && dual_iso != 2)
             {
                 chroma_smooth(&frame_headers, image_buffer->data, mlvfs.chroma_smooth);
             }
@@ -1107,6 +1100,8 @@ static char *mlvfs_resolve_virtual(const char *path)
     
     return resolved_filename;
 }
+
+static void dng_stamp_mode_generation(struct FUSE_STAT *stbuf);
 
 static int mlvfs_getattr(const char *path, struct FUSE_STAT *stbuf)
 {
@@ -1254,12 +1249,43 @@ static int mlvfs_getattr(const char *path, struct FUSE_STAT *stbuf)
                     result = 0; // DNG frame found
                 }
             }
+
+            if (result == 0 && string_ends_with(path_in_mlv, ".dng"))
+            {
+                dng_stamp_mode_generation(stbuf);
+            }
         }
         free(mlv_filename);
         free(path_in_mlv);
     }
 
     return result;
+}
+
+/*
+ * Live dual ISO switch: the FUSE-T NFS client caches file pages and only drops them when the
+ * file's change/modify time changes. Shift the DNG times by the mode generation (in microseconds,
+ * zero until the first switch) so a frame read before a switch is fetched again afterwards.
+ */
+static void dng_stamp_mode_generation(struct FUSE_STAT *stbuf)
+{
+    unsigned generation = dual_iso_generation();
+    if (generation == 0) return;
+    long offset_ns = (long)(generation % 1000000) * 1000;
+#if __DARWIN_UNIX03
+    struct timespec *times[] = { &stbuf->st_mtimespec, &stbuf->st_ctimespec };
+#else
+    struct timespec *times[] = { &stbuf->st_mtim, &stbuf->st_ctim };
+#endif
+    for (int i = 0; i < 2; i++)
+    {
+        times[i]->tv_nsec += offset_ns;
+        while (times[i]->tv_nsec >= 1000000000L)
+        {
+            times[i]->tv_nsec -= 1000000000L;
+            times[i]->tv_sec++;
+        }
+    }
 }
 
 static int mlvfs_open(const char *path, struct fuse_file_info *fi)
@@ -1747,6 +1773,14 @@ static int mlvfs_wrap_unlink(const char *path)
     TRY_WRAP(return mlvfs_unlink(path); )
 }
 
+/* runs after FUSE has daemonized (if it does), so the watcher thread survives the fork */
+static void *mlvfs_init(struct fuse_conn_info *conn)
+{
+    (void)conn;
+    dual_iso_start_watcher();
+    return NULL;
+}
+
 static struct fuse_operations mlvfs_filesystem_operations =
 {
     .getattr     = mlvfs_wrap_getattr,
@@ -1762,7 +1796,8 @@ static struct fuse_operations mlvfs_filesystem_operations =
     .truncate    = mlvfs_wrap_truncate,
     .write       = mlvfs_wrap_write,
     .statfs      = mlvfs_wrap_statfs,
-    .unlink      = mlvfs_wrap_unlink
+    .unlink      = mlvfs_wrap_unlink,
+    .init        = mlvfs_init
 };
 
 struct fuse_opt_ex
@@ -1800,10 +1835,8 @@ static const struct fuse_opt_ex mlvfs_opts_ex[] =
     MLVFS_OPTION("--amaze-edge",        hdr_interpolation_method, 0, "Dual ISO: interpolation method (high quality)", 0),
     MLVFS_OPTION("--mean23",            hdr_interpolation_method, 1, "Dual ISO: interpolation method (fast)", 0),
     MLVFS_OPTION("--no-alias-map",      hdr_no_alias_map,         1, "Dual ISO: disable alias map", 0),
-    MLVFS_OPTION("--alias-map",         hdr_no_alias_map,         0, "Dual ISO: enable alias map",
-"Web GUI options"),
-    MLVFS_OPTION("--port=%s",           port,                     0, "Port used for web GUI (default: 8000)", 0),
-    MLVFS_OPTION("--fps=%f",            fps,                      0, "FPS used for playback in web GUI",
+    MLVFS_OPTION("--alias-map",         hdr_no_alias_map,         0, "Dual ISO: enable alias map\n"
+                                          "                           (live switch: SIGUSR1 -> --dual-iso-preview, SIGUSR2 -> --dual-iso)",
 "Diagnostic options"),
     MLVFS_OPTION("--version",           version,                  1, "Display MLVFS version", 0),
     { FUSE_OPT_END }
@@ -1864,6 +1897,9 @@ int main(int argc, char **argv)
     {
         exit(1);
     }
+
+    /* before anything else: the default action of SIGUSR1/SIGUSR2 would kill the process */
+    dual_iso_switch_init(mlvfs.dual_iso);
 
     if (mlvfs.index_dir)
     {
@@ -1940,7 +1976,6 @@ int main(int argc, char **argv)
 
         if(!res)
         {
-            webgui_start(&mlvfs);
             umask(0);
             res = fuse_main(args.argc, args.argv, &mlvfs_filesystem_operations, NULL);
         }
@@ -1954,7 +1989,6 @@ int main(int argc, char **argv)
     }
 
     fuse_opt_free_args(&args);
-    webgui_stop();
     stripes_free_corrections();
     free_all_image_buffers();
     close_all_chunks();

@@ -32,7 +32,6 @@
 struct mlvfs
 {
     char * mlv_path;
-    char * port;
     int name_scheme;
     int chroma_smooth;
     int fix_bad_pixels;
@@ -41,7 +40,6 @@ struct mlvfs
     int hdr_interpolation_method;
     int hdr_no_fullres;
     int hdr_no_alias_map;
-    double fps;
     int deflicker;
     int fix_pattern_noise;
     int version;

@@ -26,3 +26,14 @@ Robustness (truncated / corrupt frames):
   corrupted DHT/SOF/SOS fields must not crash.
 - `python3 engine/tests/truncated_clip_test.py <clip.MLV> [--cut-frame 5]`: mounts a copy cut mid-frame; earlier
   frames read and pass the sanity check, the cut frame returns EIO, mlvfs survives and unmounts.
+
+Unit tests (no FUSE needed):
+- `make -C engine -f Makefile.arm64 resolve-name-test`: `--resolve-naming` folder name -> MLV base path matching
+  (POSIX `<regex.h>`, replaces SLRE): canonical names, lowercase `mlv`/`c`, spaces and accents, non-matching names.
+- `make -C engine -f Makefile.arm64 dual-iso-cache-test`: live dual ISO switching by signals (SIGUSR1 -> mode 1,
+  SIGUSR2 -> mode 2, log line `dual iso mode: N`) and the image buffer cache generation: a frame decoded before a
+  switch is decoded again in the new mode; a buffer still held across a switch is not freed.
+
+Live switch on a mount: `kill -USR2 <mlvfs pid>` (high quality) / `kill -USR1 <pid>` (preview). The DNG
+mtime/ctime shift by the switch generation (in microseconds) so the FUSE-T NFS client refetches frames it had
+cached; it does so once its attribute cache expires (a few seconds).

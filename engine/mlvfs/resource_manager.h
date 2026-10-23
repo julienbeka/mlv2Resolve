@@ -40,6 +40,7 @@ struct image_buffer
     uint16_t * data;
     LOCK_T mutex;
     int in_use;
+    unsigned generation; /* dual ISO mode generation the buffer was created in */
 };
 
 int create_preview(struct image_buffer * image_buffer);

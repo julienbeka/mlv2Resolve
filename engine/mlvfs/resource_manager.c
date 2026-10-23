@@ -25,6 +25,7 @@
 #include "index.h"
 #include "mlvfs.h"
 #include "resource_manager.h"
+#include "dual_iso_switch.h"
 #include "sys/stat.h"
 
 //some macros for simple thread synchronization
@@ -47,16 +48,41 @@ static struct image_buffer * image_buffers = NULL;
 
 static int image_buffer_count = 0;
 
-static struct image_buffer * get_image_buffer(const char * dng_filename)
+/* Only buffers decoded in the current dual ISO mode generation are returned. */
+static struct image_buffer * get_image_buffer(const char * dng_filename, unsigned generation)
 {
     for(struct image_buffer * current = image_buffers; current != NULL; current = current->next)
     {
-        if(!strcmp(current->dng_filename, dng_filename)) return current;
+        if(current->generation == generation && !strcmp(current->dng_filename, dng_filename)) return current;
     }
     return NULL;
 }
 
-static struct image_buffer * new_image_buffer(const char * dng_filename)
+static void free_image_buffer(struct image_buffer * image_buffer);
+
+/* Frees buffers of an older dual ISO mode generation that nobody uses (caller holds image_buffer_mutex). */
+static void purge_stale_image_buffers(unsigned generation)
+{
+    struct image_buffer * current = image_buffers;
+    while(current != NULL)
+    {
+        struct image_buffer * next = current->next;
+        if(current->generation != generation)
+        {
+            /* trylock: a buffer still being decoded is busy, never wait for it while holding the list lock */
+            int in_use = 1;
+            if(pthread_mutex_trylock(&current->mutex) == 0)
+            {
+                in_use = current->in_use;
+                UNLOCK(current->mutex)
+            }
+            if(!in_use) free_image_buffer(current);
+        }
+        current = next;
+    }
+}
+
+static struct image_buffer * new_image_buffer(const char * dng_filename, unsigned generation)
 {
     image_buffer_cleanup();
     struct image_buffer * new_buffer = malloc(sizeof(struct image_buffer));
@@ -85,6 +111,7 @@ static struct image_buffer * new_image_buffer(const char * dng_filename)
         return NULL;
     }
     strcpy(new_buffer->dng_filename, dng_filename);
+    new_buffer->generation = generation;
     INIT_LOCK(new_buffer->mutex);
     return new_buffer;
 }
@@ -94,14 +121,25 @@ struct image_buffer * get_or_create_image_buffer(const char * path, int(*new_buf
     struct image_buffer * image_buffer = NULL;
     *was_created = 0;
     
+    /* read before the frame callback reads the mode: a buffer is never tagged newer than the mode it was decoded in */
+    unsigned generation = dual_iso_generation();
+
     RELOCK(image_buffer_mutex)
     {
-        image_buffer = get_image_buffer(path);
-        if(!image_buffer)
+        purge_stale_image_buffers(generation);
+        image_buffer = get_image_buffer(path, generation);
+        if(image_buffer)
         {
-            image_buffer = new_image_buffer(path);
-            image_buffer->in_use = 1;
-            *was_created = 1;
+            image_buffer->in_use = 1; /* so a purge/cleanup in another thread does not free it under us */
+        }
+        else
+        {
+            image_buffer = new_image_buffer(path, generation);
+            if(image_buffer)
+            {
+                image_buffer->in_use = 1;
+                *was_created = 1;
+            }
         }
     }
     UNLOCK(image_buffer_mutex)
@@ -160,10 +198,10 @@ void release_image_buffer_by_path(const char * path)
 {
     RELOCK(image_buffer_mutex)
     {
-        struct image_buffer * image_buffer = get_image_buffer(path);
-        if(image_buffer)
+        /* every generation: a stale buffer may still be held by an open handle */
+        for(struct image_buffer * current = image_buffers; current != NULL; current = current->next)
         {
-            image_buffer->in_use = 0;
+            if(!strcmp(current->dng_filename, path)) current->in_use = 0;
         }
     }
     UNLOCK(image_buffer_mutex)

@@ -14,15 +14,17 @@ LIBS = -L$(FUSE_LIB) -lfuse-t -lz -pthread -Wl,-rpath,$(FUSE_LIB)
 
 LZMA_SRCS = 7zAlloc 7zBuf 7zBuf2 7zCrc 7zCrcOpt 7zDec 7zFile 7zIn 7zStream Alloc Bcj2 Bra Bra86 BraIA64 CpuArch Delta LzFind Lzma2Dec Lzma2Enc Lzma86Dec Lzma86Enc LzmaDec LzmaEnc LzmaLib Ppmd7 Ppmd7Dec Ppmd7Enc Sha256 Xz XzCrc64
 OBJS = $(addprefix $(SRC)/, dng.o index.o wav.o stripes.o cs.o amaze_demosaic_RT.o hdr.o histogram.o \
-  mongoose/mongoose.o webgui.o resource_manager.o lj92.o gif.o patternnoise.o focus_pixels.o slre/slre.o) \
+  resource_manager.o lj92.o gif.o patternnoise.o focus_pixels.o dual_iso_switch.o resolve_name.o) \
   $(addprefix $(SRC)/LZMA/, $(addsuffix .o, $(LZMA_SRCS)))
 
 HDRS = $(wildcard $(SRC)/*.h)
 TEST_BIN = ../build/engine/lj92_truncation_test
+RESOLVE_TEST_BIN = ../build/engine/resolve_name_test
+CACHE_TEST_BIN = ../build/engine/dual_iso_cache_test
 
 default: mlvfs-bin
 
-.PHONY: default clean lj92-test
+.PHONY: default clean lj92-test resolve-name-test dual-iso-cache-test
 
 mlvfs-bin: $(SRC)/main.c $(OBJS) $(HDRS)
 	$(CC) $(CFLAGS) $(SRC)/main.c $(OBJS) $(LIBS) -o mlvfs-bin
@@ -38,5 +40,21 @@ $(TEST_BIN): tests/lj92_truncation_test.c $(SRC)/lj92.c $(SRC)/lj92.h
 	mkdir -p $(dir $@)
 	$(CC) $(ARCH) -O1 -g -Wall -std=gnu99 -fsanitize=undefined -I$(SRC) tests/lj92_truncation_test.c $(SRC)/lj92.c -o $@
 
+# Resolve-naming folder match test (no FUSE needed): make -f Makefile.arm64 resolve-name-test
+resolve-name-test: $(RESOLVE_TEST_BIN)
+	$(RESOLVE_TEST_BIN)
+
+$(RESOLVE_TEST_BIN): tests/resolve_name_test.c $(SRC)/resolve_name.c $(SRC)/resolve_name.h
+	mkdir -p $(dir $@)
+	$(CC) $(ARCH) -O1 -g -Wall -std=gnu99 -fsanitize=undefined -I$(SRC) tests/resolve_name_test.c $(SRC)/resolve_name.c -o $@
+
+# Live dual ISO switch (signals) + image buffer cache generation test: make -f Makefile.arm64 dual-iso-cache-test
+dual-iso-cache-test: $(CACHE_TEST_BIN)
+	$(CACHE_TEST_BIN)
+
+$(CACHE_TEST_BIN): tests/dual_iso_cache_test.c $(SRC)/resource_manager.c $(SRC)/dual_iso_switch.c $(HDRS)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -O1 -g -fsanitize=undefined tests/dual_iso_cache_test.c $(SRC)/resource_manager.c $(SRC)/dual_iso_switch.c -pthread -o $@
+
 clean:
-	rm -f mlvfs-bin $(OBJS) $(TEST_BIN)
+	rm -f mlvfs-bin $(OBJS) $(TEST_BIN) $(RESOLVE_TEST_BIN) $(CACHE_TEST_BIN)

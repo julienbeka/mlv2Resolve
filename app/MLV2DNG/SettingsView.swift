@@ -38,13 +38,23 @@ enum LanguageSwitch {
         UserDefaults.standard.set(lang.rawValue, forKey: choiceKey)
         UserDefaults.standard.synchronize()
     }
-    /// Spawns a detached helper that reopens the app after this instance has quit, then terminates.
+    /// Spawns a detached helper that waits for this process to exit (30 s cap), reopens the app, then terminates.
     @MainActor static func relaunch() {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/sh")
-        p.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\"", Bundle.main.bundleURL.path]
-        try? p.run()
-        NSApp.terminate(nil)
+        p.arguments = ["-c",
+            "pid=\"$1\"; i=0; while kill -0 \"$pid\" 2>/dev/null && [ $i -lt 150 ]; do sleep 0.2; i=$((i+1)); done; /usr/bin/open -n \"$0\"",
+            Bundle.main.bundleURL.path, String(ProcessInfo.processInfo.processIdentifier)]
+        do { try p.run() } catch {
+            NSLog("Relaunch failed: \(error)")
+            let a = NSAlert()
+            a.messageText = error.localizedDescription
+            a.runModal()
+            return
+        }
+        // Runloop timer, not a GCD block: terminate(_:) with .terminateLater spins a nested loop that
+        // never drains further main-queue blocks, so calling it from one would hang the quit.
+        NSApp.perform(#selector(NSApplication.terminate(_:)), with: nil, afterDelay: 0.05)
     }
     @MainActor static func promptRestart() {
         let a = NSAlert()
@@ -70,7 +80,7 @@ struct SettingsView: View {
                 guard new != language else { return }
                 language = new
                 LanguageSwitch.apply(new)
-                LanguageSwitch.promptRestart()
+                DispatchQueue.main.async { LanguageSwitch.promptRestart() }
             })) {
                 Text("System").tag(AppLanguage.system)
                 Text(verbatim: "English").tag(AppLanguage.en)

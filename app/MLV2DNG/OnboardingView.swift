@@ -218,6 +218,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppDelegate.shared = self
         LaunchAtLogin.initializeIfNeeded()
+        #if DEBUG
+        if CommandLine.arguments.contains("--debug-relaunch") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8) { LanguageSwitch.relaunch() }
+        }
+        #endif
         guard model.state != .ready else {
             AppCore.shared.start()
             showMainWindowIfFirstLaunch()

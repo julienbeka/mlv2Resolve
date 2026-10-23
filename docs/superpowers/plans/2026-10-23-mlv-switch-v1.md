@@ -102,6 +102,21 @@ Added by controller ruling: the 2016 MLVFS LJ92 decoder produces noise on curren
 - [ ] **Step 3:** Run `mount_test.py M29-0615.MLV --expect-frames 320 --expect-raw build/ref` and the same for `M23-1246.MLV` (frames 0 and 160). Expected: PASS, exact match. Re-run Task 3's `--expect-scale 3,1 --expect-fpm` checks and the ≥25 fps check. Expected: PASS.
 - [ ] **Step 4:** Commit `fix(engine): decode current Magic Lantern lossless clips`.
 
+### Task 3c: Keep MLVFS index files out of the rushes folders (added during execution)
+
+Added by controller ruling: upstream MLVFS writes `<clip>.IDX` next to each source MLV (`engine/mlvfs/index.c`, ~lines 115 and 189), violating « Original MLV folders are never written to ».
+
+**Files:**
+- Modify: `engine/mlvfs/index.c`, `engine/mlvfs/main.c` (option table), `engine/tests/mount_test.py`, `.gitignore` (add `*.IDX`)
+
+**Interfaces:**
+- Produces: mlvfs option `--index-dir=%s` (absolute directory, created if missing). Index file path = `<index-dir>/<hex of a stable 64-bit hash of the MLV's absolute path>_<file size>.IDX`, so two clips with the same name in different folders never collide and a changed file is re-indexed. Without the option, behaviour is unchanged (next to the MLV). The app (Task 8) always passes `--index-dir=~/Library/Caches/MLV Switch/index`.
+
+- [ ] **Step 1:** Extend the harness: `--index-dir <dir>` is passed to mlvfs, and the harness snapshots the source folder (names, sizes, mtimes) before mounting and asserts it is identical after unmount (`--assert-source-untouched`, on by default). Run on the current binary with a fresh copy of the folder free of `.IDX` files. Expected: FAIL (new `.IDX` files appear).
+- [ ] **Step 2:** Implement the option in both index read and write paths.
+- [ ] **Step 3:** Run `mount_test.py M29-0615.MLV --expect-frames 320 --expect-raw build/ref --index-dir /tmp/mlvswitch-idx` twice (second run reuses the index). Expected: PASS both times, source folder untouched, `.IDX` present in the index dir.
+- [ ] **Step 4:** Commit `fix(engine): write MLVFS index files to a cache directory`.
+
 ### Task 4: Resolve validation and go/no-go gate
 
 **Files:**
@@ -195,7 +210,7 @@ This task is manual and done with the user (Resolve has no scripting in this pha
       public var mounted: [Shoot: URL] { get }
   }
   ```
-- Launch arguments (array, never a shell string), in this order: `mountPoint.path`, `--mlv-dir=\(shoot.folder.path)`, `--resolve-naming`, `--bad-pix` (only if `fixBadPixels`), `--no-focus-pixels` (only if `!fixFocusPixels`), `--dual-iso-preview` or `--dual-iso` (per `mode`), `--fpm-dir=\(fpmDir.path)`, `--port=\(port)`, `-o`, `ro`, `-o`, `volname=\(shoot.name)`.
+- Launch arguments (array, never a shell string), in this order: `mountPoint.path`, `--mlv-dir=\(shoot.folder.path)`, `--resolve-naming`, `--bad-pix` (only if `fixBadPixels`), `--no-focus-pixels` (only if `!fixFocusPixels`), `--dual-iso-preview` or `--dual-iso` (per `mode`), `--fpm-dir=\(fpmDir.path)`, `--index-dir=\(indexDir.path)` (`indexDir` = `~/Library/Caches/MLV Switch/index`, a new `MountManager.init` parameter), `--port=\(port)`, `-o`, `ro`, `-o`, `volname=\(shoot.name)`.
 
 - [ ] **Step 1: Write the failing tests** with fakes (`FakeLauncher` records args, `FakeUnmounter`, recording `http`):
   - `testMountPassesArgsAsArray`: shoot `Tournage été 2026 🎬` → args[0] is `root/Tournage été 2026 🎬`, contains `--mlv-dir=<folder with spaces>` unescaped, `--dual-iso-preview`, `-o`, `ro`.

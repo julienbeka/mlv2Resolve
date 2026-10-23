@@ -39,14 +39,14 @@ enum LanguageSwitch {
         UserDefaults.standard.synchronize()
     }
     /// Spawns a detached helper that reopens the app after this instance has quit, then terminates.
-    static func relaunch() {
+    @MainActor static func relaunch() {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/sh")
         p.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\"", Bundle.main.bundleURL.path]
         try? p.run()
         NSApp.terminate(nil)
     }
-    static func promptRestart() {
+    @MainActor static func promptRestart() {
         let a = NSAlert()
         a.messageText = String(localized: "mlv2dng needs to restart to change the language.")
         a.addButton(withTitle: String(localized: "Restart Now"))

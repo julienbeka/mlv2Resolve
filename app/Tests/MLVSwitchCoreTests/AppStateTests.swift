@@ -348,3 +348,24 @@ extension AppStateTests {
         XCTAssertEqual(unmounter.unmounted.count, 2)
     }
 }
+
+extension AppStateTests {
+    func testSameNameOnTwoDisksGetsCollisionNotice() async throws {
+        try makeShootFolder("Jour 1")
+        let other = tmp.appendingPathComponent("Other", isDirectory: true)
+        try makeShootFolder("Jour 1", in: other)
+        let manager = makeManager()
+        let state = makeState(manager)
+        await state.choose(folder: volume)
+        await state.toggle(try shoot(state, "Jour 1"))
+        XCTAssertNil(state.info, "first one gets the plain name")
+        await state.choose(folder: other)
+        let second = try shoot(state, "Jour 1")
+        await state.toggle(second)
+        let all = await manager.mounted
+        let url = try XCTUnwrap(all[second])
+        XCTAssertEqual(url.lastPathComponent, "Jour 1 (\(second.volumeName))")
+        XCTAssertEqual(state.info,
+                       "Deux tournages s'appellent « Jour 1 » : le second est monté sous « Jour 1 (\(second.volumeName)) ».")
+    }
+}

@@ -232,14 +232,26 @@ public final class AppState: ObservableObject {
     @discardableResult
     private func mount(_ shoot: Shoot) async -> Bool {
         do {
-            try await manager.mount(shoot, mode: mode, fixBadPixels: fixBadPixels, fixFocusPixels: fixFocusPixels)
+            let url = try await manager.mount(shoot, mode: mode, fixBadPixels: fixBadPixels,
+                                              fixFocusPixels: fixFocusPixels)
             mounted.insert(Self.key(shoot.folder))
             noteSqueeze(shoot)
+            noteCollision(shoot, mountedAt: url)
             return true
         } catch {
             alert = "Impossible de monter « \(shoot.name) » : \(Self.reason(error))."
             return false
         }
+    }
+
+    /// The mount point got the disk-name suffix because another mounted shoot
+    /// already uses the plain name.
+    private func noteCollision(_ shoot: Shoot, mountedAt url: URL) {
+        let plain = MountPaths.sanitize(shoot.name)
+        let actual = url.lastPathComponent
+        guard actual.precomposedStringWithCanonicalMapping != plain else { return }
+        let notice = "Deux tournages s'appellent « \(shoot.name) » : le second est monté sous « \(actual) »."
+        info = info.map { $0 + "\n\n" + notice } ?? notice
     }
 
     private func noteSqueeze(_ shoot: Shoot) {

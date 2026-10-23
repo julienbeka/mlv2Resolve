@@ -22,6 +22,46 @@ func shootTitle(_ s: Shoot) -> String {
     return "\(s.name) — \(n) clip\(n > 1 ? "s" : "") · \(frenchSizes(s.totalBytes))"
 }
 
+/// Actions shared by the menu and the main window.
+@MainActor
+enum MenuActions {
+    static var resolveURL: URL? { resolveAppURL(fileExists: { FileManager.default.fileExists(atPath: $0) }) }
+
+    static func openResolve() {
+        guard let url = resolveURL else { return }
+        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+    }
+
+    static func showDNGsInFinder() {
+        let root = MountPaths.defaultRoot
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(root)
+    }
+
+    static func chooseFolder(state: AppState) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choisir"
+        NSApp.activate(ignoringOtherApps: true)
+        if panel.runModal() == .OK, let url = panel.url {
+            Task { await state.choose(folder: url) }
+        }
+    }
+
+    static func showDetail(_ text: String, style: NSAlert.Style, clear: () -> Void) {
+        NSApp.activate(ignoringOtherApps: true)
+        let a = NSAlert()
+        a.alertStyle = style
+        a.messageText = "MLV Switch"
+        a.informativeText = text
+        a.addButton(withTitle: "OK")
+        a.runModal()
+        clear()
+    }
+}
+
 struct MenuLabel: View {
     @ObservedObject var state: AppState
     var body: some View {
@@ -45,11 +85,11 @@ struct MenuContent: View {
             Divider()
         }
         if let alert = state.alert {
-            Button("⚠︎ Problème — voir le détail") { showDetail(alert, style: .warning) { state.clearAlert() } }
+            Button("⚠︎ Problème — voir le détail") { MenuActions.showDetail(alert, style: .warning) { state.clearAlert() } }
             Divider()
         }
         if let info = state.info {
-            Button("ℹ︎ Conseil Resolve") { showDetail(info, style: .informational) { state.clearInfo() } }
+            Button("ℹ︎ Conseil Resolve") { MenuActions.showDetail(info, style: .informational) { state.clearInfo() } }
             Divider()
         }
         Text(state.folder?.lastPathComponent ?? "Aucun dossier choisi")
@@ -63,14 +103,10 @@ struct MenuContent: View {
             }
         }
         Divider()
-        Button("Choisir un dossier…") { chooseFolder() }
-        Button("Ouvrir Resolve") { openResolve() }
-            .disabled(resolveURL == nil)
-        Button("Afficher les DNG dans le Finder") {
-            let root = MountPaths.defaultRoot
-            try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-            NSWorkspace.shared.open(root)
-        }
+        Button("Choisir un dossier…") { MenuActions.chooseFolder(state: state) }
+        Button("Ouvrir Resolve") { MenuActions.openResolve() }
+            .disabled(MenuActions.resolveURL == nil)
+        Button("Afficher les DNG dans le Finder") { MenuActions.showDNGsInFinder() }
         Picker("Dual ISO", selection: Binding(get: { state.mode }, set: { m in Task { await state.setMode(m) } })) {
             Text("Montage fluide").tag(DualISOMode.montageFluide)
             Text("Qualité étalonnage").tag(DualISOMode.qualiteEtalonnage)
@@ -80,39 +116,10 @@ struct MenuContent: View {
             Task { await state.unmountAll() }
         }
         .disabled(state.mounted.isEmpty)
+        Button("Ouvrir la fenêtre MLV Switch") { AppDelegate.shared?.showMainWindow() }
         Button("Réglages…") {
             AppDelegate.shared?.showSettings(state: state)
         }
         Button("Quitter") { NSApp.terminate(nil) }
-    }
-
-    private func showDetail(_ text: String, style: NSAlert.Style, clear: () -> Void) {
-        NSApp.activate(ignoringOtherApps: true)
-        let a = NSAlert()
-        a.alertStyle = style
-        a.messageText = "MLV Switch"
-        a.informativeText = text
-        a.addButton(withTitle: "OK")
-        a.runModal()
-        clear()
-    }
-
-    private var resolveURL: URL? { resolveAppURL(fileExists: { FileManager.default.fileExists(atPath: $0) }) }
-
-    private func openResolve() {
-        guard let url = resolveURL else { return }
-        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
-    }
-
-    private func chooseFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Choisir"
-        NSApp.activate(ignoringOtherApps: true)
-        if panel.runModal() == .OK, let url = panel.url {
-            Task { await state.choose(folder: url) }
-        }
     }
 }

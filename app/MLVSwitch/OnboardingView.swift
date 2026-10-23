@@ -179,10 +179,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
 
+    private var mainWindow: NSWindow?
+    private static let mainWindowShownKey = "mainWindowShownOnce"
+
+    /// Opens (or brings back) the main window; marks the first-launch display as done.
+    func showMainWindow() {
+        if mainWindow == nil {
+            let hosting = NSHostingController(rootView: MainWindowView(state: AppCore.shared.state))
+            let w = NSWindow(contentViewController: hosting)
+            w.title = "MLV Switch"
+            w.styleMask = [.titled, .closable]
+            w.isReleasedWhenClosed = false
+            w.setContentSize(hosting.view.fittingSize)
+            let screen = NSScreen.main ?? NSScreen.screens[0]
+            let vf = screen.visibleFrame
+            w.setFrameOrigin(NSPoint(x: vf.midX - w.frame.width / 2, y: vf.midY - w.frame.height / 2))
+            mainWindow = w
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        mainWindow?.makeKeyAndOrderFront(nil)
+        UserDefaults.standard.set(true, forKey: Self.mainWindowShownKey)
+    }
+
+    /// First launch ever: show the main window (deferred while the onboarding window is up).
+    private func showMainWindowIfFirstLaunch() {
+        guard !UserDefaults.standard.bool(forKey: Self.mainWindowShownKey) else { return }
+        guard window == nil else { return } // onboarding showing; windowWillClose / becomeReady retries
+        showMainWindow()
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showMainWindow()
+        return true
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppDelegate.shared = self
         LaunchAtLogin.initializeIfNeeded()
-        guard model.state != .ready else { return AppCore.shared.start() }
+        guard model.state != .ready else {
+            AppCore.shared.start()
+            showMainWindowIfFirstLaunch()
+            return
+        }
         // FUSE-T missing: the menu shows the alert icon and « Installer FUSE-T… »; closing the
         // onboarding window keeps a quiet background check that starts the app once ready.
         AppCore.shared.state.needsFuseT = true
@@ -234,6 +274,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         AppCore.shared.state.needsFuseT = false
         NSLog("MLV Switch: FUSE-T ready, starting")
         AppCore.shared.start()
+        showMainWindowIfFirstLaunch()
     }
 
     func applicationWillTerminate(_ notification: Notification) {

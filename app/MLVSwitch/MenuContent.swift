@@ -38,17 +38,14 @@ struct MenuLabel: View {
 
 struct MenuContent: View {
     @ObservedObject var state: AppState
-    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         if let alert = state.alert {
-            Text("⚠︎ \(alert)")
-            Button("OK") { state.clearAlert() }
+            Button("⚠︎ Problème — voir le détail") { showDetail(alert, style: .warning) { state.clearAlert() } }
             Divider()
         }
         if let info = state.info {
-            Text(info)
-            Button("Fermer") { state.clearInfo() }
+            Button("ℹ︎ Conseil Resolve") { showDetail(info, style: .informational) { state.clearInfo() } }
             Divider()
         }
         Text(state.folder?.lastPathComponent ?? "Aucun dossier choisi")
@@ -76,14 +73,24 @@ struct MenuContent: View {
         }
         Divider()
         Button("Tout démonter") {
-            Task { for s in state.shoots where state.mounted.contains(s.folder.standardizedFileURL.path) { await state.toggle(s) } }
+            Task { await state.unmountAll() }
         }
         .disabled(state.mounted.isEmpty)
         Button("Réglages…") {
-            openWindow(id: "settings")
-            NSApp.activate(ignoringOtherApps: true)
+            AppDelegate.shared?.showSettings(state: state)
         }
         Button("Quitter") { NSApp.terminate(nil) }
+    }
+
+    private func showDetail(_ text: String, style: NSAlert.Style, clear: () -> Void) {
+        NSApp.activate(ignoringOtherApps: true)
+        let a = NSAlert()
+        a.alertStyle = style
+        a.messageText = "MLV Switch"
+        a.informativeText = text
+        a.addButton(withTitle: "OK")
+        a.runModal()
+        clear()
     }
 
     private var resolveURL: URL? { resolveAppURL(fileExists: { FileManager.default.fileExists(atPath: $0) }) }

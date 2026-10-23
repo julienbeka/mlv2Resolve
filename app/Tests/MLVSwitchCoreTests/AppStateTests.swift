@@ -259,3 +259,21 @@ extension AppStateTests {
         XCTAssertNil(state.info)
     }
 }
+
+extension AppStateTests {
+    func testUnmountAllCoversOtherFolders() async throws {
+        let a = try makeShootFolder("A")
+        let other = tmp.appendingPathComponent("Other", isDirectory: true)
+        let b = try makeShootFolder("B", in: other)
+        defaults.set([key(a), key(b)], forKey: "mountedShoots")
+        let state = makeState()
+        await state.choose(folder: volume)
+        await state.restore()
+        XCTAssertEqual(state.mounted, [key(a), key(b)])
+        await state.unmountAll()
+        XCTAssertTrue(state.mounted.isEmpty)
+        XCTAssertTrue(savedMounts.isEmpty)
+        XCTAssertNil(state.alert)
+        XCTAssertEqual(unmounter.unmounted.count, 2)
+    }
+}

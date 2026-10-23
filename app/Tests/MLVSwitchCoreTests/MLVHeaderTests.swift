@@ -53,6 +53,12 @@ final class MLVHeaderTests: XCTestCase {
         XCTAssertNil(try squeeze(Data([0x4D, 0x4C, 0x56])))
     }
 
+    func testBlockSizeBelowMinimum() throws {
+        var d = Data("MLVI".utf8)
+        d.append(contentsOf: [8, 0, 0, 0] + [UInt8](repeating: 0, count: 8))
+        XCTAssertNil(try squeeze(d))
+    }
+
     func testRealClipIfPresent() throws {
         var dir = URL(fileURLWithPath: #filePath)
         var found: URL?

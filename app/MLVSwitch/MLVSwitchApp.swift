@@ -15,9 +15,5 @@ struct MLVSwitchApp: App {
         }
         .menuBarExtraStyle(.menu)
 
-        Window("Réglages", id: "settings") {
-            SettingsView(state: state)
-        }
-        .windowResizability(.contentSize)
     }
 }

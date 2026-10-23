@@ -159,9 +159,27 @@ struct OnboardingView: View {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var window: NSWindow?
+    private var settingsWindow: NSWindow?
     private let model = OnboardingModel()
+    static weak var shared: AppDelegate?
+
+    func showSettings(state: AppState) {
+        NSApp.activate(ignoringOtherApps: true)
+        if settingsWindow == nil {
+            let hosting = NSHostingController(rootView: SettingsView(state: state))
+            let w = NSWindow(contentViewController: hosting)
+            w.title = "Réglages"
+            w.styleMask = [.titled, .closable]
+            w.isReleasedWhenClosed = false
+            w.setContentSize(hosting.view.fittingSize)
+            w.center()
+            settingsWindow = w
+        }
+        settingsWindow?.makeKeyAndOrderFront(nil)
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AppDelegate.shared = self
         LaunchAtLogin.initializeIfNeeded()
         guard model.state != .ready else { return AppCore.shared.start() }
         let hosting = NSHostingController(rootView: OnboardingView(model: model))

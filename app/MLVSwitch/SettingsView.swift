@@ -8,8 +8,14 @@ enum LaunchAtLogin {
     /// On by default: registered once at first launch.
     static func initializeIfNeeded() {
         guard !UserDefaults.standard.bool(forKey: initKey) else { return }
-        UserDefaults.standard.set(true, forKey: initKey)
-        try? SMAppService.mainApp.register()
+        guard Bundle.main.bundleURL.path.hasPrefix("/Applications/") else {
+            NSLog("Launch at login: not registering, app not in /Applications (\(Bundle.main.bundleURL.path))")
+            return
+        }
+        do {
+            try SMAppService.mainApp.register()
+            UserDefaults.standard.set(true, forKey: initKey)
+        } catch { NSLog("Launch at login: \(error)") }
     }
     static var isEnabled: Bool { SMAppService.mainApp.status == .enabled }
     static func set(_ on: Bool) {
@@ -38,6 +44,7 @@ struct SettingsView: View {
                 Text("Logiciel libre sous licence GPL-3.0-or-later.")
             }
         }
+        .onAppear { launchAtLogin = LaunchAtLogin.isEnabled }
         .formStyle(.grouped)
         .frame(width: 440)
         .fixedSize(horizontal: false, vertical: true)

@@ -17,7 +17,7 @@ public enum MLVHeader {
             let type = String(decoding: head.prefix(4), as: UTF8.self)
             let size = head.withUnsafeBytes { UInt64($0.loadUnaligned(fromByteOffset: 4, as: UInt32.self).littleEndian) }
             if type == "VIDF" { return nil }
-            guard size >= 8 else { return nil }
+            guard size >= 16 else { return nil }
             if type == "RAWC" {
                 // After blockType, blockSize, timestamp(8): res_x, res_y, crop, reserved (2 each), then 4 bytes.
                 guard size >= 28, (try? fh.seek(toOffset: offset + 24)) != nil,

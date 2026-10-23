@@ -7,6 +7,12 @@ cd "$ROOT"
 
 "$ROOT/scripts/build-engine.sh"
 
+# Local builds default to the latest release tag and the commit count, so they
+# never show a stale version; CI overrides both from the tag and run number.
+MARKETING_VERSION="${MARKETING_VERSION:-$(git -C "$ROOT" describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')}"
+BUILD_NUMBER="${BUILD_NUMBER:-$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo 1)}"
+MARKETING_VERSION="${MARKETING_VERSION:-0.0.0}" # shallow clone without tags
+
 cd "$ROOT/app"
 xcodegen generate --quiet
 xcodebuild -project "mlv2dng.xcodeproj" -scheme "mlv2dng" -configuration Release \

@@ -1,6 +1,7 @@
 name: mlv2dng
 options:
   bundleIdPrefix: net.mlv2dng
+  developmentLanguage: en
   deploymentTarget:
     macOS: "14.0"
 packages:
@@ -24,6 +25,8 @@ targets:
     info:
       path: MLV2DNG/Info.plist
       properties:
+        CFBundleDevelopmentRegion: en
+        CFBundleLocalizations: [en, fr]
         CFBundleName: mlv2dng
         CFBundleDisplayName: mlv2dng
         LSUIElement: true

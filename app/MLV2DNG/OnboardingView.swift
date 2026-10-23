@@ -126,27 +126,27 @@ struct OnboardingView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Bienvenue dans mlv2dng").font(.title2.bold())
-            Text("Pour afficher vos MLV en DNG, mlv2dng a besoin de FUSE-T, un composant gratuit qui ne modifie pas la sécurité de votre Mac. L'installation demande votre mot de passe une seule fois.")
+            Text("Welcome to mlv2dng").font(.title2.bold())
+            Text("To show your MLV files as DNG, mlv2dng needs FUSE-T, a free component that doesn't change your Mac's security. Installation asks for your password once.")
                 .fixedSize(horizontal: false, vertical: true)
             if case let .fuseTOutdated(found, minimum) = model.state {
-                Text("La version de FUSE-T installée (\(found)) est trop ancienne (minimum \(minimum)).")
+                Text("The installed version of FUSE-T (\(found)) is too old (minimum \(minimum)).")
                     .foregroundStyle(.orange)
             }
             if let p = model.progress {
-                ProgressView(value: p > 0 ? p : nil) { Text("Téléchargement de FUSE-T…") }
+                ProgressView(value: p > 0 ? p : nil) { Text("Downloading FUSE-T…") }
             }
             if let e = model.errorMessage { Text(e).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
             if model.installerOpened {
-                Text("Suivez l'installateur. Cette fenêtre se fermera automatiquement.").foregroundStyle(.secondary)
+                Text("Follow the installer. This window will close automatically.").foregroundStyle(.secondary)
             }
             if !model.resolveFound {
-                Text("DaVinci Resolve n'a pas été trouvé — vous pourrez l'installer plus tard.")
+                Text("DaVinci Resolve wasn't found — you can install it later.")
                     .foregroundStyle(.secondary)
             }
             HStack {
                 Spacer()
-                Button(model.installerOpened ? "Rouvrir l'installateur" : "Installer FUSE-T") { model.install() }
+                Button(model.installerOpened ? LocalizedStringKey("Reopen Installer") : LocalizedStringKey("Install FUSE-T")) { model.install() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(model.progress != nil)
             }
@@ -169,7 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if settingsWindow == nil {
             let hosting = NSHostingController(rootView: SettingsView(state: state))
             let w = NSWindow(contentViewController: hosting)
-            w.title = "Réglages"
+            w.title = String(localized: "Settings")
             w.styleMask = [.titled, .closable]
             w.isReleasedWhenClosed = false
             w.setContentSize(hosting.view.fittingSize)

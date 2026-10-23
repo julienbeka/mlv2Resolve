@@ -133,10 +133,11 @@ public final class AppState: ObservableObject {
         let failed = await manager.setMode(m)
         if m == .qualiteEtalonnage, !refreshHintShown {
             refreshHintShown = true
-            info = "Dans Resolve, sélectionnez les plans puis clic droit → Rafraîchir."
+            info = String(localized: "In Resolve, select the clips, then right-click → Refresh.", bundle: L10n.bundle)
         }
         if !failed.isEmpty {
-            alert = "Le mode dual ISO n'a pas pu être appliqué à : \(failed.map(\.name).sorted().joined(separator: ", "))."
+            let names = failed.map(\.name).sorted().joined(separator: ", ")
+            alert = String(localized: "Dual ISO mode couldn't be applied to: \(names).", bundle: L10n.bundle)
         }
     }
 
@@ -196,12 +197,12 @@ public final class AppState: ObservableObject {
     }
     /// User-initiated unmounts are never forced: a busy volume stays mounted.
     static func busyAlert(_ names: [String]) -> String {
-        let list = names.sorted().map { "« \($0) »" }.joined(separator: ", ")
-        return "Impossible de démonter \(list) : des fichiers sont peut-être ouverts dans Resolve."
+        let list = names.sorted().map { String(localized: "“\($0)”", bundle: L10n.bundle) }.joined(separator: ", ")
+        return String(localized: "Couldn't unmount \(list): files may be open in Resolve.", bundle: L10n.bundle)
     }
 
     static func unplugAlert(_ volume: URL) -> String {
-        "Disque « \(volume.standardizedFileURL.lastPathComponent) » débranché"
+        String(localized: "Disk “\(volume.standardizedFileURL.lastPathComponent)” was unplugged", bundle: L10n.bundle)
     }
 
     private func resolveLastFolder() -> URL? {
@@ -222,7 +223,7 @@ public final class AppState: ObservableObject {
             shoots = try scan(folder)
         } catch {
             shoots = []
-            alert = "Dossier illisible : \(folder.path)"
+            alert = String(localized: "Couldn't read folder: \(folder.path)", bundle: L10n.bundle)
         }
     }
 
@@ -251,7 +252,7 @@ public final class AppState: ObservableObject {
             noteCollision(shoot, mountedAt: url)
             return true
         } catch {
-            alert = "Impossible de monter « \(shoot.name) » : \(Self.reason(error))."
+            alert = String(localized: "Couldn't mount “\(shoot.name)”: \(Self.reason(error)).", bundle: L10n.bundle)
             return false
         }
     }
@@ -262,7 +263,7 @@ public final class AppState: ObservableObject {
         let plain = MountPaths.sanitize(shoot.name)
         let actual = url.lastPathComponent
         guard actual.precomposedStringWithCanonicalMapping != plain else { return }
-        let notice = "Deux tournages s'appellent « \(shoot.name) » : le second est monté sous « \(actual) »."
+        let notice = String(localized: "Two shoots are named “\(shoot.name)”: the second is mounted as “\(actual)”.", bundle: L10n.bundle)
         info = info.map { $0 + "\n\n" + notice } ?? notice
     }
 
@@ -271,7 +272,7 @@ public final class AppState: ObservableObject {
         guard !infoShown.contains(k), let file = shoot.clips.first?.files.first,
               let n = MLVHeader.horizontalSqueeze(of: file) else { return }
         infoShown.insert(k)
-        info = "Tournage anamorphosé 1x\(n) : dans Resolve, réglez le rapport de pixel à \(n):1 (Attributs du clip)."
+        info = String(localized: "Anamorphic shoot 1x\(n): in Resolve, set the pixel aspect ratio to \(n):1 (Clip Attributes).", bundle: L10n.bundle)
     }
 
     private func handle(_ event: MountEvent) {
@@ -299,7 +300,7 @@ public final class AppState: ObservableObject {
         guard n < restartDelays.count else {
             crashes[k] = nil
             restartTasks[k] = nil
-            alert = "Le montage de « \(shoot.name) » s'est arrêté et n'a pas pu être relancé (code \(status))."
+            alert = String(localized: "Mounting of “\(shoot.name)” stopped and couldn't be restarted (code \(status)).", bundle: L10n.bundle)
             return
         }
         let delay = restartDelays[n]
@@ -336,12 +337,12 @@ public final class AppState: ObservableObject {
 
     static func reason(_ error: Error) -> String {
         switch error as? MountError {
-        case .mountPointBusy(let url): return "l'emplacement « \(url.path) » est déjà utilisé"
-        case .unmountFailed: return "l'ancien montage n'a pas pu être retiré"
-        case .unmountInProgress: return "un démontage est en cours, réessayez"
-        case .exitedDuringStartup: return "le moteur s'est arrêté au démarrage"
-        case .startupTimedOut: return "le montage n'est pas apparu à temps"
-        case .signalFailed: return "le moteur ne répond pas"
+        case .mountPointBusy(let url): return String(localized: "the location “\(url.path)” is already in use", bundle: L10n.bundle)
+        case .unmountFailed: return String(localized: "the previous mount couldn't be removed", bundle: L10n.bundle)
+        case .unmountInProgress: return String(localized: "an unmount is in progress, try again", bundle: L10n.bundle)
+        case .exitedDuringStartup: return String(localized: "the engine stopped during startup", bundle: L10n.bundle)
+        case .startupTimedOut: return String(localized: "the mount didn't appear in time", bundle: L10n.bundle)
+        case .signalFailed: return String(localized: "the engine isn't responding", bundle: L10n.bundle)
         case nil: return error.localizedDescription
         }
     }

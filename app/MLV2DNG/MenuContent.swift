@@ -3,23 +3,26 @@ import SwiftUI
 import AppKit
 import MLV2DNGCore
 
-private func frenchSizes(_ bytes: Int64) -> String {
-    // ByteCountFormatter follows the formatter's locale via the system; French units (Go/Mo) via Bundle language is not
-    // controllable here, so format with a French number style explicitly.
-    let units: [(String, Double)] = [("To", 1e12), ("Go", 1e9), ("Mo", 1e6), ("Ko", 1e3)]
+/// File size in the app's language (decimal units, like Finder). `ByteCountFormatter` cannot be pointed at the app's
+/// preferred localization (it prints "GB" even in French), so the units are chosen from the UI language.
+func localizedSize(_ bytes: Int64, language: String = Bundle.main.preferredLocalizations.first ?? "en") -> String {
+    let french = language.hasPrefix("fr")
+    let units: [(String, Double)] = french
+        ? [("To", 1e12), ("Go", 1e9), ("Mo", 1e6), ("Ko", 1e3)]
+        : [("TB", 1e12), ("GB", 1e9), ("MB", 1e6), ("KB", 1e3)]
     let b = Double(bytes)
     for (u, v) in units where b >= v {
         let n = NumberFormatter()
-        n.locale = Locale(identifier: "fr_FR")
+        n.locale = Locale(identifier: french ? "fr_FR" : "en_US")
         n.maximumFractionDigits = b / v < 10 ? 1 : 0
         return "\(n.string(from: NSNumber(value: b / v)) ?? "") \(u)"
     }
-    return "\(bytes) octets"
+    return french ? "\(bytes) octets" : "\(bytes) bytes"
 }
 
 func shootTitle(_ s: Shoot) -> String {
     let n = s.clips.count
-    return "\(s.name) — \(n) clip\(n > 1 ? "s" : "") · \(frenchSizes(s.totalBytes))"
+    return String(localized: "\(s.name) — \(String(localized: "\(n) clips")) · \(localizedSize(s.totalBytes))")
 }
 
 /// Actions shared by the menu and the main window.
@@ -43,7 +46,7 @@ enum MenuActions {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
-        panel.prompt = "Choisir"
+        panel.prompt = String(localized: "Choose")
         NSApp.activate(ignoringOtherApps: true)
         if panel.runModal() == .OK, let url = panel.url {
             Task { await state.choose(folder: url) }
@@ -56,7 +59,7 @@ enum MenuActions {
         a.alertStyle = style
         a.messageText = "mlv2dng"
         a.informativeText = text
-        a.addButton(withTitle: "OK")
+        a.addButton(withTitle: String(localized: "OK"))
         a.runModal()
         clear()
     }
@@ -81,18 +84,18 @@ struct MenuContent: View {
 
     var body: some View {
         if state.needsFuseT {
-            Button("Installer FUSE-T…") { AppDelegate.shared?.showOnboarding() }
+            Button("Install FUSE-T…") { AppDelegate.shared?.showOnboarding() }
             Divider()
         }
         if let alert = state.alert {
-            Button("⚠︎ Problème — voir le détail") { MenuActions.showDetail(alert, style: .warning) { state.clearAlert() } }
+            Button("⚠︎ Problem — See Details") { MenuActions.showDetail(alert, style: .warning) { state.clearAlert() } }
             Divider()
         }
         if let info = state.info {
-            Button("ℹ︎ Conseil Resolve") { MenuActions.showDetail(info, style: .informational) { state.clearInfo() } }
+            Button("ℹ︎ Resolve Tip") { MenuActions.showDetail(info, style: .informational) { state.clearInfo() } }
             Divider()
         }
-        Text(state.folder?.lastPathComponent ?? "Aucun dossier choisi")
+        if let folder = state.folder { Text(verbatim: folder.lastPathComponent) } else { Text("No folder chosen") }
         ForEach(state.shoots, id: \.folder) { shoot in
             let on = state.mounted.contains(shoot.folder.standardizedFileURL.path)
             Button {
@@ -104,23 +107,23 @@ struct MenuContent: View {
             .disabled(state.busy.contains(shoot.folder.standardizedFileURL.path))
         }
         Divider()
-        Button("Choisir un dossier…") { MenuActions.chooseFolder(state: state) }
-        Button("Ouvrir Resolve") { MenuActions.openResolve() }
+        Button("Choose Folder…") { MenuActions.chooseFolder(state: state) }
+        Button("Open Resolve") { MenuActions.openResolve() }
             .disabled(MenuActions.resolveURL == nil)
-        Button("Afficher les DNG dans le Finder") { MenuActions.showDNGsInFinder() }
+        Button("Show DNGs in Finder") { MenuActions.showDNGsInFinder() }
         Picker("Dual ISO", selection: Binding(get: { state.mode }, set: { m in Task { await state.setMode(m) } })) {
-            Text("Montage fluide").tag(DualISOMode.montageFluide)
-            Text("Qualité étalonnage").tag(DualISOMode.qualiteEtalonnage)
+            Text("Smooth Editing").tag(DualISOMode.montageFluide)
+            Text("Grading Quality").tag(DualISOMode.qualiteEtalonnage)
         }
         Divider()
-        Button("Tout démonter") {
+        Button("Unmount All") {
             Task { await state.unmountAll() }
         }
         .disabled(state.mounted.isEmpty)
-        Button("Ouvrir la fenêtre mlv2dng") { AppDelegate.shared?.showMainWindow() }
-        Button("Réglages…") {
+        Button("Open mlv2dng Window") { AppDelegate.shared?.showMainWindow() }
+        Button("Settings…") {
             AppDelegate.shared?.showSettings(state: state)
         }
-        Button("Quitter") { NSApp.terminate(nil) }
+        Button("Quit mlv2dng") { NSApp.terminate(nil) }
     }
 }

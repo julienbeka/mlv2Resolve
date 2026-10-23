@@ -13,6 +13,7 @@ final class AppStateTests: XCTestCase {
     var unmounter: FakeUnmounter!
 
     override func setUp() async throws {
+        L10n.bundle = L10nTests.bundle("en")
         let fm = FileManager.default
         tmp = fm.temporaryDirectory.resolvingSymlinksInPath()
             .appendingPathComponent("AppStateTests-\(UUID().uuidString)", isDirectory: true)
@@ -128,7 +129,7 @@ final class AppStateTests: XCTestCase {
         XCTAssertTrue(state.mounted.isEmpty)
         let mounted = await manager.mounted
         XCTAssertTrue(mounted.isEmpty)
-        XCTAssertEqual(state.alert, "Disque « SSD » débranché")
+        XCTAssertEqual(state.alert, "Disk “SSD” was unplugged")
         XCTAssertEqual(savedMounts, [key(volume.appendingPathComponent("A"))])
     }
 
@@ -200,7 +201,7 @@ final class AppStateTests: XCTestCase {
             }
         }
         await waitUntil { state.alert != nil }
-        XCTAssertEqual(state.alert, "Le montage de « A » s'est arrêté et n'a pas pu être relancé (code 9).")
+        XCTAssertEqual(state.alert, "Mounting of “A” stopped and couldn't be restarted (code 9).")
         try await Task.sleep(for: .milliseconds(100))
         XCTAssertEqual(launcher.processes.count, 3, "no relaunch after two retries")
         XCTAssertTrue(state.mounted.isEmpty)
@@ -215,7 +216,7 @@ final class AppStateTests: XCTestCase {
         launcher.mountsAppear.set(false) // relaunches never come up
         try XCTUnwrap(launcher.processes.last).exit(4)
         await waitUntil(8) { state.alert != nil }
-        XCTAssertTrue(state.alert?.hasPrefix("Le montage de « A » s'est arrêté et n'a pas pu être relancé") ?? false,
+        XCTAssertTrue(state.alert?.hasPrefix("Mounting of “A” stopped and couldn't be restarted") ?? false,
                       state.alert ?? "nil")
         XCTAssertEqual(launcher.processes.count, 3)
         XCTAssertTrue(state.mounted.isEmpty)
@@ -257,7 +258,7 @@ final class AppStateTests: XCTestCase {
         await state.choose(folder: volume)
         await state.toggle(try shoot(state, "A"))
         XCTAssertTrue(state.mounted.isEmpty)
-        XCTAssertEqual(state.alert, "Impossible de monter « A » : le montage n'est pas apparu à temps.")
+        XCTAssertEqual(state.alert, "Couldn't mount “A”: the mount didn't appear in time.")
         XCTAssertTrue(savedMounts.isEmpty)
     }
 
@@ -305,7 +306,7 @@ extension AppStateTests {
         await state.choose(folder: volume)
         let s = try shoot(state, "Ana")
         await state.toggle(s)
-        XCTAssertEqual(state.info, "Tournage anamorphosé 1x3 : dans Resolve, réglez le rapport de pixel à 3:1 (Attributs du clip).")
+        XCTAssertEqual(state.info, "Anamorphic shoot 1x3: in Resolve, set the pixel aspect ratio to 3:1 (Clip Attributes).")
         state.clearInfo()
         XCTAssertNil(state.info)
         await state.toggle(s)
@@ -334,8 +335,8 @@ extension AppStateTests {
         await state.toggle(try shoot(state, "A"))
         launcher.processes[0].failsSignals.set(true)
         await state.setMode(.qualiteEtalonnage)
-        XCTAssertEqual(state.alert, "Le mode dual ISO n'a pas pu être appliqué à : A.")
-        XCTAssertEqual(AppState.reason(MountError.signalFailed(errno: ESRCH)), "le moteur ne répond pas")
+        XCTAssertEqual(state.alert, "Dual ISO mode couldn't be applied to: A.")
+        XCTAssertEqual(AppState.reason(MountError.signalFailed(errno: ESRCH)), "the engine isn't responding")
     }
 
     func testQualityModeHintOnce() async {
@@ -343,7 +344,7 @@ extension AppStateTests {
         await state.setMode(.montageFluide)
         XCTAssertNil(state.info)
         await state.setMode(.qualiteEtalonnage)
-        XCTAssertEqual(state.info, "Dans Resolve, sélectionnez les plans puis clic droit → Rafraîchir.")
+        XCTAssertEqual(state.info, "In Resolve, select the clips, then right-click → Refresh.")
         state.clearInfo()
         await state.setMode(.montageFluide)
         await state.setMode(.qualiteEtalonnage)
@@ -386,7 +387,7 @@ extension AppStateTests {
         let url = try XCTUnwrap(all[second])
         XCTAssertEqual(url.lastPathComponent, "Jour 1 (\(second.volumeName))")
         XCTAssertEqual(state.info,
-                       "Deux tournages s'appellent « Jour 1 » : le second est monté sous « Jour 1 (\(second.volumeName)) ».")
+                       "Two shoots are named “Jour 1”: the second is mounted as “Jour 1 (\(second.volumeName))”.")
     }
 }
 
@@ -403,7 +404,7 @@ extension AppStateTests {
         unmounter.makeBusy(url)
 
         await state.toggle(s)
-        XCTAssertEqual(state.alert, "Impossible de démonter « A » : des fichiers sont peut-être ouverts dans Resolve.")
+        XCTAssertEqual(state.alert, "Couldn't unmount “A”: files may be open in Resolve.")
         XCTAssertEqual(state.mounted, [key(a)])
         XCTAssertEqual(savedMounts, [key(a)])
         XCTAssertEqual(unmounter.forced, [false])
@@ -411,9 +412,9 @@ extension AppStateTests {
         XCTAssertEqual(mounted.count, 1)
 
         await state.unmountAll()
-        XCTAssertEqual(state.alert, "Impossible de démonter « A » : des fichiers sont peut-être ouverts dans Resolve.")
+        XCTAssertEqual(state.alert, "Couldn't unmount “A”: files may be open in Resolve.")
         XCTAssertEqual(state.mounted, [key(a)])
-        XCTAssertEqual(unmounter.forced, [false, false], "« Tout démonter » never forces")
+        XCTAssertEqual(unmounter.forced, [false, false], "“Unmount All” never forces")
     }
 
     func testUnplugForcesBusyShoot() async throws {

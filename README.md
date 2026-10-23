@@ -10,6 +10,8 @@ Application de barre des menus macOS qui monte des tournages Magic Lantern (MLV)
 
 *A macOS menu-bar app that mounts Magic Lantern MLV shoots as virtual CinemaDNG sequences for DaVinci Resolve, using MLVFS on FUSE-T (Apple Silicon).*
 
+L'interface suit la langue de macOS : anglais par défaut, français disponible. / *The app follows the macOS language: English by default, French available.*
+
 ## Installation
 
 1. Ouvrez `mlv2dng.app` (placez-la dans `/Applications`).

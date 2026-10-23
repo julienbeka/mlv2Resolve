@@ -39,7 +39,9 @@ public enum ShootScanner {
     private static func chunkIndex(_ ext: String) -> Int? {
         let e = ext.lowercased()
         if e == "mlv" { return 0 }
-        if e.count == 3, e.hasPrefix("m"), let n = Int(e.dropFirst()), n >= 0 {
+        let digits = Array(e.utf8.dropFirst())
+        if e.utf8.count == 3, e.hasPrefix("m"),
+           digits.allSatisfy({ $0 >= 48 && $0 <= 57 }), let n = Int(e.dropFirst()) {
             return n + 1
         }
         return nil
@@ -47,6 +49,7 @@ public enum ShootScanner {
 
     private static func clips(in entries: [URL]) -> [Clip] {
         var groups: [String: [(Int, URL)]] = [:]
+        var names: [String: String] = [:]
         for url in entries {
             let file = url.lastPathComponent
             if file.hasPrefix(".") { continue }
@@ -54,11 +57,13 @@ public enum ShootScanner {
             if isDir { continue }
             guard let idx = chunkIndex(url.pathExtension) else { continue }
             let base = url.deletingPathExtension().lastPathComponent
-            groups[base, default: []].append((idx, url))
+            let key = base.lowercased()
+            groups[key, default: []].append((idx, url))
+            if idx == 0 { names[key] = base }
         }
         var result: [Clip] = []
-        for (base, items) in groups {
-            guard items.contains(where: { $0.0 == 0 }) else { continue }
+        for (key, items) in groups {
+            guard items.contains(where: { $0.0 == 0 }), let base = names[key] else { continue }
             let sorted = items.sorted { $0.0 < $1.0 }
             let bytes = sorted.reduce(Int64(0)) { acc, item in
                 let size = (try? item.1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0

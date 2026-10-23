@@ -85,6 +85,18 @@ final class ShootScannerTests: XCTestCase {
         XCTAssertEqual(shoots[0].clips[0].files.count, 1)
     }
 
+    func testMixedCaseSpanGroups() throws {
+        try make("T/a001.mlv", size: 10)
+        try make("T/A001.M00", size: 20)
+        try make("T/b002.MLV")
+        try make("T/b002.m+1", size: 5)
+        let shoots = try ShootScanner.scan(root.appendingPathComponent("T"))
+        XCTAssertEqual(shoots[0].clips.map(\.name), ["a001", "b002"])
+        XCTAssertEqual(shoots[0].clips[0].bytes, 30)
+        XCTAssertEqual(shoots[0].clips[0].files.map(\.lastPathComponent), ["a001.mlv", "A001.M00"])
+        XCTAssertEqual(shoots[0].clips[1].files.count, 1) // .m+1 rejected
+    }
+
     func testClipsSortedAscending() throws {
         try make("T/B.MLV")
         try make("T/A.MLV")

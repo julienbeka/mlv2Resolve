@@ -45,6 +45,8 @@ struct mlvfs
     int deflicker;
     int fix_pattern_noise;
     int version;
+    char * fpm_dir;
+    int no_focus_pixels;
 };
 
 //all the mlv block headers corresponding to a particular frame, needed to generate a DNG for that frame
@@ -60,6 +62,7 @@ struct frame_headers
     mlv_expo_hdr_t expo_hdr;
     mlv_lens_hdr_t lens_hdr;
     mlv_wbal_hdr_t wbal_hdr;
+    mlv_rawc_hdr_t rawc_hdr; /* blockType[0] == 0 when the clip has no RAWC block */
 };
 
 #define MLVFS_SOFTWARE_NAME "MLVFS"

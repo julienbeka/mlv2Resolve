@@ -228,6 +228,22 @@ typedef struct {
 }  mlv_wbal_hdr_t;
 
 typedef struct {
+    uint8_t     blockType[4];   /* RAWC - raw image capture information (layout from MLV App / ML raw.h) */
+    uint32_t    blockSize;
+    uint64_t    timestamp;
+    uint16_t    sensor_res_x;   /* sensor resolution */
+    uint16_t    sensor_res_y;
+    uint16_t    sensor_crop;    /* sensor crop factor x100 */
+    uint16_t    reserved;
+    uint8_t     binning_x;      /* subsampling factor: (binning_x+skipping_x) x (binning_y+skipping_y) */
+    uint8_t     skipping_x;
+    uint8_t     binning_y;
+    uint8_t     skipping_y;
+    int16_t     offset_x;       /* top-left corner of the image area, relative to the sensor */
+    int16_t     offset_y;       /* (-32768 = unknown) */
+}  mlv_rawc_hdr_t;
+
+typedef struct {
     uint8_t     blockType[4];    /* DEBG - debug messages for development use, contains no production data */
     uint32_t    blockSize;
     uint64_t    timestamp;

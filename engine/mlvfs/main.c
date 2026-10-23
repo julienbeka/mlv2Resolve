@@ -48,6 +48,7 @@
 #include "gif.h"
 #include "histogram.h"
 #include "patternnoise.h"
+#include "focus_pixels.h"
 #include "slre/slre.h"
 
 static struct mlvfs mlvfs;
@@ -531,6 +532,11 @@ int mlv_get_frame_headers(const char *mlv_filename, int index, struct frame_head
                         hdr_size = MIN(sizeof(mlv_wbal_hdr_t), mlv_hdr.blockSize);
                         fread(&frame_headers->wbal_hdr, hdr_size, 1, in_file);
                     }
+                    else if(!memcmp(mlv_hdr.blockType, "RAWC", 4))
+                    {
+                        hdr_size = MIN(sizeof(mlv_rawc_hdr_t), mlv_hdr.blockSize);
+                        fread(&frame_headers->rawc_hdr, hdr_size, 1, in_file);
+                    }
                 }
         }
         
@@ -965,7 +971,17 @@ static int process_frame(struct image_buffer * image_buffer)
             }
             else
             {
-                fix_focus_pixels(&frame_headers, image_buffer->data, 0);
+                if(!mlvfs.no_focus_pixels)
+                {
+                    int fpm_count = fpm_fix(image_buffer->data, frame_headers.rawi_hdr.xRes, frame_headers.rawi_hdr.yRes,
+                                            frame_headers.idnt_hdr.cameraModel, frame_headers.vidf_hdr.panPosX, frame_headers.vidf_hdr.panPosY,
+                                            mlvfs.fpm_dir, frame_headers.rawi_hdr.raw_info.width, frame_headers.rawi_hdr.raw_info.height,
+                                            frame_headers.rawi_hdr.raw_info.black_level);
+                    if(fpm_first_time(mlv_filename))
+                    {
+                        fprintf(stderr, "%s: focus pixels: %d corrected\n", mlv_filename, fpm_count);
+                    }
+                }
                 if(mlvfs.fix_bad_pixels)
                 {
                     fix_bad_pixels(&frame_headers, image_buffer->data, mlvfs.fix_bad_pixels == 2, is_dual_iso);
@@ -1860,6 +1876,8 @@ static const struct fuse_opt_ex mlvfs_opts_ex[] =
     MLVFS_OPTION("--cs2x2",             chroma_smooth,            2, "2x2 chroma smoothing", 0),
     MLVFS_OPTION("--cs3x3",             chroma_smooth,            3, "3x3 chroma smoothing", 0),
     MLVFS_OPTION("--cs5x5",             chroma_smooth,            5, "5x5 chroma smoothing", 0),
+    MLVFS_OPTION("--fpm-dir=%s",        fpm_dir,                  0, "Directory with focus pixel maps (.fpm, MLV App format)", 0),
+    MLVFS_OPTION("--no-focus-pixels",   no_focus_pixels,          1, "Do not fix focus pixels", 0),
     MLVFS_OPTION("--bad-pix",           fix_bad_pixels,           1, "Fix bad pixels (autodetected)", 0),
     MLVFS_OPTION("--really-bad-pix",    fix_bad_pixels,           2, "Aggressive bad pixel fix", 0),
     MLVFS_OPTION("--fix-pattern-noise", fix_pattern_noise,        1, "Fix row/column noise in shadows (slow)", 0),

@@ -657,9 +657,24 @@ size_t dng_get_header_data(struct frame_headers * frame_headers, uint8_t * outpu
         double rawW = frame_headers->rawi_hdr.raw_info.active_area.x2 - frame_headers->rawi_hdr.raw_info.active_area.x1;
         double rawH = frame_headers->rawi_hdr.raw_info.active_area.y2 - frame_headers->rawi_hdr.raw_info.active_area.y1;
         double aspect_ratio = rawW / rawH;
+        const mlv_rawc_hdr_t * rawc = &frame_headers->rawc_hdr;
+        int sampling_x = rawc->binning_x + rawc->skipping_x;
+        int sampling_y = rawc->binning_y + rawc->skipping_y;
+        if(!memcmp(rawc->blockType, "RAWC", 4) && sampling_x > 0 && sampling_y > 0)
+        {
+            //RAWC tells how the sensor was sampled: (binning_x+skipping_x) x (binning_y+skipping_y)
+            //e.g. 1x3 anamorphic = 3x1 -> stretch horizontally by 3; 5D3 720p = 3x5 -> stretch vertically by 5/3
+            int a = sampling_x, b = sampling_y;
+            while(b) { int t = a % b; a = b; b = t; }
+            if(sampling_x > sampling_y) { par[0] = sampling_x / a; par[1] = sampling_y / a; }
+            else if(sampling_y > sampling_x) { par[2] = sampling_y / a; par[3] = sampling_x / a; }
+            focal_resolution_x[1] = focal_resolution_x[1] * sampling_x;
+            focal_resolution_y[1] = focal_resolution_y[1] * sampling_y;
+        }
+        //no RAWC block: fall back to the original heuristic
         //check the aspect ratio of the original raw buffer, if it's > 2 and we're not in crop mode, then this is probably squeezed footage
         //TODO: can we be more precise about detecting this?
-        if(aspect_ratio > 2.0 && rawH <= 720)
+        else if(aspect_ratio > 2.0 && rawH <= 720)
         {
             // 5x3 line skpping
             par[2] = 5; par[3] = 3;

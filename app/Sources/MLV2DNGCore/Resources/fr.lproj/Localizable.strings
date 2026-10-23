@@ -6,7 +6,7 @@
 "Couldn't read folder: %@" = "Dossier illisible : %@";
 "Couldn't mount “%@”: %@." = "Impossible de monter « %@ » : %@.";
 "Two shoots are named “%@”: the second is mounted as “%@”." = "Deux tournages s'appellent « %@ » : le second est monté sous « %@ ».";
-"Anamorphic shoot 1x%lld: in Resolve, set the pixel aspect ratio to %lld:1 (Clip Attributes)." = "Tournage anamorphosé 1x%lld : dans Resolve, réglez le rapport de pixel à %lld:1 (Attributs du clip).";
+"Anamorphic shoot 1x%lld: in Resolve, go to the Color page → Sizing → Input Sizing and set Width to %lld." = "Tournage anamorphosé 1x%lld : dans Resolve, page Color → Sizing → Input Sizing, réglez Width sur %lld.";
 "Mounting of “%@” stopped and couldn't be restarted (code %d)." = "Le montage de « %@ » s'est arrêté et n'a pas pu être relancé (code %d).";
 "the location “%@” is already in use" = "l'emplacement « %@ » est déjà utilisé";
 "the previous mount couldn't be removed" = "l'ancien montage n'a pas pu être retiré";

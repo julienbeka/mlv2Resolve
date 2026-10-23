@@ -6,7 +6,7 @@
 "Couldn't read folder: %@" = "Couldn't read folder: %@";
 "Couldn't mount “%@”: %@." = "Couldn't mount “%@”: %@.";
 "Two shoots are named “%@”: the second is mounted as “%@”." = "Two shoots are named “%@”: the second is mounted as “%@”.";
-"Anamorphic shoot 1x%lld: in Resolve, set the pixel aspect ratio to %lld:1 (Clip Attributes)." = "Anamorphic shoot 1x%lld: in Resolve, set the pixel aspect ratio to %lld:1 (Clip Attributes).";
+"Anamorphic shoot 1x%lld: in Resolve, go to the Color page → Sizing → Input Sizing and set Width to %lld." = "Anamorphic shoot 1x%lld: in Resolve, go to the Color page → Sizing → Input Sizing and set Width to %lld.";
 "Mounting of “%@” stopped and couldn't be restarted (code %d)." = "Mounting of “%@” stopped and couldn't be restarted (code %d).";
 "the location “%@” is already in use" = "the location “%@” is already in use";
 "the previous mount couldn't be removed" = "the previous mount couldn't be removed";

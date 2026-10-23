@@ -24,7 +24,7 @@ Pour compiler depuis les sources, voir [Compiler](#compiler).
 2. Cliquez sur un tournage pour le monter. Les DNG apparaissent dans `~/MLV Mounts/<tournage>` (**Afficher les DNG dans le Finder**). Importez-les dans Resolve depuis ce dossier.
 3. Les tournages montés sont remontés automatiquement au lancement et à la reconnexion de leur disque, toujours au même chemin : Resolve retrouve ses plans.
 4. **Dual ISO** : utilisez « Montage fluide » pendant le montage et « Qualité étalonnage » avant l'étalonnage. La bascule s'applique à chaud ; dans Resolve, sélectionnez les plans puis clic droit → Rafraîchir.
-5. Rushs anamorphosés 1x3 : réglez le rapport de pixel du plan à 3:1 dans Resolve (Attributs du clip) ; l'app vous le rappelle au montage d'un tel tournage.
+5. Rushs anamorphosés 1x3 : Resolve ignore le rapport de pixel inscrit dans les DNG et ses attributs du clip ne proposent pas de 3:1 ; désanamorphosez dans la page Color → Sizing → Input Sizing → **Width = 3** (Height reste à 1). L'app vous le rappelle au montage d'un tel tournage.
 
 Vos fichiers MLV d'origine ne sont jamais modifiés : les montages sont en lecture seule et le moteur refuse toute écriture.
 

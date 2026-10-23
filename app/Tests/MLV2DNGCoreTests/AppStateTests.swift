@@ -306,7 +306,7 @@ extension AppStateTests {
         await state.choose(folder: volume)
         let s = try shoot(state, "Ana")
         await state.toggle(s)
-        XCTAssertEqual(state.info, "Anamorphic shoot 1x3: in Resolve, set the pixel aspect ratio to 3:1 (Clip Attributes).")
+        XCTAssertEqual(state.info, "Anamorphic shoot 1x3: in Resolve, go to the Color page → Sizing → Input Sizing and set Width to 3.")
         state.clearInfo()
         XCTAssertNil(state.info)
         await state.toggle(s)

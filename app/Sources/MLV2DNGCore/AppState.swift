@@ -272,7 +272,7 @@ public final class AppState: ObservableObject {
         guard !infoShown.contains(k), let file = shoot.clips.first?.files.first,
               let n = MLVHeader.horizontalSqueeze(of: file) else { return }
         infoShown.insert(k)
-        info = String(localized: "Anamorphic shoot 1x\(n): in Resolve, set the pixel aspect ratio to \(n):1 (Clip Attributes).", bundle: L10n.bundle)
+        info = String(localized: "Anamorphic shoot 1x\(n): in Resolve, go to the Color page → Sizing → Input Sizing and set Width to \(n).", bundle: L10n.bundle)
     }
 
     private func handle(_ event: MountEvent) {

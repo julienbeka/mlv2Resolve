@@ -24,7 +24,7 @@ To build from source, see [Building](#building).
 2. Click a shoot to mount it. The DNGs appear in `~/MLV Mounts/<shoot>` (**Show DNGs in Finder**). Import them into Resolve from there.
 3. Mounted shoots are remounted automatically at launch and when their disk is plugged back in, always at the same path, so Resolve finds its clips again.
 4. **Dual ISO**: use **Smooth Editing** while editing and **Grading Quality** before grading. The switch is applied live; in Resolve, select the clips and right-click → Refresh.
-5. 1x3 anamorphic footage: set the clip's pixel aspect ratio to 3:1 in Resolve (Clip Attributes); the app reminds you when you mount such a shoot.
+5. 1x3 anamorphic footage: Resolve ignores the pixel aspect ratio stored in the DNGs and its Clip Attributes offer no 3:1 option, so desqueeze on the Color page → Sizing → Input Sizing → **Width = 3** (Height stays 1). The app reminds you when you mount such a shoot.
 
 Your original MLV files are never modified: the mounts are read-only and the engine refuses every write.
 

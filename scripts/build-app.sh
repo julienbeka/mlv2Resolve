@@ -23,7 +23,14 @@ xcodebuild -project "mlv2dng.xcodeproj" -scheme "mlv2dng" -configuration Release
 tail -n 3 "$ROOT/build/xcodebuild.log"
 
 APP="$ROOT/build/DerivedData/Build/Products/Release/mlv2dng.app"
+# Copy next to the target, sign, then swap in one move: Finder never sees a
+# half-copied bundle (which leaves it showing a generic icon).
+rm -rf "$ROOT/build/.mlv2dng.app.new"
+cp -R "$APP" "$ROOT/build/.mlv2dng.app.new"
+codesign --force --deep -s - "$ROOT/build/.mlv2dng.app.new"
 rm -rf "$ROOT/build/mlv2dng.app"
-cp -R "$APP" "$ROOT/build/mlv2dng.app"
-codesign --force --deep -s - "$ROOT/build/mlv2dng.app"
+mv "$ROOT/build/.mlv2dng.app.new" "$ROOT/build/mlv2dng.app"
+touch "$ROOT/build/mlv2dng.app"
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+  -f "$ROOT/build/mlv2dng.app" >/dev/null 2>&1 || true
 echo "Built: $ROOT/build/mlv2dng.app"

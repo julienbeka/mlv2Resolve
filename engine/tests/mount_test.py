@@ -8,6 +8,9 @@ Usage: mount_test.py <clip.MLV> [--expect-frames N] [--min-fps F] [--backend nfs
 --expect-fpm        asserts the mlvfs log contains "focus pixels: N corrected" with N > 0.
 --expect-raw DIR    asserts DNG frames 0 and 160 equal DIR/<clip>_<frame>.u16 (from make_reference.py) exactly;
                     implies --no-bad-pix and --no-focus-pixels so MLVFS outputs the decoded sensor values untouched.
+--expect-readonly   asserts the engine itself refuses writes (the harness never passes -o ro): touch, mkdir, mv of
+                    the clip folder, rm of a DNG, rm of a real (non-virtual) file and an in-place DNG write all fail,
+                    and nothing they targeted changed (the source folder snapshot is checked as usual).
 --expect-sane       stdlib-only plausibility check on frame 0: black < median < white, and the median absolute
                     difference between same-colour horizontal neighbours is small relative to white - black.
 mlvfs stdout and stderr both go to one log file (tail printed at the end).
@@ -121,6 +124,69 @@ def check_sane(cdir, dngs):
     assert rel <= SANE_MAX_REL_MAD, "same-colour neighbour MAD %.5f of range > %.3f (noise?)" % (rel, SANE_MAX_REL_MAD)
 
 
+def check_readonly(mnt, cdir, dngs, src_folder):
+    """Every mutating operation through the mount must fail; return the list of failures."""
+    # a real (non-virtual) sub-folder of the rushes folder, passed through by MLVFS, with a real file in it
+    real_dir = next((d for d in sorted(os.listdir(mnt)) if not d.startswith(".") and d not in (os.path.basename(cdir),)
+                     and os.path.isdir(os.path.join(mnt, d)) and "MLV_" not in d), None)
+    real = []
+    if real_dir:
+        real = sorted(f for f in os.listdir(os.path.join(mnt, real_dir))
+                      if not f.startswith(".") and os.path.isfile(os.path.join(mnt, real_dir, f)))[:1]
+    print("mount root:", sorted(os.listdir(mnt))[:8], "real probe:", real_dir, real)
+    dng = os.path.join(cdir, dngs[0])
+    size_before = os.path.getsize(dng)
+    attempts = [
+        ("touch new file at root", ["touch", os.path.join(mnt, "mlvswitch_ro_probe.txt")]),
+        ("touch new file in clip folder", ["touch", os.path.join(cdir, "mlvswitch_ro_probe.txt")]),
+        ("mkdir at root", ["mkdir", os.path.join(mnt, "mlvswitch_ro_dir")]),
+        ("mkdir in clip folder", ["mkdir", os.path.join(cdir, "mlvswitch_ro_dir")]),
+        ("mv clip folder", ["mv", cdir, os.path.join(mnt, "mlvswitch_ro_renamed")]),
+        ("rm DNG", ["rm", "-f", dng]),
+    ]
+    probes = [os.path.join(mnt, "mlvswitch_ro_probe.txt"), os.path.join(cdir, "mlvswitch_ro_probe.txt"),
+              os.path.join(mnt, "mlvswitch_ro_dir"), os.path.join(cdir, "mlvswitch_ro_dir"),
+              os.path.join(mnt, "mlvswitch_ro_renamed")]
+    if real_dir:
+        rd = os.path.join(mnt, real_dir)
+        attempts.append(("touch in real folder " + real_dir, ["touch", os.path.join(rd, "mlvswitch_ro_probe.txt")]))
+        attempts.append(("mkdir in real folder " + real_dir, ["mkdir", os.path.join(rd, "mlvswitch_ro_dir")]))
+        attempts.append(("mv real folder " + real_dir, ["mv", rd, rd + ".mlvswitch_ro"]))
+        probes += [os.path.join(rd, "mlvswitch_ro_probe.txt"), os.path.join(rd, "mlvswitch_ro_dir"), rd + ".mlvswitch_ro"]
+    if real:
+        # reversible (rename within the same folder) rather than rm, so a broken engine cannot destroy a real file
+        rf = os.path.join(mnt, real_dir, real[0])
+        attempts.append(("mv real file " + real[0], ["mv", rf, rf + ".mlvswitch_ro"]))
+        probes.append(rf + ".mlvswitch_ro")
+    failures = []
+    src_real_dir = os.path.join(src_folder, real_dir) if real_dir else None
+    for label, cmd in attempts:
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        err = (r.stderr.strip().splitlines() or [""])[-1]
+        print("readonly: %-34s rc=%d %s" % (label, r.returncode, err))
+        if r.returncode == 0:
+            failures.append(label)
+    try:
+        with open(dng, "r+b") as f:
+            f.write(b"\0")
+        failures.append("open DNG for writing")
+        print("readonly: open DNG r+b                  SUCCEEDED")
+    except OSError as e:
+        print("readonly: open DNG r+b                  refused: %s" % e.strerror)
+    for p in probes:
+        if os.path.exists(p):
+            failures.append("exists after refusal: " + p)
+    if not os.path.exists(dng) or os.path.getsize(dng) != size_before:
+        failures.append("DNG missing or resized")
+    if src_real_dir and not os.path.isdir(src_real_dir):
+        failures.append("real folder gone from source: " + src_real_dir)
+        if os.path.isdir(src_real_dir + ".mlvswitch_ro"):
+            os.rename(src_real_dir + ".mlvswitch_ro", src_real_dir)  # undo
+    if real and not os.path.exists(os.path.join(mnt, real_dir, real[0])):
+        failures.append("real file gone: " + real[0])
+    return failures
+
+
 def unmount(mnt, proc):
     r = subprocess.run(["umount", mnt], capture_output=True)
     if r.returncode != 0:
@@ -156,6 +222,7 @@ def main():
     ap.add_argument("--no-bad-pix", action="store_true", help="mount without --bad-pix")
     ap.add_argument("--expect-raw", metavar="REF_DIR")
     ap.add_argument("--expect-sane", action="store_true")
+    ap.add_argument("--expect-readonly", action="store_true")
     ap.add_argument("--index-dir", help="pass --index-dir to mlvfs; asserts .IDX files land there")
     ap.add_argument("--assert-source-untouched", action=argparse.BooleanOptionalAction, default=True,
                     help="assert the source folder is identical (names, sizes, mtimes) after unmount")
@@ -236,6 +303,10 @@ def main():
             check_sane(cdir, dngs)
         if a.expect_raw:
             check_raw(cdir, dngs, os.path.abspath(a.expect_raw), name)
+        if a.expect_readonly:
+            failures = check_readonly(mnt, cdir, dngs, folder)
+            assert not failures, "mount accepted mutating operations: %s" % failures
+            print("readonly: all mutating operations refused")
         ok = True
     except AssertionError as e:
         print("FAIL:", e)

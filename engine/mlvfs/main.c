@@ -1269,6 +1269,12 @@ static int mlvfs_open(const char *path, struct fuse_file_info *fi)
     /* reset the cached image buffer, if any */
     fi->fh = 0;
 
+    /* MLV Switch: read-only mount, refuse any write access (real or virtual) */
+    if ((fi->flags & O_ACCMODE) != O_RDONLY || (fi->flags & O_TRUNC))
+    {
+        return -EROFS;
+    }
+
     /* try to find the real file on disk */
     char *resolved_filename = mlvfs_resolve_virtual(path);
 
@@ -1602,36 +1608,14 @@ static int mlvfs_read(const char *path, char *buf, size_t size, FUSE_OFF_T offse
     return -ENOENT;
 }
 
+/*
+ * MLV Switch: the mount is strictly read-only, independently of "-o ro".
+ * Every mutating operation is refused with EROFS, so nothing can ever reach
+ * the real rushes folder through the mount (even for non-virtual paths).
+ */
 static int mlvfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 {
-    /* try to find the real file on disk */
-    char *resolved_filename = mlvfs_resolve_virtual(path);
-
-    /* it's a virtual file */
-    if (!resolved_filename)
-    {
-        return -EPERM;
-    }
-
-    check_mld_exists(resolved_filename);
-
-#if _WIN32
-    /* on windows only these modes are allowed */
-    mode &= (_S_IREAD | _S_IWRITE);
-#endif
-
-    int fd = creat(resolved_filename, mode);
-    free(resolved_filename);
-
-    if (fd < 0)
-    {
-        return -errno;
-    }
-
-    /* always close file after read/write operations. else deleting etc will fail on windows */
-    close(fd);
-
-    return 0;
+    return -EROFS;
 }
 
 static int mlvfs_fsync(const char *path, int isdatasync, struct fuse_file_info *fi)
@@ -1642,20 +1626,7 @@ static int mlvfs_fsync(const char *path, int isdatasync, struct fuse_file_info *
 
 static int mlvfs_mkdir(const char *path, mode_t mode)
 {
-    int result = -ENOENT;
-    char * real_path = mlvfs_resolve_virtual(path);
-    if(real_path)
-    {
-        check_mld_exists(real_path);
-#ifdef _WIN32
-        mkdir(real_path);
-#else
-        mkdir(real_path, mode);
-#endif
-        free(real_path);
-        result = 0;
-    }
-    return result;
+    return -EROFS;
 }
 
 static int mlvfs_release(const char *path, struct fuse_file_info *fi)
@@ -1672,100 +1643,27 @@ static int mlvfs_release(const char *path, struct fuse_file_info *fi)
 
 static int mlvfs_rename(const char *from, const char *to)
 {
-    int result = -ENOENT;
-    char * real_from = mlvfs_resolve_virtual(from);
-    char * real_to = mlvfs_resolve_virtual(to);
-
-    if(real_from && real_to)
-    {
-        dbg_printf("real_path '%s' -> '%s'\n", real_from, real_to);
-        rename(real_from, real_to);
-        result = 0;
-    }
-    if (real_from)
-    {
-        free(real_from);
-    }
-    if (real_to)
-    {
-        free(real_to);
-    }
-    return result;
+    return -EROFS;
 }
 
 static int mlvfs_rmdir(const char *path)
 {
-    int result = -ENOENT;
-    char * real_path = mlvfs_resolve_virtual(path);
-    if (real_path)
-    {
-        dbg_printf("real_path '%s'\n", real_path);
-        rmdir(real_path);
-        free(real_path);
-        result = 0;
-    }
-    return result;
+    return -EROFS;
 }
 
 static int mlvfs_unlink(const char *path)
 {
-    int result = -EPERM;
-    char * real_path = mlvfs_resolve_virtual(path);
-    if (real_path)
-    {
-        dbg_printf("real_path '%s'\n", real_path);
-#ifdef _WIN32
-        _unlink(real_path);
-#else
-        unlink(real_path);
-#endif
-        free(real_path);
-        result = 0;
-    }
-    return result;
+    return -EROFS;
 }
 
 static int mlvfs_truncate(const char *path, FUSE_OFF_T offset)
 {
-    int result = -EPERM;
-    char * real_path = mlvfs_resolve_virtual(path);
-    if(real_path)
-    {
-        dbg_printf("real_path '%s'\n", real_path);
-        truncate(real_path, offset);
-        free(real_path);
-        result = 0;
-    }
-    return result;
+    return -EROFS;
 }
 
 static int mlvfs_write(const char *path, const char *buf, size_t size, FUSE_OFF_T offset, struct fuse_file_info *fi)
 {
-    /* files are always opened/closed before/after any file operation */
-    char *resolved_filename = mlvfs_resolve_virtual(path);
-    int fd = -1;
-
-    if (resolved_filename)
-    {
-        fd = open(resolved_filename, O_RDWR | O_BINARY);
-        free(resolved_filename);
-    }
-
-    if (fd < 0)
-    {
-        return -errno;
-    }
-
-    int res = (int)pwrite(fd, buf, size, offset);
-    if (res < 0)
-    {
-        res = -errno;
-    }
-
-    /* always close file after read/write operations. else deleting etc will fail on windows */
-    close(fd);
-
-    return res;
+    return -EROFS;
 }
 
 static int mlvfs_statfs(const char *path, struct statvfs *stat)

@@ -23,6 +23,7 @@ final class LegacyMigrationTests: XCTestCase {
         XCTAssertEqual(new.integer(forKey: "dualISOMode"), 2)
         XCTAssertEqual(new.object(forKey: "fixBadPixels") as? Bool, false)
         XCTAssertNil(new.object(forKey: "fixFocusPixels"))
+        XCTAssertNil(new.object(forKey: "mainWindowShownOnce"))
         XCTAssertTrue(new.bool(forKey: LegacyMigration.migratedKey))
         // Second run: lastFolder present, nothing is overwritten.
         old.set(Data([9]), forKey: "lastFolder")

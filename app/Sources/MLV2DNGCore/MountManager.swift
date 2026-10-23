@@ -210,7 +210,10 @@ public actor MountManager {
     /// One-time cleanup of the previous app's mount root: unmounts stale mount
     /// points inside it, removes empty child directories, then the root itself
     /// if it ended up empty (`rmdir` only, never recursive).
+    /// Does nothing unless `root` is a real directory (a symlink is never followed).
     public func cleanLegacyRoot(_ root: URL) async {
+        var st = stat()
+        guard lstat(root.path, &st) == 0, (st.st_mode & S_IFMT) == S_IFDIR else { return }
         try? await cleanStaleMounts(in: root)
         rmdir(root.path)
     }

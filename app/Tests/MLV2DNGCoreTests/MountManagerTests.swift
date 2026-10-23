@@ -351,6 +351,53 @@ final class MountManagerTests: XCTestCase {
         XCTAssertEqual(mounted.count, 1)
     }
 
+    func testCleanLegacyRootRemovesOnlySafeThings() async throws {
+        let fm = FileManager.default
+        let legacy = fm.temporaryDirectory.appendingPathComponent("Legacy-\(UUID().uuidString)", isDirectory: true)
+        let mount = legacy.appendingPathComponent("Shoot")
+        let empty = legacy.appendingPathComponent("Vide")
+        let full = legacy.appendingPathComponent("Mes fichiers")
+        for d in [mount, empty, full] { try fm.createDirectory(at: d, withIntermediateDirectories: true) }
+        fm.createFile(atPath: full.appendingPathComponent("note.txt").path, contents: Data("x".utf8))
+        unmounter.markMounted(mount)
+        defer { try? fm.removeItem(at: legacy) }
+
+        await makeManager().cleanLegacyRoot(legacy)
+
+        XCTAssertEqual(unmounter.unmounted, [mount.standardizedFileURL.path])
+        XCTAssertFalse(fm.fileExists(atPath: mount.path))
+        XCTAssertFalse(fm.fileExists(atPath: empty.path))
+        XCTAssertTrue(fm.fileExists(atPath: full.appendingPathComponent("note.txt").path))
+        XCTAssertTrue(fm.fileExists(atPath: legacy.path)) // not empty: root kept
+    }
+
+    func testCleanLegacyRootRemovesEmptyRoot() async throws {
+        let fm = FileManager.default
+        let legacy = fm.temporaryDirectory.appendingPathComponent("Legacy-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: legacy, withIntermediateDirectories: true)
+        await makeManager().cleanLegacyRoot(legacy)
+        XCTAssertFalse(fm.fileExists(atPath: legacy.path))
+    }
+
+    func testCleanLegacyRootIgnoresSymlinkedRoot() async throws {
+        let fm = FileManager.default
+        let target = fm.temporaryDirectory.appendingPathComponent("Target-\(UUID().uuidString)", isDirectory: true)
+        let sub = target.appendingPathComponent("Sous-dossier")
+        let mount = target.appendingPathComponent("Shoot")
+        for d in [sub, mount] { try fm.createDirectory(at: d, withIntermediateDirectories: true) }
+        let link = fm.temporaryDirectory.appendingPathComponent("LegacyLink-\(UUID().uuidString)")
+        try fm.createSymbolicLink(at: link, withDestinationURL: target)
+        unmounter.markMounted(mount)
+        defer { try? fm.removeItem(at: link); try? fm.removeItem(at: target) }
+
+        await makeManager().cleanLegacyRoot(link)
+
+        XCTAssertEqual(unmounter.unmounted, [])
+        XCTAssertTrue(fm.fileExists(atPath: sub.path))
+        XCTAssertTrue(fm.fileExists(atPath: mount.path))
+        XCTAssertNotNil(try? fm.destinationOfSymbolicLink(atPath: link.path))
+    }
+
     func testCleanStaleMountsIgnoresSymlinkedChildren() async throws {
         let volume = FileManager.default.temporaryDirectory
             .appendingPathComponent("FakeVolume-\(UUID().uuidString)", isDirectory: true)

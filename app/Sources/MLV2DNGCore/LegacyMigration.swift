@@ -7,7 +7,7 @@ public enum LegacyMigration {
     public static let legacySuiteName = "net.mlvswitch.app"
     public static let migratedKey = "migratedFromMLVSwitch"
     static let keys = ["lastFolder", "mountedShoots", "dualISOMode", "fixBadPixels",
-                       "fixFocusPixels", "mainWindowShownOnce", "launchAtLoginInitialized"]
+                       "fixFocusPixels", "launchAtLoginInitialized"]
 
     /// Copies the saved state when `defaults` has no `lastFolder` yet.
     /// Returns true when a migration happened.

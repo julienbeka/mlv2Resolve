@@ -57,4 +57,27 @@ final class MountPathsTests: XCTestCase {
         XCTAssertEqual(p.mountPoint(for: shoot("  ", volume: "X"), alreadyMounted: [:]).lastPathComponent, "Tournage")
         XCTAssertEqual(p.mountPoint(for: shoot(".hid", volume: "X"), alreadyMounted: [:]).lastPathComponent, "_hid")
     }
+
+    func testNFDAndNFCNamesGiveSamePath() {
+        let p = MountPaths(root: root)
+        let nfc = "Tournage \u{E9}t\u{E9}"
+        let nfd = "Tournage e\u{301}te\u{301}"
+        let a = p.mountPoint(for: shoot(nfc, volume: "SSD"), alreadyMounted: [:])
+        let b = p.mountPoint(for: shoot(nfd, volume: "SSD"), alreadyMounted: [:])
+        XCTAssertEqual(Array(a.path.utf8), Array(b.path.utf8))
+    }
+
+    func testCaseOnlyDifferenceIsACollision() {
+        let p = MountPaths(root: root)
+        let a = shoot("Tournage", volume: "SSD")
+        let b = shoot("tournage", volume: "Backup")
+        XCTAssertEqual(p.mountPoint(for: b, alreadyMounted: [a: root.appendingPathComponent("Tournage")]),
+                       root.appendingPathComponent("tournage (Backup)"))
+    }
+
+    func testEmojiAndAccentName() {
+        let p = MountPaths(root: root)
+        let u = p.mountPoint(for: shoot("Tournage e\u{301}te\u{301} 2026 \u{1F3AC}", volume: "SSD"), alreadyMounted: [:])
+        XCTAssertEqual(u, root.appendingPathComponent("Tournage \u{E9}t\u{E9} 2026 \u{1F3AC}"))
+    }
 }

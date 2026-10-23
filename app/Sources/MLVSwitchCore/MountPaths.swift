@@ -14,6 +14,8 @@ public struct MountPaths: Sendable {
     }
 
     /// Pure: no filesystem access.
+    /// Folder identity is by standardized file URL; callers must pass URLs as
+    /// produced by ShootScanner (symlinks are not resolved).
     public func mountPoint(for shoot: Shoot, alreadyMounted: [Shoot: URL]) -> URL {
         let key = shoot.folder.standardizedFileURL
         if let existing = alreadyMounted.first(where: { $0.key.folder.standardizedFileURL == key })?.value {
@@ -22,7 +24,10 @@ public struct MountPaths: Sendable {
         let taken = Set(alreadyMounted.filter { $0.key.folder.standardizedFileURL != key }
             .map { $0.value.standardizedFileURL.path })
         func url(_ name: String) -> URL { root.appendingPathComponent(name) }
-        func isFree(_ name: String) -> Bool { !taken.contains(url(name).standardizedFileURL.path) }
+        // Case-insensitive (default APFS) and normalization-insensitive keys.
+        func key(_ path: String) -> String { path.precomposedStringWithCanonicalMapping.lowercased() }
+        let takenKeys = Set(taken.map(key))
+        func isFree(_ name: String) -> Bool { !takenKeys.contains(key(url(name).standardizedFileURL.path)) }
 
         let base = Self.sanitize(shoot.name)
         if isFree(base) { return url(base) }
@@ -39,6 +44,7 @@ public struct MountPaths: Sendable {
         var s = name.replacingOccurrences(of: "/", with: "-")
             .replacingOccurrences(of: ":", with: "-")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+            .precomposedStringWithCanonicalMapping
         if s.isEmpty { s = fallback }
         if s.hasPrefix(".") { s = "_" + s.dropFirst() }
         return s

@@ -58,10 +58,10 @@ final class AppCore {
         Task { await state.restore() }
     }
 
-    /// Quit: unmount everything (bounded to 10 s), keeping the saved list so
-    /// the next launch remounts the same shoots.
+    /// Quit: force-unmount everything this process mounted (bounded to 10 s),
+    /// whether or not `start()` ran, keeping the saved list so the next
+    /// launch remounts the same shoots.
     func shutdown() {
-        guard started else { return }
         let manager = self.manager
         let done = DispatchSemaphore(value: 0)
         Task.detached {

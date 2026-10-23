@@ -160,6 +160,7 @@ struct OnboardingView: View {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var window: NSWindow?
     private var settingsWindow: NSWindow?
+    private var backgroundCheck: Timer?
     private let model = OnboardingModel()
     static weak var shared: AppDelegate?
 
@@ -182,24 +183,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         AppDelegate.shared = self
         LaunchAtLogin.initializeIfNeeded()
         guard model.state != .ready else { return AppCore.shared.start() }
-        let hosting = NSHostingController(rootView: OnboardingView(model: model))
-        let w = NSWindow(contentViewController: hosting)
-        w.title = "MLV Switch"
-        w.styleMask = [.titled, .closable]
-        w.delegate = self
-        w.setContentSize(hosting.view.fittingSize)
-        let mouse = NSEvent.mouseLocation
-        let screen = NSScreen.main ?? NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.screens[0]
-        let vf = screen.visibleFrame
-        w.setFrameOrigin(NSPoint(x: vf.midX - w.frame.width / 2, y: vf.midY - w.frame.height / 2))
-        window = w
-        model.onReady = { [weak self] in
-            self?.window?.close()
-            AppCore.shared.start()
+        // FUSE-T missing: the menu shows the alert icon and « Installer FUSE-T… »; closing the
+        // onboarding window keeps a quiet background check that starts the app once ready.
+        AppCore.shared.state.needsFuseT = true
+        NSLog("MLV Switch: FUSE-T not ready (\(String(describing: model.state))), waiting")
+        model.onReady = { [weak self] in self?.becomeReady() }
+        startBackgroundCheck()
+        showOnboarding()
+    }
+
+    /// Opens (or brings back) the FUSE-T onboarding window.
+    func showOnboarding() {
+        if window == nil {
+            let hosting = NSHostingController(rootView: OnboardingView(model: model))
+            let w = NSWindow(contentViewController: hosting)
+            w.title = "MLV Switch"
+            w.styleMask = [.titled, .closable]
+            w.isReleasedWhenClosed = false
+            w.delegate = self
+            w.setContentSize(hosting.view.fittingSize)
+            let mouse = NSEvent.mouseLocation
+            let screen = NSScreen.main ?? NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.screens[0]
+            let vf = screen.visibleFrame
+            w.setFrameOrigin(NSPoint(x: vf.midX - w.frame.width / 2, y: vf.midY - w.frame.height / 2))
+            window = w
         }
         model.startPolling()
-        w.makeKeyAndOrderFront(nil)
+        window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Every 5 s, off the main thread, while FUSE-T is not ready.
+    private func startBackgroundCheck() {
+        backgroundCheck?.invalidate()
+        backgroundCheck = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
+            Task.detached {
+                guard OnboardingSupport.currentState() == .ready else { return }
+                await MainActor.run { AppDelegate.shared?.becomeReady() }
+            }
+        }
+    }
+
+    /// FUSE-T became ready (onboarding poll or background check): start once.
+    func becomeReady() {
+        guard AppCore.shared.state.needsFuseT else { return }
+        backgroundCheck?.invalidate()
+        backgroundCheck = nil
+        model.stopPolling()
+        window?.close()
+        AppCore.shared.state.needsFuseT = false
+        NSLog("MLV Switch: FUSE-T ready, starting")
+        AppCore.shared.start()
     }
 
     func applicationWillTerminate(_ notification: Notification) {

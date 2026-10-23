@@ -25,7 +25,7 @@ func shootTitle(_ s: Shoot) -> String {
 struct MenuLabel: View {
     @ObservedObject var state: AppState
     var body: some View {
-        if state.alert != nil {
+        if state.alert != nil || state.needsFuseT {
             Image(systemName: "exclamationmark.triangle")
         } else {
             HStack(spacing: 2) {
@@ -40,6 +40,10 @@ struct MenuContent: View {
     @ObservedObject var state: AppState
 
     var body: some View {
+        if state.needsFuseT {
+            Button("Installer FUSE-T…") { AppDelegate.shared?.showOnboarding() }
+            Divider()
+        }
         if let alert = state.alert {
             Button("⚠︎ Problème — voir le détail") { showDetail(alert, style: .warning) { state.clearAlert() } }
             Divider()

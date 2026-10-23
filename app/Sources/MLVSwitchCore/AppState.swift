@@ -24,6 +24,9 @@ public final class AppState: ObservableObject {
     @Published public private(set) var mounted: Set<String> = []
     @Published public private(set) var mode: DualISOMode
     @Published public private(set) var alert: String?
+    /// FUSE-T is missing or outdated: the app is not started yet (menu shows the alert icon
+    /// and « Installer FUSE-T… »). Set by the app shell.
+    @Published public var needsFuseT = false
     /// Non-error hint (e.g. anamorphic pixel aspect), shown once per shoot per session.
     @Published public private(set) var info: String?
     /// Applied on the next mount.

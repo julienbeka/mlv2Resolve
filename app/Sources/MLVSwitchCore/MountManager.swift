@@ -449,16 +449,29 @@ final class FoundationProcess: RunningProcess, @unchecked Sendable {
     }
 }
 
-/// `/sbin/umount` (polite), or `/usr/sbin/diskutil unmount force` when forced.
-/// Each tool is bounded by a timeout so a dead localhost NFS server cannot
+/// `/sbin/umount` (polite), or `/sbin/umount -f` when forced. diskutil is
+/// deliberately not used: it goes through DiskArbitration, which asks running
+/// apps (including this one) to approve the unmount, and deadlocks if the
+/// caller's main thread is busy. Each tool is bounded by a timeout so a dead localhost NFS server cannot
 /// hang the caller indefinitely.
 public struct UmountUnmounter: Unmounter {
     let umountTimeout: TimeInterval
     let forceTimeout: TimeInterval
+    /// Test seam: when set, replaces the real process runner and mount-point check.
+    let runner: (@Sendable (String, [String], TimeInterval) -> Int32?)?
+    let mountCheck: (@Sendable (URL) -> Bool)?
 
     public init(umountTimeout: TimeInterval = 5, forceTimeout: TimeInterval = 10) {
+        self.init(umountTimeout: umountTimeout, forceTimeout: forceTimeout, runner: nil, mountCheck: nil)
+    }
+
+    init(umountTimeout: TimeInterval = 5, forceTimeout: TimeInterval = 10,
+         runner: (@Sendable (String, [String], TimeInterval) -> Int32?)?,
+         mountCheck: (@Sendable (URL) -> Bool)?) {
         self.umountTimeout = umountTimeout
         self.forceTimeout = forceTimeout
+        self.runner = runner
+        self.mountCheck = mountCheck
     }
 
     public func unmount(_ path: URL, force: Bool) throws {
@@ -469,13 +482,14 @@ public struct UmountUnmounter: Unmounter {
             if isMountPoint(path) { throw MountError.unmountFailed(path) }
             return
         }
-        _ = run("/usr/sbin/diskutil", ["unmount", "force", path.path], timeout: forceTimeout)
+        _ = run("/sbin/umount", ["-f", path.path], timeout: forceTimeout)
         if isMountPoint(path) { throw MountError.unmountFailed(path) }
     }
 
     /// True when `path` is the root of a mounted file system (`statfs`
     /// f_mntonname). Symlinks are never mount points here.
     public func isMountPoint(_ path: URL) -> Bool {
+        if let mountCheck { return mountCheck(path) }
         var st = stat()
         guard lstat(path.path, &st) == 0, (st.st_mode & S_IFMT) != S_IFLNK else { return false }
         guard let real = realpath(path.path, nil) else { return false }
@@ -491,6 +505,7 @@ public struct UmountUnmounter: Unmounter {
     /// Exit status, or nil if the tool could not start or timed out (it is
     /// then terminated, and killed if it ignores SIGTERM).
     private func run(_ tool: String, _ args: [String], timeout: TimeInterval) -> Int32? {
+        if let runner { return runner(tool, args, timeout) }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: tool)
         p.arguments = args

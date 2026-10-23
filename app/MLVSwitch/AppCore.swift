@@ -58,16 +58,10 @@ final class AppCore {
         Task { await state.restore() }
     }
 
-    /// Quit: force-unmount everything this process mounted (bounded to 10 s),
-    /// whether or not `start()` ran, keeping the saved list so the next
-    /// launch remounts the same shoots.
-    func shutdown() {
-        let manager = self.manager
-        let done = DispatchSemaphore(value: 0)
-        Task.detached {
-            await manager.unmountAll(force: true) // quitting: Resolve may still hold files
-            done.signal()
-        }
-        _ = done.wait(timeout: .now() + 10)
+    /// Quit: force-unmount everything this process mounted, keeping the saved
+    /// list so the next launch remounts the same shoots. Async so the main
+    /// thread stays free (nothing here may block it); callers bound it.
+    func shutdown() async {
+        await manager.unmountAll(force: true) // quitting: Resolve may still hold files
     }
 }

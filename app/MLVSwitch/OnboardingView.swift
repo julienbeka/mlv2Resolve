@@ -277,9 +277,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         showMainWindowIfFirstLaunch()
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
-        AppCore.shared.shutdown()
+    /// Unmount asynchronously (terminateLater) so the main thread is never
+    /// blocked while unmount machinery may need it; 10 s safety timeout.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        final class Once: @unchecked Sendable { let lock = NSLock(); var done = false }
+        let once = Once()
+        let reply: @Sendable () -> Void = {
+            once.lock.lock(); defer { once.lock.unlock() }
+            guard !once.done else { return }
+            once.done = true
+            DispatchQueue.main.async { NSApp.reply(toApplicationShouldTerminate: true) }
+        }
+        Task { await AppCore.shared.shutdown(); reply() }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 10) { reply() }
+        return .terminateLater
     }
+
+    func applicationWillTerminate(_ notification: Notification) {}
 
     func windowWillClose(_ notification: Notification) {
         model.stopPolling()

@@ -392,6 +392,22 @@ final class MountManagerTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: volume.path))
     }
 
+    func testForceUnmountUsesUmountDashF() throws {
+        final class Calls: @unchecked Sendable { var list: [(String, [String])] = [] }
+        let calls = Calls()
+        let mounted = NSLock()
+        nonisolated(unsafe) var isMounted = true
+        let u = UmountUnmounter(runner: { tool, args, _ in
+            mounted.lock(); defer { mounted.unlock() }
+            calls.list.append((tool, args)); isMounted = false; return 0
+        }, mountCheck: { _ in mounted.lock(); defer { mounted.unlock() }; return isMounted })
+        let p = URL(fileURLWithPath: "/tmp/x-mount")
+        try u.unmount(p, force: true)
+        XCTAssertEqual(calls.list.count, 1)
+        XCTAssertEqual(calls.list[0].0, "/sbin/umount")
+        XCTAssertEqual(calls.list[0].1, ["-f", "/tmp/x-mount"])
+    }
+
     func testRealIsMountPointIgnoresSymlinks() throws {
         let u = UmountUnmounter()
         XCTAssertTrue(u.isMountPoint(URL(fileURLWithPath: "/")))

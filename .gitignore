@@ -1,0 +1,10 @@
+*.MLV
+*.M0?
+build/
+.superpowers/
+*.gcsv
+*.mp4
+*.motion.csv
+poc/out/
+.DS_Store
+*.bin

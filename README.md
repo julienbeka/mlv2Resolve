@@ -37,11 +37,15 @@ Le moteur seul : `scripts/build-engine.sh` (écrit `build/engine/mlvfs`).
 Le code propre à ce dépôt (app, scripts, tests, ajouts au moteur) est sous licence
 GPL-3.0-or-later. Voir `LICENSE`.
 
-Le moteur (`engine/mlvfs/`) contient du code tiers :
+Le moteur (`engine/mlvfs/`) contient du code tiers, tout compatible GPL-3.0 :
 
-- MLVFS (David Milligan) : GPL-2.0-or-later, utilisé ici sous GPL-3.0-or-later.
-- Code porté de MLV App (cartes de focus pixels, décodeur LJ92) : GPL-3.0.
-- Deux bibliothèques fournies avec MLVFS sont **GPL-2.0-only** : `mongoose/` (serveur web de
-  l'interface de réglage) et `slre/` (expressions régulières). GPL-2.0-only n'est pas compatible
-  avec GPL-3.0 : elles doivent être remplacées (ou relicenciées) **avant toute distribution publique
-  d'un binaire**. Suivi : tâche de suivi « remplacer mongoose et slre » (non faite en v1).
+- MLVFS (David Milligan) et le code Magic Lantern qu'il reprend (dual ISO, chroma smoothing,
+  pattern noise…) : GPL-2.0-or-later, utilisé ici sous GPL-3.0-or-later.
+- Code porté de MLV App (cartes de focus pixels, décodeur LJ92) et AMaZE (RawTherapee) : GPL-3.0.
+- LZMA SDK (Igor Pavlov) : domaine public. En-têtes de tags DNG : licence Adobe DNG SDK (permissive).
+
+Aucun composant GPL-2.0-only : le serveur web `mongoose/` (interface de réglage) et `slre/`
+(expressions régulières), fournis avec MLVFS sous GPL-2.0-only, ont été retirés. Le mode dual ISO
+se change désormais par signal (SIGUSR1 = montage fluide, SIGUSR2 = qualité étalonnage) et la
+correspondance des noms de dossiers Resolve utilise `<regex.h>` POSIX. Le binaire `mlvfs` (et donc
+l'application) est distribuable sous **GPL-3.0**.

@@ -40,11 +40,22 @@ public final class AppState: ObservableObject {
     private var eventTask: Task<Void, Never>?
     private var infoShown: Set<String> = []
     private var refreshHintShown = false
+    /// Back-off before each automatic relaunch of a crashed engine.
+    private let restartDelays: [Duration]
+    /// A crash this long after the previous one starts a fresh retry budget.
+    private let restartWindow: Duration
+    /// Consecutive crashes per shoot key, with the time of the last one.
+    private var crashes: [String: (count: Int, last: ContinuousClock.Instant)] = [:]
+    private var restartTasks: [String: Task<Void, Never>] = [:]
 
-    public init(manager: MountManager, defaults: UserDefaults, scan: @escaping (URL) throws -> [Shoot]) {
+    public init(manager: MountManager, defaults: UserDefaults, scan: @escaping (URL) throws -> [Shoot],
+                restartDelays: [Duration] = [.seconds(1), .seconds(5)],
+                restartWindow: Duration = .seconds(60)) {
         self.manager = manager
         self.defaults = defaults
         self.scan = scan
+        self.restartDelays = restartDelays
+        self.restartWindow = restartWindow
         mode = DualISOMode(rawValue: defaults.integer(forKey: Key.dualISOMode)) ?? .montageFluide
         if defaults.object(forKey: Key.fixBadPixels) != nil { fixBadPixels = defaults.bool(forKey: Key.fixBadPixels) }
         if defaults.object(forKey: Key.fixFocusPixels) != nil { fixFocusPixels = defaults.bool(forKey: Key.fixFocusPixels) }
@@ -75,6 +86,7 @@ public final class AppState: ObservableObject {
 
     public func toggle(_ shoot: Shoot) async {
         let k = Self.key(shoot.folder)
+        cancelRestart(k)
         if mounted.contains(k) {
             do {
                 try await manager.unmount(shoot)
@@ -90,6 +102,8 @@ public final class AppState: ObservableObject {
 
     /// Unmounts every mounted shoot, whatever folder it came from.
     public func unmountAll() async {
+        // Pending relaunches of crashed engines are abandoned: the user wants everything off.
+        for k in Array(restartTasks.keys) { cancelRestart(k); saved.removeAll { $0 == k } }
         var failed: [String] = []
         for shoot in await manager.mounted.keys {
             let k = Self.key(shoot.folder)
@@ -140,6 +154,7 @@ public final class AppState: ObservableObject {
 
     public func volumeWillUnmount(_ volume: URL) async {
         let prefix = Self.prefix(volume)
+        for k in Array(restartTasks.keys) where k.hasPrefix(prefix) { cancelRestart(k) }
         let affected = mounted.filter { $0.hasPrefix(prefix) }
         guard !affected.isEmpty else { return }
         // Drop them first so exit events during the unplug are not reported as crashes.
@@ -161,7 +176,14 @@ public final class AppState: ObservableObject {
         set { defaults.set(newValue, forKey: Key.mountedShoots) }
     }
 
-    static func key(_ url: URL) -> String { url.standardizedFileURL.path }
+    /// `standardizedFileURL` drops a leading `/private` only while the path
+    /// exists, so strip it explicitly: the key must not change when a folder
+    /// disappears (unplugged disk, deleted folder).
+    static func key(_ url: URL) -> String {
+        var p = url.standardizedFileURL.path
+        for d in ["/var/", "/tmp/", "/etc/"] where p.hasPrefix("/private" + d) { p.removeFirst("/private".count) }
+        return p
+    }
     static func prefix(_ volume: URL) -> String {
         let p = key(volume)
         return p.hasSuffix("/") ? p : p + "/"
@@ -231,10 +253,61 @@ public final class AppState: ObservableObject {
     private func handle(_ event: MountEvent) {
         switch event {
         case let .exited(shoot, status):
-            // Only report shoots we consider mounted (startup failures are alerted by `mount`).
+            // Only shoots we consider mounted (startup failures are alerted by `mount`,
+            // unplugged disks are dropped from `mounted` before their engines stop).
             guard mounted.remove(Self.key(shoot.folder)) != nil else { return }
-            alert = "Le montage de « \(shoot.name) » s'est arrêté (code \(status))."
+            engineCrashed(shoot, status: status)
         }
+    }
+
+    /// Supervision: relaunch a crashed engine after 1 s, then 5 s; alert only
+    /// when those relaunches fail too. A shoot whose folder is gone (disk
+    /// unplugged) is left to the unplug flow.
+    private func engineCrashed(_ shoot: Shoot, status: Int32) {
+        let k = Self.key(shoot.folder)
+        guard saved.contains(k), FileManager.default.fileExists(atPath: k) else {
+            restartTasks[k] = nil
+            crashes[k] = nil
+            return
+        }
+        let now = ContinuousClock.now
+        var n = crashes[k].map { now - $0.last < restartWindow ? $0.count : 0 } ?? 0
+        guard n < restartDelays.count else {
+            crashes[k] = nil
+            restartTasks[k] = nil
+            alert = "Le montage de « \(shoot.name) » s'est arrêté et n'a pas pu être relancé (code \(status))."
+            return
+        }
+        let delay = restartDelays[n]
+        n += 1
+        crashes[k] = (n, now)
+        restartTasks[k] = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, let self else { return }
+            await self.relaunch(shoot)
+        }
+    }
+
+    private func relaunch(_ shoot: Shoot) async {
+        let k = Self.key(shoot.folder)
+        restartTasks[k] = nil
+        guard saved.contains(k), !mounted.contains(k) else { return }
+        guard FileManager.default.fileExists(atPath: k) else { crashes[k] = nil; return }
+        do {
+            try await manager.mount(shoot, mode: mode, fixBadPixels: fixBadPixels, fixFocusPixels: fixFocusPixels)
+            mounted.insert(k)
+        } catch {
+            if case let .exitedDuringStartup(status)? = error as? MountError {
+                engineCrashed(shoot, status: status)
+            } else {
+                engineCrashed(shoot, status: -1)
+            }
+        }
+    }
+
+    private func cancelRestart(_ k: String) {
+        restartTasks.removeValue(forKey: k)?.cancel()
+        crashes[k] = nil
     }
 
     static func reason(_ error: Error) -> String {

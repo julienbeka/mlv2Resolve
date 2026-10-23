@@ -225,6 +225,11 @@ final class MountManagerTests: XCTestCase {
         try XCTUnwrap(launcher.processes.first).exit(11)
         let event = await firstEvent(m, within: 2)
         XCTAssertEqual(event, .exited(s, status: 11))
+        // The event is sent before the force unmount runs: wait for the cleanup.
+        let deadline = Date().addingTimeInterval(2)
+        while unmounter.unmounted.isEmpty || FileManager.default.fileExists(atPath: url.path), Date() < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
         let mounted = await m.mounted
         XCTAssertTrue(mounted.isEmpty)
         XCTAssertEqual(unmounter.unmounted, [url.standardizedFileURL.path])

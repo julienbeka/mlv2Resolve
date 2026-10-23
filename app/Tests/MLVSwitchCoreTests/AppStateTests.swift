@@ -47,8 +47,10 @@ final class AppStateTests: XCTestCase {
                             readinessTimeout: .seconds(2), pollInterval: .milliseconds(5))
     }
 
-    func makeState(_ manager: MountManager? = nil) -> AppState {
-        AppState(manager: manager ?? makeManager(), defaults: defaults, scan: ShootScanner.scan)
+    func makeState(_ manager: MountManager? = nil,
+                   restartDelays: [Duration] = [.milliseconds(10), .milliseconds(30)]) -> AppState {
+        AppState(manager: manager ?? makeManager(), defaults: defaults, scan: ShootScanner.scan,
+                 restartDelays: restartDelays)
     }
 
     /// Creates `<volume>/<name>/A001.MLV` and returns the shoot folder.
@@ -60,7 +62,7 @@ final class AppStateTests: XCTestCase {
         return dir
     }
 
-    func key(_ url: URL) -> String { url.standardizedFileURL.path }
+    func key(_ url: URL) -> String { AppState.key(url) }
 
     var savedMounts: [String] { defaults.stringArray(forKey: "mountedShoots") ?? [] }
 
@@ -157,18 +159,87 @@ final class AppStateTests: XCTestCase {
 
     // MARK: Extra
 
-    func testEngineCrashRemovesMountKeepsSavedAndAlerts() async throws {
+    func testEngineCrashIsRelaunched() async throws {
         try makeShootFolder("A")
-        let state = makeState()
+        let manager = makeManager()
+        let state = makeState(manager)
         await state.choose(folder: volume)
         await state.toggle(try shoot(state, "A"))
         XCTAssertEqual(state.mounted.count, 1)
 
         try XCTUnwrap(launcher.processes.last).exit(9)
-        await waitUntil { state.mounted.isEmpty }
-        XCTAssertTrue(state.mounted.isEmpty)
-        XCTAssertEqual(state.alert, "Le montage de « A » s'est arrêté (code 9).")
+        await waitUntil { self.launcher.processes.count == 2 && state.mounted.count == 1 }
+        XCTAssertEqual(launcher.processes.count, 2, "engine relaunched")
+        XCTAssertTrue(try XCTUnwrap(launcher.processes.last).isRunning)
+        XCTAssertEqual(state.mounted, [key(volume.appendingPathComponent("A"))])
+        let mounted = await manager.mounted
+        XCTAssertEqual(mounted.count, 1)
+        XCTAssertNil(state.alert, "a successful relaunch is silent")
         XCTAssertEqual(savedMounts, [key(volume.appendingPathComponent("A"))])
+    }
+
+    func testEngineCrashingThreeTimesAlertsAndStaysUnmounted() async throws {
+        try makeShootFolder("A")
+        let state = makeState()
+        await state.choose(folder: volume)
+        await state.toggle(try shoot(state, "A"))
+        for attempt in 1...3 {
+            try XCTUnwrap(launcher.processes.last).exit(9)
+            if attempt < 3 {
+                await waitUntil { self.launcher.processes.count == attempt + 1 && state.mounted.count == 1 }
+                XCTAssertEqual(launcher.processes.count, attempt + 1, "relaunch \(attempt)")
+                XCTAssertNil(state.alert)
+            }
+        }
+        await waitUntil { state.alert != nil }
+        XCTAssertEqual(state.alert, "Le montage de « A » s'est arrêté et n'a pas pu être relancé (code 9).")
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(launcher.processes.count, 3, "no relaunch after two retries")
+        XCTAssertTrue(state.mounted.isEmpty)
+        XCTAssertEqual(savedMounts, [key(volume.appendingPathComponent("A"))], "kept for the next launch")
+    }
+
+    func testRelaunchThatFailsAtStartupCountsAsRetry() async throws {
+        try makeShootFolder("A")
+        let state = makeState()
+        await state.choose(folder: volume)
+        await state.toggle(try shoot(state, "A"))
+        launcher.mountsAppear.set(false) // relaunches never come up
+        try XCTUnwrap(launcher.processes.last).exit(4)
+        await waitUntil(8) { state.alert != nil }
+        XCTAssertTrue(state.alert?.hasPrefix("Le montage de « A » s'est arrêté et n'a pas pu être relancé") ?? false,
+                      state.alert ?? "nil")
+        XCTAssertEqual(launcher.processes.count, 3)
+        XCTAssertTrue(state.mounted.isEmpty)
+    }
+
+    func testCrashWithFolderGoneIsNotRetried() async throws {
+        let a = try makeShootFolder("A")
+        let state = makeState()
+        await state.choose(folder: volume)
+        await state.toggle(try shoot(state, "A"))
+        try FileManager.default.removeItem(at: a) // the disk went away under the engine
+        try XCTUnwrap(launcher.processes.last).exit(6)
+        await waitUntil { state.mounted.isEmpty }
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertTrue(state.mounted.isEmpty)
+        XCTAssertEqual(launcher.processes.count, 1, "no relaunch when the folder is gone")
+        XCTAssertNil(state.alert, "left to the unplug flow")
+        XCTAssertEqual(savedMounts, [key(a)], "kept for a replug")
+    }
+
+    func testUnmountAllCancelsPendingRelaunch() async throws {
+        try makeShootFolder("A")
+        let state = makeState(restartDelays: [.milliseconds(200), .milliseconds(200)])
+        await state.choose(folder: volume)
+        await state.toggle(try shoot(state, "A"))
+        try XCTUnwrap(launcher.processes.last).exit(9)
+        await waitUntil { state.mounted.isEmpty }
+        await state.unmountAll()
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertEqual(launcher.processes.count, 1)
+        XCTAssertTrue(state.mounted.isEmpty)
+        XCTAssertTrue(savedMounts.isEmpty)
     }
 
     func testMountFailureAlertsAndDoesNotSave() async throws {

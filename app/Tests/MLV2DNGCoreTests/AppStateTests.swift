@@ -11,7 +11,6 @@ final class AppStateTests: XCTestCase {
     var defaults: UserDefaults!
     var launcher: FakeLauncher!
     var unmounter: FakeUnmounter!
-    var http: RecordingHTTP!
 
     override func setUp() async throws {
         let fm = FileManager.default
@@ -25,7 +24,6 @@ final class AppStateTests: XCTestCase {
         defaults = UserDefaults(suiteName: suite)
         unmounter = FakeUnmounter()
         launcher = FakeLauncher(unmounter: unmounter)
-        http = RecordingHTTP()
     }
 
     override func tearDown() async throws {
@@ -35,16 +33,12 @@ final class AppStateTests: XCTestCase {
 
     // MARK: Helpers
 
-    func makeManager(isPortFree: @escaping @Sendable (Int) -> Bool = { _ in true }) -> MountManager {
-        let http = self.http!
-        let busy = launcher.busyPorts
-        return MountManager(mlvfs: URL(fileURLWithPath: "/opt/engine/mlvfs"),
+    func makeManager(readinessTimeout: Duration = .seconds(2)) -> MountManager {
+        MountManager(mlvfs: URL(fileURLWithPath: "/opt/engine/mlvfs"),
                             fpmDir: URL(fileURLWithPath: "/opt/engine/fpm", isDirectory: true),
                             indexDir: tmp.appendingPathComponent("index", isDirectory: true),
                             paths: MountPaths(root: mountRoot), launcher: launcher, unmounter: unmounter,
-                            http: { try await http.get($0) },
-                            isPortFree: { !busy.get().contains($0) && isPortFree($0) },
-                            readinessTimeout: .seconds(2), pollInterval: .milliseconds(5))
+                            readinessTimeout: readinessTimeout, pollInterval: .milliseconds(5))
     }
 
     func makeState(_ manager: MountManager? = nil,
@@ -164,7 +158,7 @@ final class AppStateTests: XCTestCase {
         await state.setMode(.qualiteEtalonnage)
         XCTAssertEqual(state.mode, .qualiteEtalonnage)
         XCTAssertEqual(defaults.integer(forKey: "dualISOMode"), 2)
-        XCTAssertTrue(http.requested.contains { $0.absoluteString.hasSuffix("/set_value?dual_iso=2") })
+        XCTAssertEqual(launcher.processes.first?.signals, [SIGUSR2])
         XCTAssertNil(state.alert)
 
         let reloaded = makeState()
@@ -258,11 +252,12 @@ final class AppStateTests: XCTestCase {
 
     func testMountFailureAlertsAndDoesNotSave() async throws {
         try makeShootFolder("A")
-        let state = makeState(makeManager(isPortFree: { _ in false }))
+        launcher.mountsAppear.set(false)
+        let state = makeState(makeManager(readinessTimeout: .milliseconds(100)))
         await state.choose(folder: volume)
         await state.toggle(try shoot(state, "A"))
         XCTAssertTrue(state.mounted.isEmpty)
-        XCTAssertEqual(state.alert, "Impossible de monter « A » : aucun port libre.")
+        XCTAssertEqual(state.alert, "Impossible de monter « A » : le montage n'est pas apparu à temps.")
         XCTAssertTrue(savedMounts.isEmpty)
     }
 
@@ -332,6 +327,17 @@ extension AppStateTests {
 }
 
 extension AppStateTests {
+    func testModeSwitchFailureAlertsWithShootName() async throws {
+        try makeShootFolder("A")
+        let state = makeState()
+        await state.choose(folder: volume)
+        await state.toggle(try shoot(state, "A"))
+        launcher.processes[0].failsSignals.set(true)
+        await state.setMode(.qualiteEtalonnage)
+        XCTAssertEqual(state.alert, "Le mode dual ISO n'a pas pu être appliqué à : A.")
+        XCTAssertEqual(AppState.reason(MountError.signalFailed(errno: ESRCH)), "le moteur ne répond pas")
+    }
+
     func testQualityModeHintOnce() async {
         let state = makeState()
         await state.setMode(.montageFluide)

@@ -17,16 +17,23 @@ final class FakeProcess: RunningProcess, @unchecked Sendable {
     let args: [String]
     private let state = Locked<(running: Bool, terminated: Bool, onExit: (@Sendable (Int32) -> Void)?)>(
         (true, false, nil))
-    /// Called (before onExit) when the process stops, e.g. to free its fake port.
-    let onDeath: @Sendable () -> Void
+    private let sent = Locked<[Int32]>([])
+    /// When set, `signal` throws even though the process looks alive (it died meanwhile).
+    let failsSignals = Locked(false)
 
-    init(args: [String], onDeath: @escaping @Sendable () -> Void = {}) {
+    init(args: [String]) {
         self.args = args
-        self.onDeath = onDeath
     }
 
     var isRunning: Bool { state.get().running }
     var wasTerminated: Bool { state.get().terminated }
+    /// Signals delivered so far, in order.
+    var signals: [Int32] { sent.get() }
+
+    func signal(_ sig: Int32) throws {
+        guard isRunning, !failsSignals.get() else { throw MountError.signalFailed(errno: ESRCH) }
+        sent.mutate { $0.append(sig) }
+    }
 
     var onExit: (@Sendable (Int32) -> Void)? {
         get { state.get().onExit }
@@ -41,7 +48,6 @@ final class FakeProcess: RunningProcess, @unchecked Sendable {
     /// Simulates dying without the exit callback having run yet.
     func dieSilently() {
         state.mutate { $0.running = false }
-        onDeath()
     }
 
     private func stop(_ code: Int32, terminated: Bool) {
@@ -52,7 +58,6 @@ final class FakeProcess: RunningProcess, @unchecked Sendable {
             return (true, s.onExit)
         }
         guard wasRunning else { return }
-        onDeath()
         handler?(code)
     }
 
@@ -90,13 +95,10 @@ final class FakeUnmounter: Unmounter, @unchecked Sendable {
     }
 }
 
-/// Simulates the engine: a launch makes the mount point appear and binds the
-/// web-GUI port (unless disabled), and process death frees the port.
+/// Simulates the engine: a launch makes the mount point appear (unless disabled).
 final class FakeLauncher: ProcessLauncher, @unchecked Sendable {
     let unmounter: FakeUnmounter
-    let busyPorts = Locked<Set<Int>>([])
     let mountsAppear = Locked(true)
-    let bindsPort = Locked(true)
     private let launched = Locked<[FakeProcess]>([])
 
     init(unmounter: FakeUnmounter) { self.unmounter = unmounter }
@@ -107,27 +109,9 @@ final class FakeLauncher: ProcessLauncher, @unchecked Sendable {
 
     func launch(_ executable: URL, _ args: [String], log: URL?) throws -> any RunningProcess {
         logs.mutate { $0.append(log) }
-        let port = Self.port(in: args)
-        let busy = busyPorts
-        let p = FakeProcess(args: args, onDeath: { if let port { busy.mutate { _ = $0.remove(port) } } })
+        let p = FakeProcess(args: args)
         launched.mutate { $0.append(p) }
         if mountsAppear.get() { unmounter.markMounted(URL(fileURLWithPath: args[0])) }
-        if bindsPort.get(), let port { busyPorts.mutate { _ = $0.insert(port) } }
         return p
-    }
-
-    static func port(in args: [String]) -> Int? {
-        guard let v = args.first(where: { $0.hasPrefix("--port=") }) else { return nil }
-        return v.split(separator: ":").last.flatMap { Int($0) }
-    }
-}
-
-final class RecordingHTTP: @unchecked Sendable {
-    private let urls = Locked<[URL]>([])
-    let failingPorts = Locked<Set<Int>>([])
-    var requested: [URL] { urls.get() }
-    func get(_ url: URL) async throws {
-        urls.mutate { $0.append(url) }
-        if let port = url.port, failingPorts.get().contains(port) { throw URLError(.cannotConnectToHost) }
     }
 }

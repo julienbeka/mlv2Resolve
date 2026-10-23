@@ -12,6 +12,9 @@ public protocol ProcessLauncher: Sendable {
 public protocol RunningProcess: AnyObject, Sendable {
     var isRunning: Bool { get }
     func terminate()
+    /// Sends `sig` to the process. Throws when it cannot be delivered (the
+    /// process is gone).
+    func signal(_ sig: Int32) throws
     /// Called once, from an arbitrary thread, with the exit status.
     var onExit: (@Sendable (Int32) -> Void)? { get set }
 }
@@ -31,17 +34,15 @@ public extension Unmounter {
 }
 
 public enum MountError: Error, Equatable {
-    case noFreePort
     case mountPointBusy(URL)
     case unmountFailed(URL)
     case unmountInProgress(URL)
-    /// The engine exited before the mount and its web GUI were up.
+    /// The engine exited before the mount was up.
     case exitedDuringStartup(status: Int32)
     /// The mount did not appear within the readiness timeout.
     case startupTimedOut(URL)
-    /// The mount appeared but nothing listens on the web-GUI port, so the
-    /// dual ISO mode could not be switched live.
-    case webGUIUnavailable(port: Int)
+    /// The signal could not be delivered to the engine (it is no longer running).
+    case signalFailed(errno: Int32)
 }
 
 public enum MountEvent: Sendable, Equatable {
@@ -55,20 +56,21 @@ public enum MountEvent: Sendable, Equatable {
 /// Owns one supervised `mlvfs -f` process per mounted shoot.
 ///
 /// State lives on the actor; blocking unmount tools run off it. An entry
-/// being unmounted keeps its port and path reserved until the unmount ends.
+/// being unmounted keeps its path reserved until the unmount ends. The dual
+/// ISO mode is switched live by signals: SIGUSR1 = montage fluide (mode 1),
+/// SIGUSR2 = qualité étalonnage (mode 2).
 public actor MountManager {
     /// Actor-confined.
     private final class Entry {
         let id: UUID
         let shoot: Shoot
         let url: URL
-        let port: Int
         let process: any RunningProcess
         let exitStatus: ExitBox
         var unmountTask: Task<Void, Error>?
 
-        init(id: UUID, shoot: Shoot, url: URL, port: Int, process: any RunningProcess, exitStatus: ExitBox) {
-            self.id = id; self.shoot = shoot; self.url = url; self.port = port
+        init(id: UUID, shoot: Shoot, url: URL, process: any RunningProcess, exitStatus: ExitBox) {
+            self.id = id; self.shoot = shoot; self.url = url
             self.process = process; self.exitStatus = exitStatus
         }
 
@@ -82,9 +84,6 @@ public actor MountManager {
     private let paths: MountPaths
     private let launcher: any ProcessLauncher
     private let unmounter: any Unmounter
-    private let http: @Sendable (URL) async throws -> Void
-    private let portRange: ClosedRange<Int>
-    private let isPortFree: @Sendable (Int) -> Bool
     private let readinessTimeout: Duration
     private let pollInterval: Duration
     private var entries: [UUID: Entry] = [:]
@@ -96,9 +95,6 @@ public actor MountManager {
 
     public init(mlvfs: URL, fpmDir: URL, indexDir: URL, logDir: URL? = nil, paths: MountPaths,
                 launcher: any ProcessLauncher, unmounter: any Unmounter,
-                http: @escaping @Sendable (URL) async throws -> Void,
-                portRange: ClosedRange<Int> = 8100...8199,
-                isPortFree: @escaping @Sendable (Int) -> Bool,
                 readinessTimeout: Duration = .seconds(5),
                 pollInterval: Duration = .milliseconds(50)) {
         self.mlvfs = mlvfs
@@ -108,9 +104,6 @@ public actor MountManager {
         self.paths = paths
         self.launcher = launcher
         self.unmounter = unmounter
-        self.http = http
-        self.portRange = portRange
-        self.isPortFree = isPortFree
         self.readinessTimeout = readinessTimeout
         self.pollInterval = pollInterval
         (events, eventSink) = AsyncStream.makeStream(of: MountEvent.self)
@@ -124,11 +117,8 @@ public actor MountManager {
                    uniquingKeysWith: { a, _ in a })
     }
 
-    /// Web-GUI port of a mounted shoot (internal, for tests).
-    func port(for shoot: Shoot) -> Int? { entry(for: shoot)?.port }
-
-    /// Launches mlvfs for `shoot` and returns once the mount and its web GUI
-    /// are up (bounded by the readiness timeout). Mounting an already-mounted
+    /// Launches mlvfs for `shoot` and returns once the mount is up (bounded
+    /// by the readiness timeout). Mounting an already-mounted
     /// shoot (same folder) returns its existing mount point.
     @discardableResult
     public func mount(_ shoot: Shoot, mode: DualISOMode,
@@ -152,13 +142,11 @@ public actor MountManager {
             break
         }
         if unmounter.isMountPoint(url) { throw MountError.mountPointBusy(url) }
-        let port = try freePort()
 
         var args = [url.path, "--mlv-dir=\(shoot.folder.path)", "--resolve-naming"]
         if fixBadPixels { args.append("--bad-pix") }
         if !fixFocusPixels { args.append("--no-focus-pixels") }
         args += [mode.engineFlag, "--fpm-dir=\(fpmDir.path)", "--index-dir=\(indexDir.path)",
-                 "--port=127.0.0.1:\(port)", // web GUI on loopback only
                  "-o", "ro", "-o", "volname=\(Self.volumeName(url.lastPathComponent))",
                  "-f"] // foreground: otherwise mlvfs daemonizes and we lose the process
 
@@ -173,7 +161,7 @@ public actor MountManager {
         }
         let id = UUID()
         let box = ExitBox()
-        entries[id] = Entry(id: id, shoot: shoot, url: url, port: port, process: process, exitStatus: box)
+        entries[id] = Entry(id: id, shoot: shoot, url: url, process: process, exitStatus: box)
         process.onExit = { [weak self] status in
             box.set(status)
             guard let self else { return }
@@ -200,24 +188,16 @@ public actor MountManager {
         for e in Array(entries.values) { try? await unmount(e.shoot, force: force) }
     }
 
-    /// Switches the dual ISO mode of every running mlvfs live. Returns the
-    /// shoots whose engine did not accept the change.
+    /// Switches the dual ISO mode of every running mlvfs live by signalling
+    /// it (SIGUSR1 = montage fluide, SIGUSR2 = qualité étalonnage). Returns
+    /// the shoots whose engine could not be signalled (process gone).
     @discardableResult
     public func setMode(_ mode: DualISOMode) async -> [Shoot] {
-        let targets = entries.values.filter { $0.isLive && $0.unmountTask == nil }.map { ($0.shoot, $0.port) }
-        let http = self.http
-        return await withTaskGroup(of: Shoot?.self) { group in
-            for (shoot, port) in targets {
-                group.addTask {
-                    guard let url = URL(string: "http://127.0.0.1:\(port)/set_value?dual_iso=\(mode.rawValue)")
-                    else { return shoot }
-                    do { try await http(url); return nil } catch { return shoot }
-                }
-            }
-            var failed: [Shoot] = []
-            for await f in group { if let f { failed.append(f) } }
-            return failed
+        var failed: [Shoot] = []
+        for e in entries.values where e.isLive && e.unmountTask == nil {
+            do { try e.process.signal(mode.signal) } catch { failed.append(e.shoot) }
         }
+        return failed
     }
 
     /// Unmounts mount points under `paths.root` that no live process of this
@@ -273,37 +253,27 @@ public actor MountManager {
         return entries.values.first { $0.shoot.folder.standardizedFileURL == key }
     }
 
-    private func freePort() throws -> Int {
-        let used = Set(entries.values.map(\.port))
-        guard let port = portRange.first(where: { !used.contains($0) && isPortFree($0) }) else {
-            throw MountError.noFreePort
-        }
-        return port
-    }
-
-    /// Polls until the mount point is mounted and the web-GUI port is bound.
+    /// Polls until the mount point is mounted.
     /// On failure the entry is torn down before throwing.
     private func awaitReady(_ id: UUID) async throws {
         let clock = ContinuousClock()
         let deadline = clock.now + readinessTimeout
         guard let initial = entries[id] else { throw MountError.exitedDuringStartup(status: -1) }
-        let (url, port, process, box) = (initial.url, initial.port, initial.process, initial.exitStatus)
-        var mountSeen = false
+        let (url, process, box) = (initial.url, initial.process, initial.exitStatus)
         while true {
             let current = entries[id]
             if current == nil || !process.isRunning {
                 if let current, current.unmountTask == nil { await reap(id) }
                 throw MountError.exitedDuringStartup(status: box.get() ?? -1)
             }
-            mountSeen = unmounter.isMountPoint(url)
-            if mountSeen && !isPortFree(port) { return }
+            if unmounter.isMountPoint(url) { return }
             if clock.now >= deadline {
                 if let current, current.unmountTask == nil {
                     let task = Task { try await self.performUnmount(id, force: true) } // our own failed start
                     current.unmountTask = task
                     try? await task.value
                 }
-                throw mountSeen ? MountError.webGUIUnavailable(port: port) : MountError.startupTimedOut(url)
+                throw MountError.startupTimedOut(url)
             }
             try? await Task.sleep(for: pollInterval)
         }
@@ -372,36 +342,6 @@ final class ExitBox: @unchecked Sendable {
 
 // MARK: - Real implementations
 
-public extension MountManager {
-    /// True when nothing listens on 127.0.0.1:`port` (probed with `bind()`).
-    @Sendable static func isLocalPortFree(_ port: Int) -> Bool {
-        let fd = socket(AF_INET, SOCK_STREAM, 0)
-        guard fd >= 0 else { return false }
-        defer { close(fd) }
-        var addr = sockaddr_in()
-        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-        addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = in_port_t(UInt16(port).bigEndian)
-        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
-        let rc = withUnsafePointer(to: &addr) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
-            }
-        }
-        return rc == 0
-    }
-
-    /// Plain GET; throws on transport errors and non-2xx responses.
-    @Sendable static func httpGet(_ url: URL) async throws {
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 3
-        let (_, response) = try await URLSession.shared.data(for: request)
-        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            throw URLError(.badServerResponse)
-        }
-    }
-}
-
 public struct FoundationLauncher: ProcessLauncher {
     public init() {}
 
@@ -440,6 +380,11 @@ final class FoundationProcess: RunningProcess, @unchecked Sendable {
     var isRunning: Bool { lock.withLock { exitStatus == nil } && process.isRunning }
 
     func terminate() { if process.isRunning { process.terminate() } }
+
+    func signal(_ sig: Int32) throws {
+        guard isRunning else { throw MountError.signalFailed(errno: ESRCH) }
+        if kill(process.processIdentifier, sig) != 0 { throw MountError.signalFailed(errno: errno) }
+    }
 
     var onExit: (@Sendable (Int32) -> Void)? {
         get { lock.withLock { handler } }

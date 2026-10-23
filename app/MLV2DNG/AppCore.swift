@@ -34,9 +34,7 @@ final class AppCore {
                                indexDir: indexDir,
                                logDir: EngineLog.defaultDirectory,
                                paths: MountPaths(root: Self.mountRoot),
-                               launcher: FoundationLauncher(), unmounter: UmountUnmounter(),
-                               http: MountManager.httpGet,
-                               isPortFree: MountManager.isLocalPortFree)
+                               launcher: FoundationLauncher(), unmounter: UmountUnmounter())
         state = AppState(manager: manager, defaults: .standard, scan: ShootScanner.scan)
     }
 

@@ -336,13 +336,12 @@ public final class AppState: ObservableObject {
 
     static func reason(_ error: Error) -> String {
         switch error as? MountError {
-        case .noFreePort: return "aucun port libre"
         case .mountPointBusy(let url): return "l'emplacement « \(url.path) » est déjà utilisé"
         case .unmountFailed: return "l'ancien montage n'a pas pu être retiré"
         case .unmountInProgress: return "un démontage est en cours, réessayez"
         case .exitedDuringStartup: return "le moteur s'est arrêté au démarrage"
         case .startupTimedOut: return "le montage n'est pas apparu à temps"
-        case .webGUIUnavailable: return "le moteur ne répond pas"
+        case .signalFailed: return "le moteur ne répond pas"
         case nil: return error.localizedDescription
         }
     }

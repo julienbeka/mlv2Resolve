@@ -103,7 +103,10 @@ final class FakeLauncher: ProcessLauncher, @unchecked Sendable {
 
     var processes: [FakeProcess] { launched.get() }
 
-    func launch(_ executable: URL, _ args: [String]) throws -> any RunningProcess {
+    let logs = Locked<[URL?]>([])
+
+    func launch(_ executable: URL, _ args: [String], log: URL?) throws -> any RunningProcess {
+        logs.mutate { $0.append(log) }
         let port = Self.port(in: args)
         let busy = busyPorts
         let p = FakeProcess(args: args, onDeath: { if let port { busy.mutate { _ = $0.remove(port) } } })

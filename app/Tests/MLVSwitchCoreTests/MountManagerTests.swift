@@ -97,6 +97,21 @@ final class MountManagerTests: XCTestCase {
         XCTAssertEqual(MountManager.volumeName("Tournage été 2026 🎬"), "Tournage été 2026 🎬")
     }
 
+    func testEngineLogNamedAfterMountPoint() async throws {
+        let logDir = root.appendingPathComponent("Logs", isDirectory: true)
+        let http = self.http!
+        let busy = launcher.busyPorts
+        let m = MountManager(mlvfs: mlvfs, fpmDir: fpmDir, indexDir: indexDir, logDir: logDir,
+                             paths: MountPaths(root: root), launcher: launcher, unmounter: unmounter,
+                             http: { try await http.get($0) }, isPortFree: { !busy.get().contains($0) },
+                             readinessTimeout: .seconds(2), pollInterval: .milliseconds(5))
+        try await m.mount(shoot("Jour 1"), mode: .montageFluide)
+        try await m.mount(shoot("Jour 1", folder: "/Volumes/Autre/Jour 1"), mode: .montageFluide)
+        XCTAssertEqual(launcher.logs.get().map { $0?.lastPathComponent }, ["Jour 1.log", "Jour 1 (SSD).log"])
+        XCTAssertEqual(launcher.logs.get().first??.deletingLastPathComponent().standardizedFileURL,
+                       logDir.standardizedFileURL)
+    }
+
     func testQualityModeUsesFullDualISO() async throws {
         let m = makeManager()
         try await m.mount(shoot("A"), mode: .qualiteEtalonnage)
@@ -398,8 +413,9 @@ final class MountManagerTests: XCTestCase {
         try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: engine.path), "build the engine first")
         let index = root.appendingPathComponent(".index", isDirectory: true)
         let mountRoot = root.appendingPathComponent("mounts", isDirectory: true)
+        let logDir = root.appendingPathComponent("Logs", isDirectory: true)
         let m = MountManager(mlvfs: engine, fpmDir: repo.appendingPathComponent("engine/mlvfs/fpm"),
-                             indexDir: index, paths: MountPaths(root: mountRoot),
+                             indexDir: index, logDir: logDir, paths: MountPaths(root: mountRoot),
                              launcher: FoundationLauncher(), unmounter: UmountUnmounter(),
                              http: MountManager.httpGet, isPortFree: MountManager.isLocalPortFree)
         let s = Shoot(name: "Intégration été, n° \(UUID().uuidString.prefix(6))", folder: repo,
@@ -423,6 +439,20 @@ final class MountManagerTests: XCTestCase {
             let dngs = try FileManager.default.contentsOfDirectory(
                 atPath: url.appendingPathComponent(clipDir).path).filter { $0.lowercased().hasSuffix(".dng") }
             XCTAssertEqual(dngs.count, 320)
+            // The engine's stdout+stderr land in the per-shoot log (frame 0 read -> focus pixel line).
+            let first = try XCTUnwrap(dngs.sorted().first)
+            let reader = try FileHandle(forReadingFrom: url.appendingPathComponent(clipDir).appendingPathComponent(first))
+            _ = try reader.read(upToCount: 1 << 20)
+            try reader.close()
+            let logURL = EngineLog.file(in: logDir, name: url.lastPathComponent)
+            var log = ""
+            for _ in 0..<100 where !log.contains("focus pixels:") {
+                log = (try? String(contentsOf: logURL, encoding: .utf8)) ?? ""
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            print("engine log \(logURL.lastPathComponent):\n" + log.split(separator: "\n").prefix(4).joined(separator: "\n"))
+            XCTAssertTrue(log.hasPrefix("=== "), log)
+            XCTAssertTrue(log.contains("focus pixels:"), log)
 
             // A DNG held open (as Resolve does): the user-initiated unmount must not force it.
             let held = try FileHandle(forReadingFrom: url.appendingPathComponent(clipDir)

@@ -5,7 +5,8 @@ import Foundation
 // MARK: - Seams
 
 public protocol ProcessLauncher: Sendable {
-    func launch(_ executable: URL, _ args: [String]) throws -> any RunningProcess
+    /// `log`: file receiving the process's stdout and stderr (appended), or nil to discard them.
+    func launch(_ executable: URL, _ args: [String], log: URL?) throws -> any RunningProcess
 }
 
 public protocol RunningProcess: AnyObject, Sendable {
@@ -77,6 +78,7 @@ public actor MountManager {
     private let mlvfs: URL
     private let fpmDir: URL
     private let indexDir: URL
+    private let logDir: URL?
     private let paths: MountPaths
     private let launcher: any ProcessLauncher
     private let unmounter: any Unmounter
@@ -92,7 +94,7 @@ public actor MountManager {
     public nonisolated let events: AsyncStream<MountEvent>
     private let eventSink: AsyncStream<MountEvent>.Continuation
 
-    public init(mlvfs: URL, fpmDir: URL, indexDir: URL, paths: MountPaths,
+    public init(mlvfs: URL, fpmDir: URL, indexDir: URL, logDir: URL? = nil, paths: MountPaths,
                 launcher: any ProcessLauncher, unmounter: any Unmounter,
                 http: @escaping @Sendable (URL) async throws -> Void,
                 portRange: ClosedRange<Int> = 8100...8199,
@@ -102,6 +104,7 @@ public actor MountManager {
         self.mlvfs = mlvfs
         self.fpmDir = fpmDir
         self.indexDir = indexDir
+        self.logDir = logDir
         self.paths = paths
         self.launcher = launcher
         self.unmounter = unmounter
@@ -162,7 +165,8 @@ public actor MountManager {
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         let process: any RunningProcess
         do {
-            process = try launcher.launch(mlvfs, args)
+            process = try launcher.launch(mlvfs, args,
+                                          log: logDir.map { EngineLog.file(in: $0, name: url.lastPathComponent) })
         } catch {
             removeIfEmpty(url)
             throw error
@@ -389,15 +393,23 @@ public extension MountManager {
 public struct FoundationLauncher: ProcessLauncher {
     public init() {}
 
-    public func launch(_ executable: URL, _ args: [String]) throws -> any RunningProcess {
+    public func launch(_ executable: URL, _ args: [String], log: URL?) throws -> any RunningProcess {
         let p = Process()
         p.executableURL = executable
         p.arguments = args
         p.standardInput = FileHandle.nullDevice
-        p.standardOutput = FileHandle.nullDevice
-        p.standardError = FileHandle.nullDevice
+        // A log that cannot be opened must not prevent the mount.
+        let handle = log.flatMap { try? EngineLog.openForAppend($0) }
+        if let handle {
+            let stamp = ISO8601DateFormatter().string(from: Date())
+            let line = "=== \(stamp) \(executable.lastPathComponent) \(args.joined(separator: " "))\n"
+            try? handle.write(contentsOf: Data(line.utf8))
+        }
+        p.standardOutput = handle ?? FileHandle.nullDevice
+        p.standardError = handle ?? FileHandle.nullDevice
         let running = FoundationProcess(p)
         p.terminationHandler = { [running] proc in running.exited(proc.terminationStatus) }
+        defer { try? handle?.close() } // the child keeps its own descriptors
         try p.run()
         return running
     }

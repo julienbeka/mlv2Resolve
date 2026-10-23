@@ -31,6 +31,7 @@ final class AppCore {
         manager = MountManager(mlvfs: mlvfs,
                                fpmDir: resources.appendingPathComponent("fpm", isDirectory: true),
                                indexDir: indexDir,
+                               logDir: EngineLog.defaultDirectory,
                                paths: MountPaths(root: Self.mountRoot),
                                launcher: FoundationLauncher(), unmounter: UmountUnmounter(),
                                http: MountManager.httpGet,

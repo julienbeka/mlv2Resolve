@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import SwiftUI
+import AppKit
 import ServiceManagement
 import MLVSwitchCore
 
@@ -38,6 +39,11 @@ struct SettingsView: View {
                 Toggle("Corriger les pixels morts", isOn: $state.fixBadPixels)
                 Toggle("Corriger les focus pixels", isOn: $state.fixFocusPixels)
                 Text("Appliqué au prochain montage.").font(.caption).foregroundStyle(.secondary)
+                Button("Ouvrir le dossier des journaux") {
+                    let dir = EngineLog.defaultDirectory
+                    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                    NSWorkspace.shared.open(dir)
+                }
             }
             Section("À propos") {
                 Text("Inspiré de Switch par Danne · MLVFS par David Milligan · cartes de focus pixels et décodeur LJ92 issus de MLV App (ilia3101 et contributeurs)")

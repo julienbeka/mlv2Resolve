@@ -25,9 +25,9 @@ public struct MountPaths: Sendable {
             .map { $0.value.standardizedFileURL.path })
         func url(_ name: String) -> URL { root.appendingPathComponent(name) }
         // Case-insensitive (default APFS) and normalization-insensitive keys.
-        func key(_ path: String) -> String { path.precomposedStringWithCanonicalMapping.lowercased() }
-        let takenKeys = Set(taken.map(key))
-        func isFree(_ name: String) -> Bool { !takenKeys.contains(key(url(name).standardizedFileURL.path)) }
+        func fold(_ path: String) -> String { path.precomposedStringWithCanonicalMapping.lowercased() }
+        let takenKeys = Set(taken.map(fold))
+        func isFree(_ name: String) -> Bool { !takenKeys.contains(fold(url(name).standardizedFileURL.path)) }
 
         let base = Self.sanitize(shoot.name)
         if isFree(base) { return url(base) }

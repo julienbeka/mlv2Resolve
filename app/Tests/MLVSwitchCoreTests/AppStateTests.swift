@@ -192,3 +192,70 @@ final class AppStateTests: XCTestCase {
         XCTAssertTrue(savedMounts.isEmpty)
     }
 }
+
+// MARK: Task 11: pixel fixes, info, alert clearing
+extension AppStateTests {
+    func testPixelTogglesReachNextMount() async throws {
+        try makeShootFolder("A")
+        let state = makeState()
+        XCTAssertTrue(state.fixBadPixels && state.fixFocusPixels)
+        await state.choose(folder: volume)
+        let a = try shoot(state, "A")
+        await state.toggle(a)
+        var args = try XCTUnwrap(launcher.processes.last).args
+        XCTAssertTrue(args.contains("--bad-pix"))
+        XCTAssertFalse(args.contains("--no-focus-pixels"))
+        await state.toggle(a) // unmount
+        state.fixBadPixels = false
+        state.fixFocusPixels = false
+        await state.toggle(a)
+        args = try XCTUnwrap(launcher.processes.last).args
+        XCTAssertFalse(args.contains("--bad-pix"))
+        XCTAssertTrue(args.contains("--no-focus-pixels"))
+        // persisted
+        let other = makeState()
+        XCTAssertFalse(other.fixBadPixels)
+        XCTAssertFalse(other.fixFocusPixels)
+    }
+
+    func testSqueezeInfoOncePerShoot() async throws {
+        let dir = try makeShootFolder("Ana")
+        try SyntheticMLV.data(sampling: (1, 2, 1, 0)).write(to: dir.appendingPathComponent("A001.MLV"))
+        let state = makeState()
+        await state.choose(folder: volume)
+        let s = try shoot(state, "Ana")
+        await state.toggle(s)
+        XCTAssertEqual(state.info, "Tournage anamorphosé 1x3 : dans Resolve, réglez le rapport de pixel à 3:1 (Attributs du clip).")
+        state.clearInfo()
+        XCTAssertNil(state.info)
+        await state.toggle(s)
+        await state.toggle(s)
+        XCTAssertNil(state.info)
+    }
+
+    func testNoInfoForPlainShootAndClearAlert() async throws {
+        try makeShootFolder("A")
+        let state = makeState()
+        await state.choose(folder: volume)
+        await state.toggle(try shoot(state, "A"))
+        XCTAssertNil(state.info)
+        await state.volumeWillUnmount(volume)
+        XCTAssertNotNil(state.alert)
+        state.clearAlert()
+        XCTAssertNil(state.alert)
+    }
+}
+
+extension AppStateTests {
+    func testQualityModeHintOnce() async {
+        let state = makeState()
+        await state.setMode(.montageFluide)
+        XCTAssertNil(state.info)
+        await state.setMode(.qualiteEtalonnage)
+        XCTAssertEqual(state.info, "Dans Resolve, sélectionnez les plans puis clic droit → Rafraîchir.")
+        state.clearInfo()
+        await state.setMode(.montageFluide)
+        await state.setMode(.qualiteEtalonnage)
+        XCTAssertNil(state.info)
+    }
+}

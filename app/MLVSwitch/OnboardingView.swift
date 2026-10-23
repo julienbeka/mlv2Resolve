@@ -162,6 +162,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let model = OnboardingModel()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        LaunchAtLogin.initializeIfNeeded()
         guard model.state != .ready else { return AppCore.shared.start() }
         let hosting = NSHostingController(rootView: OnboardingView(model: model))
         let w = NSWindow(contentViewController: hosting)

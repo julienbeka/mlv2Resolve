@@ -12,6 +12,14 @@ final class AppCore {
     private var started = false
     private var observers: [NSObjectProtocol] = []
 
+    /// `-MLVSwitchRoot <path>` overrides the mount root (testing only).
+    static var mountRoot: URL {
+        if let p = UserDefaults.standard.string(forKey: "MLVSwitchRoot") {
+            return URL(fileURLWithPath: p, isDirectory: true)
+        }
+        return MountPaths.defaultRoot
+    }
+
     private init() {
         let resources = Bundle.main.resourceURL ?? Bundle.main.bundleURL
         let mlvfs = Bundle.main.url(forResource: "mlvfs", withExtension: nil)
@@ -23,7 +31,7 @@ final class AppCore {
         manager = MountManager(mlvfs: mlvfs,
                                fpmDir: resources.appendingPathComponent("fpm", isDirectory: true),
                                indexDir: indexDir,
-                               paths: MountPaths(root: MountPaths.defaultRoot),
+                               paths: MountPaths(root: Self.mountRoot),
                                launcher: FoundationLauncher(), unmounter: UmountUnmounter(),
                                http: MountManager.httpGet,
                                isPortFree: MountManager.isLocalPortFree)

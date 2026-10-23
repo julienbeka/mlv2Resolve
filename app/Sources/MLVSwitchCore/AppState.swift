@@ -14,6 +14,8 @@ public final class AppState: ObservableObject {
         static let lastFolder = "lastFolder"
         static let mountedShoots = "mountedShoots"
         static let dualISOMode = "dualISOMode"
+        static let fixBadPixels = "fixBadPixels"
+        static let fixFocusPixels = "fixFocusPixels"
     }
 
     @Published public private(set) var folder: URL?
@@ -22,17 +24,30 @@ public final class AppState: ObservableObject {
     @Published public private(set) var mounted: Set<String> = []
     @Published public private(set) var mode: DualISOMode
     @Published public private(set) var alert: String?
+    /// Non-error hint (e.g. anamorphic pixel aspect), shown once per shoot per session.
+    @Published public private(set) var info: String?
+    /// Applied on the next mount.
+    @Published public var fixBadPixels = true {
+        didSet { defaults.set(fixBadPixels, forKey: Key.fixBadPixels) }
+    }
+    @Published public var fixFocusPixels = true {
+        didSet { defaults.set(fixFocusPixels, forKey: Key.fixFocusPixels) }
+    }
 
     private let manager: MountManager
     private let defaults: UserDefaults
     private let scan: (URL) throws -> [Shoot]
     private var eventTask: Task<Void, Never>?
+    private var infoShown: Set<String> = []
+    private var refreshHintShown = false
 
     public init(manager: MountManager, defaults: UserDefaults, scan: @escaping (URL) throws -> [Shoot]) {
         self.manager = manager
         self.defaults = defaults
         self.scan = scan
         mode = DualISOMode(rawValue: defaults.integer(forKey: Key.dualISOMode)) ?? .montageFluide
+        if defaults.object(forKey: Key.fixBadPixels) != nil { fixBadPixels = defaults.bool(forKey: Key.fixBadPixels) }
+        if defaults.object(forKey: Key.fixFocusPixels) != nil { fixFocusPixels = defaults.bool(forKey: Key.fixFocusPixels) }
         folder = resolveLastFolder()
         let stream = manager.events
         eventTask = Task { [weak self] in
@@ -46,6 +61,9 @@ public final class AppState: ObservableObject {
     deinit { eventTask?.cancel() }
 
     // MARK: Public API
+
+    public func clearAlert() { alert = nil }
+    public func clearInfo() { info = nil }
 
     public func choose(folder: URL) async {
         self.folder = folder
@@ -74,6 +92,10 @@ public final class AppState: ObservableObject {
         mode = m
         defaults.set(m.rawValue, forKey: Key.dualISOMode)
         let failed = await manager.setMode(m)
+        if m == .qualiteEtalonnage, !refreshHintShown {
+            refreshHintShown = true
+            info = "Dans Resolve, sélectionnez les plans puis clic droit → Rafraîchir."
+        }
         if !failed.isEmpty {
             alert = "Le mode dual ISO n'a pas pu être appliqué à : \(failed.map(\.name).sorted().joined(separator: ", "))."
         }
@@ -169,13 +191,22 @@ public final class AppState: ObservableObject {
     @discardableResult
     private func mount(_ shoot: Shoot) async -> Bool {
         do {
-            try await manager.mount(shoot, mode: mode)
+            try await manager.mount(shoot, mode: mode, fixBadPixels: fixBadPixels, fixFocusPixels: fixFocusPixels)
             mounted.insert(Self.key(shoot.folder))
+            noteSqueeze(shoot)
             return true
         } catch {
             alert = "Impossible de monter « \(shoot.name) » : \(Self.reason(error))."
             return false
         }
+    }
+
+    private func noteSqueeze(_ shoot: Shoot) {
+        let k = Self.key(shoot.folder)
+        guard !infoShown.contains(k), let file = shoot.clips.first?.files.first,
+              let n = MLVHeader.horizontalSqueeze(of: file) else { return }
+        infoShown.insert(k)
+        info = "Tournage anamorphosé 1x\(n) : dans Resolve, réglez le rapport de pixel à \(n):1 (Attributs du clip)."
     }
 
     private func handle(_ event: MountEvent) {

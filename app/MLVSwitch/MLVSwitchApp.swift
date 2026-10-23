@@ -5,9 +5,19 @@ import MLVSwitchCore
 @main
 struct MLVSwitchApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @ObservedObject private var state = AppCore.shared.state
+
     var body: some Scene {
-        MenuBarExtra("MLV Switch", systemImage: "film.stack") {
-            Text("MLV Switch")
+        MenuBarExtra {
+            MenuContent(state: state)
+        } label: {
+            MenuLabel(state: state)
         }
+        .menuBarExtraStyle(.menu)
+
+        Window("Réglages", id: "settings") {
+            SettingsView(state: state)
+        }
+        .windowResizability(.contentSize)
     }
 }

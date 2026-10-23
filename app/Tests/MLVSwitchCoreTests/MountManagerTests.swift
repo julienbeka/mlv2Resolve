@@ -85,6 +85,18 @@ final class MountManagerTests: XCTestCase {
         XCTAssertEqual(mounted, [s: url])
     }
 
+    func testVolumeNameIsSafeForFuseOptions() async throws {
+        let m = makeManager()
+        let url = try await m.mount(shoot("Paris, jour 1"), mode: .montageFluide)
+        let args = try XCTUnwrap(launcher.processes.first).args
+        XCTAssertEqual(url.lastPathComponent, "Paris, jour 1", "the folder keeps the real name")
+        XCTAssertTrue(args.contains("volname=Paris jour 1"), "\(args)")
+        XCTAssertFalse(args.contains { $0.hasPrefix("volname=") && $0.contains(",") })
+        XCTAssertEqual(MountManager.volumeName("a=b\\c,,d"), "a b c d")
+        XCTAssertEqual(MountManager.volumeName(" , "), "MLV Switch")
+        XCTAssertEqual(MountManager.volumeName("Tournage été 2026 🎬"), "Tournage été 2026 🎬")
+    }
+
     func testQualityModeUsesFullDualISO() async throws {
         let m = makeManager()
         try await m.mount(shoot("A"), mode: .qualiteEtalonnage)
@@ -365,11 +377,22 @@ final class MountManagerTests: XCTestCase {
                              indexDir: index, paths: MountPaths(root: mountRoot),
                              launcher: FoundationLauncher(), unmounter: UmountUnmounter(),
                              http: MountManager.httpGet, isPortFree: MountManager.isLocalPortFree)
-        let s = Shoot(name: "Integration \(UUID().uuidString.prefix(6))", folder: repo,
+        let s = Shoot(name: "Intégration été, n° \(UUID().uuidString.prefix(6))", folder: repo,
                       volumeName: "Macintosh HD", clips: [])
         let url = try await m.mount(s, mode: .montageFluide)
         do {
             XCTAssertTrue(UmountUnmounter().isMountPoint(url), "mount must be up when mount() returns")
+            // FUSE-T accepted the sanitized volname (spaces, accents; the comma became a space).
+            var fs = statfs()
+            XCTAssertEqual(statfs(url.path, &fs), 0)
+            let from = withUnsafePointer(to: &fs.f_mntfromname) {
+                $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) }
+            }
+            print("mount source for \(url.lastPathComponent): \(from)")
+            let expected = MountManager.volumeName(s.name)
+            XCTAssertFalse(expected.contains(","))
+            XCTAssertEqual(from.precomposedStringWithCanonicalMapping,
+                           "fuse-t:/\(expected)".precomposedStringWithCanonicalMapping)
             let clipDir = try XCTUnwrap(try FileManager.default.contentsOfDirectory(atPath: url.path)
                 .first { $0.hasPrefix("M29-0615") })
             let dngs = try FileManager.default.contentsOfDirectory(

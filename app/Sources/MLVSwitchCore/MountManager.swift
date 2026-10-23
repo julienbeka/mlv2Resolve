@@ -155,7 +155,7 @@ public actor MountManager {
         if !fixFocusPixels { args.append("--no-focus-pixels") }
         args += [mode.engineFlag, "--fpm-dir=\(fpmDir.path)", "--index-dir=\(indexDir.path)",
                  "--port=127.0.0.1:\(port)", // web GUI on loopback only
-                 "-o", "ro", "-o", "volname=\(shoot.name)",
+                 "-o", "ro", "-o", "volname=\(Self.volumeName(url.lastPathComponent))",
                  "-f"] // foreground: otherwise mlvfs daemonizes and we lose the process
 
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -234,6 +234,15 @@ public actor MountManager {
             }
             removeIfEmpty(child)
         }
+    }
+
+    /// Finder volume name for `-o volname=`: libfuse splits `-o` values on
+    /// commas and treats `\\` as an escape, and `=` separates key and value,
+    /// so those become spaces (runs of spaces collapsed, never empty).
+    static func volumeName(_ name: String) -> String {
+        let replaced = String(name.map { ",\\=".contains($0) ? " " : $0 })
+        let collapsed = replaced.split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
+        return collapsed.isEmpty ? "MLV Switch" : collapsed
     }
 
     // MARK: Private

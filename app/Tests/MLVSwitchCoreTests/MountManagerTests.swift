@@ -295,6 +295,26 @@ final class MountManagerTests: XCTestCase {
         XCTAssertEqual(mounted, [s: url])
     }
 
+    func testBusyVolumeIsNotForcedByDefault() async throws {
+        let m = makeManager()
+        let s = shoot("A")
+        let url = try await m.mount(s, mode: .montageFluide)
+        unmounter.makeBusy(url)
+        do {
+            try await m.unmount(s)
+            XCTFail("expected error")
+        } catch MountError.unmountFailed {}
+        XCTAssertEqual(unmounter.forced, [false], "user-initiated unmount never forces")
+        XCTAssertFalse(try XCTUnwrap(launcher.processes.first).wasTerminated)
+        let still = await m.mounted
+        XCTAssertEqual(still, [s: url])
+
+        try await m.unmount(s, force: true) // quit / unplug
+        XCTAssertEqual(unmounter.forced, [false, true])
+        let after = await m.mounted
+        XCTAssertTrue(after.isEmpty)
+    }
+
     func testUnmountAll() async throws {
         let m = makeManager()
         var urls: [URL] = []
@@ -403,6 +423,19 @@ final class MountManagerTests: XCTestCase {
             let dngs = try FileManager.default.contentsOfDirectory(
                 atPath: url.appendingPathComponent(clipDir).path).filter { $0.lowercased().hasSuffix(".dng") }
             XCTAssertEqual(dngs.count, 320)
+
+            // A DNG held open (as Resolve does): the user-initiated unmount must not force it.
+            let held = try FileHandle(forReadingFrom: url.appendingPathComponent(clipDir)
+                .appendingPathComponent(try XCTUnwrap(dngs.sorted().first)))
+            _ = try held.read(upToCount: 4096)
+            var busyError: Error?
+            do { try await m.unmount(s) } catch { busyError = error }
+            print("unmount with an open DNG -> \(busyError.map { "\($0)" } ?? "succeeded")")
+            try held.close()
+            XCTAssertEqual(busyError as? MountError, .unmountFailed(url))
+            XCTAssertTrue(UmountUnmounter().isMountPoint(url), "a refused unmount keeps the volume mounted")
+            let still = await m.mounted
+            XCTAssertEqual(still.count, 1)
 
             let maybePort = await m.port(for: s)
             let port = try XCTUnwrap(maybePort)

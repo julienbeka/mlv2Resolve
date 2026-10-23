@@ -64,7 +64,7 @@ final class AppCore {
         let manager = self.manager
         let done = DispatchSemaphore(value: 0)
         Task.detached {
-            await manager.unmountAll()
+            await manager.unmountAll(force: true) // quitting: Resolve may still hold files
             done.signal()
         }
         _ = done.wait(timeout: .now() + 10)

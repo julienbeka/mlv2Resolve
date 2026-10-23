@@ -63,12 +63,14 @@ final class FakeProcess: RunningProcess, @unchecked Sendable {
 }
 
 final class FakeUnmounter: Unmounter, @unchecked Sendable {
-    private let state = Locked<(mounts: Set<String>, calls: [(path: String, force: Bool)], failing: Set<String>)>(
-        ([], [], []))
+    private let state = Locked<(mounts: Set<String>, calls: [(path: String, force: Bool)], failing: Set<String>,
+                                busy: Set<String>)>(([], [], [], []))
 
     func markMounted(_ url: URL) { state.mutate { _ = $0.mounts.insert(url.standardizedFileURL.path) } }
     func markUnmounted(_ url: URL) { state.mutate { _ = $0.mounts.remove(url.standardizedFileURL.path) } }
     func failUnmount(_ url: URL) { state.mutate { _ = $0.failing.insert(url.standardizedFileURL.path) } }
+    /// Files open on the volume: a polite unmount throws, a forced one works.
+    func makeBusy(_ url: URL) { state.mutate { _ = $0.busy.insert(url.standardizedFileURL.path) } }
     var unmounted: [String] { state.get().calls.map(\.path) }
     var forced: [Bool] { state.get().calls.map(\.force) }
 
@@ -76,7 +78,7 @@ final class FakeUnmounter: Unmounter, @unchecked Sendable {
         let p = path.standardizedFileURL.path
         let failed = state.mutate { s -> Bool in
             s.calls.append((p, force))
-            if s.failing.contains(p) { return true }
+            if s.failing.contains(p) || (!force && s.busy.contains(p)) { return true }
             s.mounts.remove(p)
             return false
         }

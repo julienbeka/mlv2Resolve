@@ -369,3 +369,46 @@ extension AppStateTests {
                        "Deux tournages s'appellent « Jour 1 » : le second est monté sous « Jour 1 (\(second.volumeName)) ».")
     }
 }
+
+extension AppStateTests {
+    func testToggleOffBusyShootAlertsAndStaysMounted() async throws {
+        let a = try makeShootFolder("A")
+        let manager = makeManager()
+        let state = makeState(manager)
+        await state.choose(folder: volume)
+        let s = try shoot(state, "A")
+        await state.toggle(s)
+        let first = await manager.mounted.values.first
+        let url = try XCTUnwrap(first)
+        unmounter.makeBusy(url)
+
+        await state.toggle(s)
+        XCTAssertEqual(state.alert, "Impossible de démonter « A » : des fichiers sont peut-être ouverts dans Resolve.")
+        XCTAssertEqual(state.mounted, [key(a)])
+        XCTAssertEqual(savedMounts, [key(a)])
+        XCTAssertEqual(unmounter.forced, [false])
+        let mounted = await manager.mounted
+        XCTAssertEqual(mounted.count, 1)
+
+        await state.unmountAll()
+        XCTAssertEqual(state.alert, "Impossible de démonter « A » : des fichiers sont peut-être ouverts dans Resolve.")
+        XCTAssertEqual(state.mounted, [key(a)])
+        XCTAssertEqual(unmounter.forced, [false, false], "« Tout démonter » never forces")
+    }
+
+    func testUnplugForcesBusyShoot() async throws {
+        try makeShootFolder("A")
+        let manager = makeManager()
+        let state = makeState(manager)
+        await state.choose(folder: volume)
+        await state.toggle(try shoot(state, "A"))
+        let first = await manager.mounted.values.first
+        let url = try XCTUnwrap(first)
+        unmounter.makeBusy(url)
+        await state.volumeWillUnmount(volume)
+        XCTAssertTrue(state.mounted.isEmpty)
+        XCTAssertEqual(unmounter.forced, [true])
+        let mounted = await manager.mounted
+        XCTAssertTrue(mounted.isEmpty)
+    }
+}

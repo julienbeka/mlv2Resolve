@@ -16,8 +16,9 @@ public protocol RunningProcess: AnyObject, Sendable {
 }
 
 public protocol Unmounter: Sendable {
-    /// Unmounts `path`; a no-op when it is not a mount point. `force` skips the
-    /// polite attempt (used when the file server is known to be dead).
+    /// Unmounts `path`; a no-op when it is not a mount point. Without `force`
+    /// only a polite unmount is tried and a busy volume throws (it stays
+    /// mounted). `force` skips the polite attempt: quit, unplug, crash cleanup.
     /// May block: the manager calls it off its actor.
     func unmount(_ path: URL, force: Bool) throws
     /// False for symlinks, even if they point at a mount point.
@@ -179,20 +180,20 @@ public actor MountManager {
     }
 
     /// Unmounts the shoot's path, stops its process and removes the empty
-    /// mount-point directory. Throws (and keeps the shoot mounted) when the
-    /// volume cannot be unmounted, e.g. because files are in use.
-    public func unmount(_ shoot: Shoot) async throws {
+    /// mount-point directory. Without `force` (user-initiated) a volume in use
+    /// is left mounted and this throws; `force` is for quit and unplug.
+    public func unmount(_ shoot: Shoot, force: Bool = false) async throws {
         guard let e = entry(for: shoot) else { return }
         if let running = e.unmountTask { return try await running.value }
         guard e.isLive else { return await reap(e.id) }
         let id = e.id
-        let task = Task { try await self.performUnmount(id, force: false) }
+        let task = Task { try await self.performUnmount(id, force: force) }
         e.unmountTask = task
         try await task.value
     }
 
-    public func unmountAll() async {
-        for e in Array(entries.values) { try? await unmount(e.shoot) }
+    public func unmountAll(force: Bool = false) async {
+        for e in Array(entries.values) { try? await unmount(e.shoot, force: force) }
     }
 
     /// Switches the dual ISO mode of every running mlvfs live. Returns the
@@ -230,7 +231,7 @@ public actor MountManager {
             let owned = Set(entries.values.map { $0.url.standardizedFileURL.path })
             guard !owned.contains(key), cleanups[key] == nil else { continue }
             if unmounter.isMountPoint(child) {
-                try? await unmountOffActor(child, force: false)
+                try? await unmountOffActor(child, force: true) // no engine of ours serves it
             }
             removeIfEmpty(child)
         }
@@ -282,7 +283,7 @@ public actor MountManager {
             if mountSeen && !isPortFree(port) { return }
             if clock.now >= deadline {
                 if let current, current.unmountTask == nil {
-                    let task = Task { try await self.performUnmount(id, force: false) }
+                    let task = Task { try await self.performUnmount(id, force: true) } // our own failed start
                     current.unmountTask = task
                     try? await task.value
                 }
@@ -436,7 +437,7 @@ final class FoundationProcess: RunningProcess, @unchecked Sendable {
     }
 }
 
-/// `/sbin/umount`, falling back to `/usr/sbin/diskutil unmount force`.
+/// `/sbin/umount` (polite), or `/usr/sbin/diskutil unmount force` when forced.
 /// Each tool is bounded by a timeout so a dead localhost NFS server cannot
 /// hang the caller indefinitely.
 public struct UmountUnmounter: Unmounter {
@@ -450,7 +451,10 @@ public struct UmountUnmounter: Unmounter {
 
     public func unmount(_ path: URL, force: Bool) throws {
         guard isMountPoint(path) else { return }
-        if !force, run("/sbin/umount", [path.path], timeout: umountTimeout) == 0, !isMountPoint(path) {
+        if !force {
+            // Polite only: a volume with open files (Resolve) stays mounted.
+            _ = run("/sbin/umount", [path.path], timeout: umountTimeout)
+            if isMountPoint(path) { throw MountError.unmountFailed(path) }
             return
         }
         _ = run("/usr/sbin/diskutil", ["unmount", "force", path.path], timeout: forceTimeout)

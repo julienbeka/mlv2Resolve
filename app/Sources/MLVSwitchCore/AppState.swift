@@ -93,7 +93,7 @@ public final class AppState: ObservableObject {
                 mounted.remove(k)
                 saved.removeAll { $0 == k }
             } catch {
-                alert = "Impossible de démonter « \(shoot.name) » : des fichiers sont peut-être ouverts (DaVinci Resolve ?)."
+                alert = Self.busyAlert([shoot.name])
             }
         } else {
             if await mount(shoot), !saved.contains(k) { saved.append(k) }
@@ -116,9 +116,7 @@ public final class AppState: ObservableObject {
         // Anything not known to the manager anymore is no longer mounted.
         let live = Set(await manager.mounted.keys.map { Self.key($0.folder) })
         for k in mounted where !live.contains(k) { mounted.remove(k); saved.removeAll { $0 == k } }
-        if !failed.isEmpty {
-            alert = "Impossible de démonter : \(failed.sorted().joined(separator: ", ")) (des fichiers sont peut-être ouverts dans DaVinci Resolve ?)."
-        }
+        if !failed.isEmpty { alert = Self.busyAlert(failed) }
     }
 
     public func setMode(_ m: DualISOMode) async {
@@ -162,7 +160,7 @@ public final class AppState: ObservableObject {
         alert = Self.unplugAlert(volume)
         let live = await manager.mounted.keys
         for shoot in live where affected.contains(Self.key(shoot.folder)) {
-            try? await manager.unmount(shoot)
+            try? await manager.unmount(shoot, force: true) // the disk is going away
         }
         // Anything that refused to unmount is still mounted.
         let still = await manager.mounted.keys.map { Self.key($0.folder) }
@@ -188,6 +186,12 @@ public final class AppState: ObservableObject {
         let p = key(volume)
         return p.hasSuffix("/") ? p : p + "/"
     }
+    /// User-initiated unmounts are never forced: a busy volume stays mounted.
+    static func busyAlert(_ names: [String]) -> String {
+        let list = names.sorted().map { "« \($0) »" }.joined(separator: ", ")
+        return "Impossible de démonter \(list) : des fichiers sont peut-être ouverts dans Resolve."
+    }
+
     static func unplugAlert(_ volume: URL) -> String {
         "Disque « \(volume.standardizedFileURL.lastPathComponent) » débranché"
     }

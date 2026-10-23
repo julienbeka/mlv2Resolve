@@ -275,7 +275,7 @@ static inline void interpolate_around(uint16_t *image_data, int i, int w, int *r
 }
 
 int fpm_fix(uint16_t *raw, int width, int height, uint32_t camera_model, int crop_x, int crop_y,
-            const char *fpm_dir, int raw_width, int raw_height, int black_level)
+            const char *fpm_dir, int raw_width, int raw_height, int black_level, int dual_iso)
 {
     if (!raw || width <= 0 || height <= 0) return 0;
 
@@ -301,7 +301,12 @@ int fpm_fix(uint16_t *raw, int width, int height, uint32_t camera_model, int cro
 
         if (x > 2 && x < w - 3 && y > 2 && y < h - 3)
         {
-            interpolate_around(raw, i, w, raw2ev, ev2raw);
+            /* dual ISO: rows alternate between the two ISOs, so only same-row neighbours are usable
+               (MLV App's 'HORIZONTAL' fpi method for dual ISO) */
+            if (dual_iso)
+                interpolate_horizontal(raw, i, raw2ev, ev2raw);
+            else
+                interpolate_around(raw, i, w, raw2ev, ev2raw);
             corrected++;
         }
         else if (x >= 0 && x < w && y >= 0 && y < h)
@@ -312,7 +317,7 @@ int fpm_fix(uint16_t *raw, int width, int height, uint32_t camera_model, int cro
             int horizontal_edge = (x >= w - 3 && x < w) || (x >= 0 && x <= 3);
             int vertical_edge = (y >= h - 3 && y < h) || (y >= 0 && y <= 3);
 
-            if (horizontal_edge && !vertical_edge && y >= 3 && y < h - 3)
+            if (horizontal_edge && !vertical_edge && !dual_iso && y >= 3 && y < h - 3)
             {
                 interpolate_vertical(raw, i, w, raw2ev, ev2raw);
                 corrected++;

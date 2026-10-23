@@ -964,6 +964,20 @@ static int process_frame(struct image_buffer * image_buffer)
                 fix_pattern_noise((int16_t*)image_buffer->data, frame_headers.rawi_hdr.xRes, frame_headers.rawi_hdr.yRes, frame_headers.rawi_hdr.raw_info.white_level, 0);
             }
             
+            /* Focus pixels are fixed before any dual ISO processing, as MLV App does, using the
+               .fpm maps from --fpm-dir (the legacy cs.c fix_focus_pixels is no longer used). */
+            if(!mlvfs.no_focus_pixels)
+            {
+                int fpm_count = fpm_fix(image_buffer->data, frame_headers.rawi_hdr.xRes, frame_headers.rawi_hdr.yRes,
+                                        frame_headers.idnt_hdr.cameraModel, frame_headers.vidf_hdr.panPosX, frame_headers.vidf_hdr.panPosY,
+                                        mlvfs.fpm_dir, frame_headers.rawi_hdr.raw_info.width, frame_headers.rawi_hdr.raw_info.height,
+                                        frame_headers.rawi_hdr.raw_info.black_level, mlvfs.dual_iso != 0);
+                if(fpm_first_time(mlv_filename))
+                {
+                    fprintf(stderr, "%s: focus pixels: %d corrected\n", mlv_filename, fpm_count);
+                }
+            }
+
             int is_dual_iso = 0;
             if(mlvfs.dual_iso == 1)
             {
@@ -979,23 +993,9 @@ static int process_frame(struct image_buffer * image_buffer)
                 //redo the dng header b/c white and black levels will be different
                 dng_get_header_data(&frame_headers, image_buffer->header, 0, image_buffer->size, mlvfs.fps, mlv_basename);
             }
-            else
+            else if(mlvfs.fix_bad_pixels)
             {
-                if(!mlvfs.no_focus_pixels)
-                {
-                    int fpm_count = fpm_fix(image_buffer->data, frame_headers.rawi_hdr.xRes, frame_headers.rawi_hdr.yRes,
-                                            frame_headers.idnt_hdr.cameraModel, frame_headers.vidf_hdr.panPosX, frame_headers.vidf_hdr.panPosY,
-                                            mlvfs.fpm_dir, frame_headers.rawi_hdr.raw_info.width, frame_headers.rawi_hdr.raw_info.height,
-                                            frame_headers.rawi_hdr.raw_info.black_level);
-                    if(fpm_first_time(mlv_filename))
-                    {
-                        fprintf(stderr, "%s: focus pixels: %d corrected\n", mlv_filename, fpm_count);
-                    }
-                }
-                if(mlvfs.fix_bad_pixels)
-                {
-                    fix_bad_pixels(&frame_headers, image_buffer->data, mlvfs.fix_bad_pixels == 2, is_dual_iso);
-                }
+                fix_bad_pixels(&frame_headers, image_buffer->data, mlvfs.fix_bad_pixels == 2, is_dual_iso);
             }
             
             if(mlvfs.chroma_smooth && mlvfs.dual_iso != 2)

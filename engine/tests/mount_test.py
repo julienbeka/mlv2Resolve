@@ -11,6 +11,7 @@ Usage: mount_test.py <clip.MLV> [--expect-frames N] [--min-fps F] [--backend nfs
 --expect-readonly   asserts the engine itself refuses writes (the harness never passes -o ro): touch, mkdir, mv of
                     the clip folder, rm of a DNG, rm of a real (non-virtual) file and an in-place DNG write all fail,
                     and nothing they targeted changed (the source folder snapshot is checked as usual).
+--dual-iso-preview  pass --dual-iso-preview to mlvfs (forces the dual ISO code path, even on a normal clip).
 --expect-sane       stdlib-only plausibility check on frame 0: black < median < white, and the median absolute
                     difference between same-colour horizontal neighbours is small relative to white - black.
 mlvfs stdout and stderr both go to one log file (tail printed at the end).
@@ -223,6 +224,7 @@ def main():
     ap.add_argument("--expect-raw", metavar="REF_DIR")
     ap.add_argument("--expect-sane", action="store_true")
     ap.add_argument("--expect-readonly", action="store_true")
+    ap.add_argument("--dual-iso-preview", action="store_true")
     ap.add_argument("--index-dir", help="pass --index-dir to mlvfs; asserts .IDX files land there")
     ap.add_argument("--assert-source-untouched", action=argparse.BooleanOptionalAction, default=True,
                     help="assert the source folder is identical (names, sizes, mtimes) after unmount")
@@ -246,6 +248,8 @@ def main():
         cmd += ["--no-focus-pixels"]
     if a.index_dir:
         cmd += ["--index-dir=" + a.index_dir]
+    if a.dual_iso_preview:
+        cmd += ["--dual-iso-preview"]
     if a.backend:
         cmd += ["-o", "backend=" + a.backend]
     proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT)

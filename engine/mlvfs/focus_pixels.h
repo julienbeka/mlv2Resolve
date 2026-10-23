@@ -28,11 +28,12 @@
  * fpm_dir:    directory holding the .fpm files (NULL = current directory)
  * raw_width/raw_height: RAWI raw_info.width / raw_info.height (selects the map)
  * black_level: RAWI raw_info.black_level (for the log-domain interpolation)
+ * dual_iso:   non-zero for dual ISO frames: interpolate from same-row neighbours only (as MLV App)
  * Returns the number of pixels corrected in this frame (0 if no map matches).
  * Thread safe; maps are loaded once and cached.
  */
 int fpm_fix(uint16_t *raw, int width, int height, uint32_t camera_model, int crop_x, int crop_y,
-            const char *fpm_dir, int raw_width, int raw_height, int black_level);
+            const char *fpm_dir, int raw_width, int raw_height, int black_level, int dual_iso);
 
 /* Returns 1 the first time it is called for a given key (e.g. clip path), 0 afterwards. Thread safe. */
 int fpm_first_time(const char *key);

@@ -106,7 +106,7 @@ int hdr_convert_data(struct frame_headers * frame_headers, uint16_t * image_data
         return 0;
     }
     
-    fix_focus_pixels(frame_headers, image_data, 1);
+    /* focus pixels are already fixed by fpm_fix() in main.c before dual ISO processing */
     
     /* compare the two histograms and plot the curve between the two exposures (dark as a function of bright) */
     const int min_pix = 100;                                /* extract a data point every N image pixels */
@@ -1941,7 +1941,7 @@ int cr2hdr20_convert_data(struct frame_headers * frame_headers, uint16_t * image
     raw_info.active_area.y2 = raw_info.height;
     if (hdr_check(raw_info, image_data))
     {
-        fix_focus_pixels(frame_headers, image_data, 1);
+        /* focus pixels are already fixed by fpm_fix() in main.c before dual ISO processing */
         if(fix_bad_pixels_mode)
         {
             fix_bad_pixels(frame_headers, image_data, fix_bad_pixels_mode == 2, 1);

@@ -15,8 +15,8 @@ final class MountManagerTests: XCTestCase {
         root = FileManager.default.temporaryDirectory
             .appendingPathComponent("MountManagerTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        launcher = FakeLauncher()
         unmounter = FakeUnmounter()
+        launcher = FakeLauncher(unmounter: unmounter)
         http = RecordingHTTP()
     }
 
@@ -33,21 +33,39 @@ final class MountManagerTests: XCTestCase {
         if !hasMount { try? FileManager.default.removeItem(at: root) }
     }
 
-    func makeManager(isPortFree: @escaping @Sendable (Int) -> Bool = { _ in true }) -> MountManager {
+    func makeManager(isPortFree: @escaping @Sendable (Int) -> Bool = { _ in true },
+                     readinessTimeout: Duration = .seconds(2)) -> MountManager {
         let http = self.http!
+        let busy = launcher.busyPorts
         return MountManager(mlvfs: mlvfs, fpmDir: fpmDir, indexDir: indexDir,
                             paths: MountPaths(root: root), launcher: launcher, unmounter: unmounter,
-                            http: { try await http.get($0) }, isPortFree: isPortFree)
+                            http: { try await http.get($0) },
+                            isPortFree: { !busy.get().contains($0) && isPortFree($0) },
+                            readinessTimeout: readinessTimeout, pollInterval: .milliseconds(5))
     }
 
-    func shoot(_ name: String, folder: String) -> Shoot {
-        Shoot(name: name, folder: URL(fileURLWithPath: folder, isDirectory: true),
+    func shoot(_ name: String, folder: String? = nil) -> Shoot {
+        Shoot(name: name, folder: URL(fileURLWithPath: folder ?? "/Volumes/SSD/\(name)", isDirectory: true),
               volumeName: "SSD", clips: [])
     }
 
+    /// First event within `seconds`, or nil. Consumes the stream: call once per test.
+    func firstEvent(_ m: MountManager, within seconds: Double) async -> MountEvent? {
+        let stream = m.events
+        return await withTaskGroup(of: MountEvent?.self) { group in
+            group.addTask { for await e in stream { return e }; return nil }
+            group.addTask { try? await Task.sleep(for: .seconds(seconds)); return nil }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+    }
+
+    // MARK: Arguments
+
     func testMountPassesArgsAsArray() async throws {
         let m = makeManager()
-        let s = shoot("Tournage été 2026 🎬", folder: "/Volumes/SSD/Tournage été 2026 🎬")
+        let s = shoot("Tournage été 2026 🎬")
         let url = try await m.mount(s, mode: .montageFluide)
         let args = try XCTUnwrap(launcher.processes.first).args
         XCTAssertEqual(args[0], root.appendingPathComponent("Tournage été 2026 🎬").path)
@@ -55,12 +73,10 @@ final class MountManagerTests: XCTestCase {
         XCTAssertTrue(args.contains("--mlv-dir=/Volumes/SSD/Tournage été 2026 🎬"))
         XCTAssertTrue(args.contains("--dual-iso-preview"))
         XCTAssertFalse(args.contains("--dual-iso"))
-        XCTAssertTrue(args.contains("-o"))
-        XCTAssertTrue(args.contains("ro"))
         XCTAssertEqual(args, [
             url.path, "--mlv-dir=/Volumes/SSD/Tournage été 2026 🎬", "--resolve-naming", "--bad-pix",
             "--dual-iso-preview", "--fpm-dir=/opt/engine/fpm", "--index-dir=/tmp/index dir",
-            "--port=8100", "-o", "ro", "-o", "volname=Tournage été 2026 🎬", "-f",
+            "--port=127.0.0.1:8100", "-o", "ro", "-o", "volname=Tournage été 2026 🎬", "-f",
         ])
         var isDir: ObjCBool = false
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue,
@@ -71,7 +87,7 @@ final class MountManagerTests: XCTestCase {
 
     func testQualityModeUsesFullDualISO() async throws {
         let m = makeManager()
-        _ = try await m.mount(shoot("A", folder: "/Volumes/SSD/A"), mode: .qualiteEtalonnage)
+        try await m.mount(shoot("A"), mode: .qualiteEtalonnage)
         let args = try XCTUnwrap(launcher.processes.first).args
         XCTAssertTrue(args.contains("--dual-iso"))
         XCTAssertFalse(args.contains("--dual-iso-preview"))
@@ -79,68 +95,206 @@ final class MountManagerTests: XCTestCase {
 
     func testAdvancedTogglesChangeArgs() async throws {
         let m = makeManager()
-        _ = try await m.mount(shoot("A", folder: "/Volumes/SSD/A"), mode: .montageFluide,
-                              fixBadPixels: false, fixFocusPixels: false)
+        try await m.mount(shoot("A"), mode: .montageFluide, fixBadPixels: false, fixFocusPixels: false)
         let args = try XCTUnwrap(launcher.processes.first).args
         XCTAssertFalse(args.contains("--bad-pix"))
         XCTAssertTrue(args.contains("--no-focus-pixels"))
     }
 
+    // MARK: Ports
+
     func testPortSkipsBusyPorts() async throws {
         let m = makeManager(isPortFree: { $0 != 8100 })
-        _ = try await m.mount(shoot("A", folder: "/Volumes/SSD/A"), mode: .montageFluide)
-        XCTAssertEqual(launcher.processes.first?.value("--port"), "8101")
+        try await m.mount(shoot("A"), mode: .montageFluide)
+        XCTAssertEqual(launcher.processes.first?.value("--port"), "127.0.0.1:8101")
     }
 
     func testPortSkipsOwnLiveProcesses() async throws {
         let m = makeManager()
-        _ = try await m.mount(shoot("A", folder: "/Volumes/SSD/A"), mode: .montageFluide)
-        _ = try await m.mount(shoot("B", folder: "/Volumes/SSD/B"), mode: .montageFluide)
-        XCTAssertEqual(launcher.processes.map { $0.value("--port") }, ["8100", "8101"])
+        try await m.mount(shoot("A"), mode: .montageFluide)
+        try await m.mount(shoot("B"), mode: .montageFluide)
+        XCTAssertEqual(launcher.processes.map { $0.value("--port") }, ["127.0.0.1:8100", "127.0.0.1:8101"])
     }
+
+    func testNoFreePortThrows() async throws {
+        let m = makeManager(isPortFree: { _ in false })
+        do {
+            try await m.mount(shoot("A"), mode: .montageFluide)
+            XCTFail("expected error")
+        } catch MountError.noFreePort {}
+        XCTAssertTrue(launcher.processes.isEmpty)
+    }
+
+    // MARK: Readiness
 
     func testMountingSameShootTwiceIsNoOp() async throws {
         let m = makeManager()
-        let s = shoot("A", folder: "/Volumes/SSD/A")
+        let s = shoot("A")
         let a = try await m.mount(s, mode: .montageFluide)
         let b = try await m.mount(s, mode: .montageFluide)
         XCTAssertEqual(a, b)
         XCTAssertEqual(launcher.processes.count, 1)
     }
 
-    func testNoFreePortThrows() async throws {
-        let m = makeManager(isPortFree: { _ in false })
+    func testWebGUINotBoundFailsMountAndCleansUp() async throws {
+        launcher.bindsPort.set(false)
+        let m = makeManager(readinessTimeout: .milliseconds(100))
         do {
-            _ = try await m.mount(shoot("A", folder: "/Volumes/SSD/A"), mode: .montageFluide)
+            try await m.mount(shoot("A"), mode: .montageFluide)
             XCTFail("expected error")
-        } catch MountError.noFreePort {}
-        XCTAssertTrue(launcher.processes.isEmpty)
+        } catch MountError.webGUIUnavailable(let port) {
+            XCTAssertEqual(port, 8100)
+        }
+        let p = try XCTUnwrap(launcher.processes.first)
+        XCTAssertTrue(p.wasTerminated)
+        XCTAssertEqual(unmounter.unmounted, [root.appendingPathComponent("A").path])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("A").path))
+        let mounted = await m.mounted
+        XCTAssertTrue(mounted.isEmpty)
     }
+
+    func testMountThatNeverAppearsTimesOut() async throws {
+        launcher.mountsAppear.set(false)
+        let m = makeManager(readinessTimeout: .milliseconds(100))
+        do {
+            try await m.mount(shoot("A"), mode: .montageFluide)
+            XCTFail("expected error")
+        } catch MountError.startupTimedOut {}
+        XCTAssertTrue(try XCTUnwrap(launcher.processes.first).wasTerminated)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("A").path))
+    }
+
+    func testProcessDyingDuringStartupThrows() async throws {
+        launcher.mountsAppear.set(false)
+        let m = makeManager()
+        let launcher = self.launcher!
+        Task {
+            while launcher.processes.isEmpty { try? await Task.sleep(for: .milliseconds(2)) }
+            launcher.processes[0].exit(1)
+        }
+        do {
+            try await m.mount(shoot("A"), mode: .montageFluide)
+            XCTFail("expected error")
+        } catch MountError.exitedDuringStartup(let status) {
+            XCTAssertEqual(status, 1)
+        }
+    }
+
+    // MARK: Dual ISO
 
     func testSetModeHitsEveryProcess() async throws {
         let m = makeManager()
-        _ = try await m.mount(shoot("A", folder: "/Volumes/SSD/A"), mode: .montageFluide)
-        _ = try await m.mount(shoot("B", folder: "/Volumes/SSD/B"), mode: .montageFluide)
-        await m.setMode(.qualiteEtalonnage)
+        try await m.mount(shoot("A"), mode: .montageFluide)
+        try await m.mount(shoot("B"), mode: .montageFluide)
+        let failed = await m.setMode(.qualiteEtalonnage)
+        XCTAssertEqual(failed, [])
         XCTAssertEqual(Set(http.requested.map(\.absoluteString)), [
             "http://127.0.0.1:8100/set_value?dual_iso=2",
             "http://127.0.0.1:8101/set_value?dual_iso=2",
         ])
     }
 
+    func testSetModeReportsFailingShoots() async throws {
+        let m = makeManager()
+        let a = shoot("A"), b = shoot("B")
+        try await m.mount(a, mode: .montageFluide)
+        try await m.mount(b, mode: .montageFluide)
+        http.failingPorts.set([8101])
+        let failed = await m.setMode(.qualiteEtalonnage)
+        XCTAssertEqual(failed, [b])
+    }
+
+    // MARK: Exits
+
     func testCrashCleansMount() async throws {
         let m = makeManager()
-        let url = try await m.mount(shoot("A", folder: "/Volumes/SSD/A"), mode: .montageFluide)
-        unmounter.markMounted(url)
+        let s = shoot("A")
+        let url = try await m.mount(s, mode: .montageFluide)
         try XCTUnwrap(launcher.processes.first).exit(11)
-        for _ in 0..<200 where await !m.mounted.isEmpty {
-            try await Task.sleep(nanoseconds: 5_000_000)
-        }
+        let event = await firstEvent(m, within: 2)
+        XCTAssertEqual(event, .exited(s, status: 11))
         let mounted = await m.mounted
         XCTAssertTrue(mounted.isEmpty)
         XCTAssertEqual(unmounter.unmounted, [url.standardizedFileURL.path])
+        XCTAssertEqual(unmounter.forced, [true], "crash path goes straight to force unmount")
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path), "empty mount point removed")
     }
+
+    func testDeliberateUnmountEmitsNoEvent() async throws {
+        let m = makeManager()
+        let s = shoot("A")
+        try await m.mount(s, mode: .montageFluide)
+        try await m.unmount(s)
+        let event = await firstEvent(m, within: 0.2)
+        XCTAssertNil(event)
+    }
+
+    func testDeadEntryIsHiddenAndMountRelaunches() async throws {
+        let m = makeManager()
+        let s = shoot("A")
+        let url = try await m.mount(s, mode: .montageFluide)
+        let first = try XCTUnwrap(launcher.processes.first)
+        first.dieSilently()
+        let mounted = await m.mounted
+        XCTAssertTrue(mounted.isEmpty, "dead process must not count as mounted")
+        let again = try await m.mount(s, mode: .montageFluide)
+        XCTAssertEqual(again, url)
+        XCTAssertEqual(launcher.processes.count, 2)
+        let mountedAfter = await m.mounted
+        XCTAssertEqual(mountedAfter, [s: url])
+        // The late exit callback of the first process must not tear down the new mount.
+        first.onExit?(9)
+        try await Task.sleep(for: .milliseconds(50))
+        let stillMounted = await m.mounted
+        XCTAssertEqual(stillMounted, [s: url])
+    }
+
+    // MARK: Unmount
+
+    func testUnmountTerminatesAndRemovesDir() async throws {
+        let m = makeManager()
+        let s = shoot("A")
+        let url = try await m.mount(s, mode: .montageFluide)
+        try await m.unmount(s)
+        XCTAssertEqual(unmounter.unmounted, [url.standardizedFileURL.path])
+        XCTAssertEqual(unmounter.forced, [false])
+        XCTAssertTrue(try XCTUnwrap(launcher.processes.first).wasTerminated)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        let mounted = await m.mounted
+        XCTAssertTrue(mounted.isEmpty)
+    }
+
+    func testFailedUnmountKeepsShootMounted() async throws {
+        let m = makeManager()
+        let s = shoot("A")
+        let url = try await m.mount(s, mode: .montageFluide)
+        unmounter.failUnmount(url)
+        do {
+            try await m.unmount(s)
+            XCTFail("expected error")
+        } catch MountError.unmountFailed {}
+        XCTAssertFalse(try XCTUnwrap(launcher.processes.first).wasTerminated)
+        let mounted = await m.mounted
+        XCTAssertEqual(mounted, [s: url])
+    }
+
+    func testUnmountAll() async throws {
+        let m = makeManager()
+        var urls: [URL] = []
+        for name in ["A", "B", "C"] {
+            urls.append(try await m.mount(shoot(name), mode: .montageFluide))
+        }
+        await m.unmountAll()
+        XCTAssertTrue(launcher.processes.allSatisfy { $0.wasTerminated && !$0.isRunning })
+        XCTAssertEqual(Set(unmounter.unmounted), Set(urls.map(\.standardizedFileURL.path)))
+        let mounted = await m.mounted
+        XCTAssertTrue(mounted.isEmpty)
+        // Terminating fires onExit; it must not trigger a second unmount.
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(unmounter.unmounted.count, 3)
+    }
+
+    // MARK: Stale mounts
 
     func testCleanStaleMounts() async throws {
         let stale = root.appendingPathComponent("Ancien tournage", isDirectory: true)
@@ -154,8 +308,7 @@ final class MountManagerTests: XCTestCase {
         unmounter.markMounted(stale)
 
         let m = makeManager()
-        let live = try await m.mount(shoot("En cours", folder: "/Volumes/SSD/En cours"), mode: .montageFluide)
-        unmounter.markMounted(live)
+        let live = try await m.mount(shoot("En cours"), mode: .montageFluide)
 
         try await m.cleanStaleMounts()
 
@@ -169,35 +322,31 @@ final class MountManagerTests: XCTestCase {
         XCTAssertEqual(mounted.count, 1)
     }
 
-    func testUnmountTerminatesAndRemovesDir() async throws {
-        let m = makeManager()
-        let s = shoot("A", folder: "/Volumes/SSD/A")
-        let url = try await m.mount(s, mode: .montageFluide)
-        unmounter.markMounted(url)
-        try await m.unmount(s)
-        XCTAssertEqual(unmounter.unmounted, [url.standardizedFileURL.path])
-        XCTAssertTrue(try XCTUnwrap(launcher.processes.first).wasTerminated)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
-        let mounted = await m.mounted
-        XCTAssertTrue(mounted.isEmpty)
+    func testCleanStaleMountsIgnoresSymlinkedChildren() async throws {
+        let volume = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FakeVolume-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: volume, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: volume) }
+        let link = root.appendingPathComponent("SSD")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: volume)
+        // Simulate an unmounter that follows the link to a real mount point.
+        unmounter.markMounted(volume)
+        unmounter.markMounted(link)
+
+        try await makeManager().cleanStaleMounts()
+
+        XCTAssertEqual(unmounter.unmounted, [])
+        XCTAssertNotNil(try? FileManager.default.destinationOfSymbolicLink(atPath: link.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: volume.path))
     }
 
-    func testUnmountAll() async throws {
-        let m = makeManager()
-        var urls: [URL] = []
-        for name in ["A", "B", "C"] {
-            let url = try await m.mount(shoot(name, folder: "/Volumes/SSD/\(name)"), mode: .montageFluide)
-            unmounter.markMounted(url)
-            urls.append(url)
-        }
-        await m.unmountAll()
-        XCTAssertTrue(launcher.processes.allSatisfy { $0.wasTerminated && !$0.isRunning })
-        XCTAssertEqual(Set(unmounter.unmounted), Set(urls.map(\.standardizedFileURL.path)))
-        let mounted = await m.mounted
-        XCTAssertTrue(mounted.isEmpty)
-        // Terminating fires onExit; it must not trigger a second unmount.
-        try await Task.sleep(nanoseconds: 50_000_000)
-        XCTAssertEqual(unmounter.unmounted.count, 3)
+    func testRealIsMountPointIgnoresSymlinks() throws {
+        let u = UmountUnmounter()
+        XCTAssertTrue(u.isMountPoint(URL(fileURLWithPath: "/")))
+        let link = root.appendingPathComponent("root-link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: URL(fileURLWithPath: "/"))
+        XCTAssertFalse(u.isMountPoint(link))
+        XCTAssertFalse(u.isMountPoint(root))
     }
 
     // MARK: - Integration
@@ -220,21 +369,24 @@ final class MountManagerTests: XCTestCase {
                       volumeName: "Macintosh HD", clips: [])
         let url = try await m.mount(s, mode: .montageFluide)
         do {
-            let unmounter = UmountUnmounter()
-            for _ in 0..<100 where !unmounter.isMountPoint(url) {
-                try await Task.sleep(nanoseconds: 100_000_000)
-            }
-            XCTAssertTrue(unmounter.isMountPoint(url), "mount did not appear")
+            XCTAssertTrue(UmountUnmounter().isMountPoint(url), "mount must be up when mount() returns")
             let clipDir = try XCTUnwrap(try FileManager.default.contentsOfDirectory(atPath: url.path)
                 .first { $0.hasPrefix("M29-0615") })
             let dngs = try FileManager.default.contentsOfDirectory(
                 atPath: url.appendingPathComponent(clipDir).path).filter { $0.lowercased().hasSuffix(".dng") }
             XCTAssertEqual(dngs.count, 320)
+
             let maybePort = await m.port(for: s)
             let port = try XCTUnwrap(maybePort)
+            let listen = try lsofListen(port)
+            print("lsof LISTEN :\(port) -> \(listen)")
+            XCTAssertTrue(listen.contains("127.0.0.1:\(port)"), listen)
+            XCTAssertFalse(listen.contains("*:\(port)"), listen)
+
             // The live switch endpoint must answer 2xx on the real engine.
             try await MountManager.httpGet(URL(string: "http://127.0.0.1:\(port)/set_value?dual_iso=2")!)
-            await m.setMode(.montageFluide)
+            let failed = await m.setMode(.montageFluide)
+            XCTAssertEqual(failed, [])
         } catch {
             await m.unmountAll()
             throw error
@@ -244,5 +396,18 @@ final class MountManagerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
         let mounted = await m.mounted
         XCTAssertTrue(mounted.isEmpty)
+    }
+
+    private func lsofListen(_ port: Int) throws -> String {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        p.arguments = ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN"]
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = FileHandle.nullDevice
+        try p.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        return String(decoding: data, as: UTF8.self)
     }
 }

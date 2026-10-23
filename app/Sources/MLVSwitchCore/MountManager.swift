@@ -16,27 +16,61 @@ public protocol RunningProcess: AnyObject, Sendable {
 }
 
 public protocol Unmounter: Sendable {
-    /// Unmounts `path`; a no-op when it is not a mount point.
-    func unmount(_ path: URL) throws
+    /// Unmounts `path`; a no-op when it is not a mount point. `force` skips the
+    /// polite attempt (used when the file server is known to be dead).
+    /// May block: the manager calls it off its actor.
+    func unmount(_ path: URL, force: Bool) throws
+    /// False for symlinks, even if they point at a mount point.
     func isMountPoint(_ path: URL) -> Bool
+}
+
+public extension Unmounter {
+    func unmount(_ path: URL) throws { try unmount(path, force: false) }
 }
 
 public enum MountError: Error, Equatable {
     case noFreePort
     case mountPointBusy(URL)
     case unmountFailed(URL)
+    case unmountInProgress(URL)
+    /// The engine exited before the mount and its web GUI were up.
+    case exitedDuringStartup(status: Int32)
+    /// The mount did not appear within the readiness timeout.
+    case startupTimedOut(URL)
+    /// The mount appeared but nothing listens on the web-GUI port, so the
+    /// dual ISO mode could not be switched live.
+    case webGUIUnavailable(port: Int)
+}
+
+public enum MountEvent: Sendable, Equatable {
+    /// A supervised mlvfs exited on its own (crash or external kill); its
+    /// mount has been cleaned up. Not sent for deliberate unmounts.
+    case exited(Shoot, status: Int32)
 }
 
 // MARK: - Manager
 
 /// Owns one supervised `mlvfs -f` process per mounted shoot.
+///
+/// State lives on the actor; blocking unmount tools run off it. An entry
+/// being unmounted keeps its port and path reserved until the unmount ends.
 public actor MountManager {
-    private struct Entry {
+    /// Actor-confined.
+    private final class Entry {
         let id: UUID
         let shoot: Shoot
         let url: URL
         let port: Int
         let process: any RunningProcess
+        let exitStatus: ExitBox
+        var unmountTask: Task<Void, Error>?
+
+        init(id: UUID, shoot: Shoot, url: URL, port: Int, process: any RunningProcess, exitStatus: ExitBox) {
+            self.id = id; self.shoot = shoot; self.url = url; self.port = port
+            self.process = process; self.exitStatus = exitStatus
+        }
+
+        var isLive: Bool { process.isRunning }
     }
 
     private let mlvfs: URL
@@ -48,13 +82,22 @@ public actor MountManager {
     private let http: @Sendable (URL) async throws -> Void
     private let portRange: ClosedRange<Int>
     private let isPortFree: @Sendable (Int) -> Bool
+    private let readinessTimeout: Duration
+    private let pollInterval: Duration
     private var entries: [UUID: Entry] = [:]
+    /// Post-crash cleanups in flight, by mount-point path.
+    private var cleanups: [String: Task<Void, Never>] = [:]
+
+    public nonisolated let events: AsyncStream<MountEvent>
+    private let eventSink: AsyncStream<MountEvent>.Continuation
 
     public init(mlvfs: URL, fpmDir: URL, indexDir: URL, paths: MountPaths,
                 launcher: any ProcessLauncher, unmounter: any Unmounter,
                 http: @escaping @Sendable (URL) async throws -> Void,
                 portRange: ClosedRange<Int> = 8100...8199,
-                isPortFree: @escaping @Sendable (Int) -> Bool) {
+                isPortFree: @escaping @Sendable (Int) -> Bool,
+                readinessTimeout: Duration = .seconds(5),
+                pollInterval: Duration = .milliseconds(50)) {
         self.mlvfs = mlvfs
         self.fpmDir = fpmDir
         self.indexDir = indexDir
@@ -64,24 +107,46 @@ public actor MountManager {
         self.http = http
         self.portRange = portRange
         self.isPortFree = isPortFree
+        self.readinessTimeout = readinessTimeout
+        self.pollInterval = pollInterval
+        (events, eventSink) = AsyncStream.makeStream(of: MountEvent.self)
     }
 
+    deinit { eventSink.finish() }
+
+    /// Shoots whose engine is running.
     public var mounted: [Shoot: URL] {
-        Dictionary(entries.values.map { ($0.shoot, $0.url) }, uniquingKeysWith: { a, _ in a })
+        Dictionary(entries.values.filter(\.isLive).map { ($0.shoot, $0.url) },
+                   uniquingKeysWith: { a, _ in a })
     }
 
     /// Web-GUI port of a mounted shoot (internal, for tests).
     func port(for shoot: Shoot) -> Int? { entry(for: shoot)?.port }
 
-    /// Launches mlvfs for `shoot` and returns its mount point. The mount itself
-    /// appears shortly after this returns. Mounting an already-mounted shoot
-    /// (same folder) returns its existing mount point.
+    /// Launches mlvfs for `shoot` and returns once the mount and its web GUI
+    /// are up (bounded by the readiness timeout). Mounting an already-mounted
+    /// shoot (same folder) returns its existing mount point.
     @discardableResult
     public func mount(_ shoot: Shoot, mode: DualISOMode,
-                      fixBadPixels: Bool = true, fixFocusPixels: Bool = true) throws -> URL {
-        if let existing = entry(for: shoot) { return existing.url }
-
-        let url = paths.mountPoint(for: shoot, alreadyMounted: mounted)
+                      fixBadPixels: Bool = true, fixFocusPixels: Bool = true) async throws -> URL {
+        var url: URL
+        while true {
+            if let e = entry(for: shoot) {
+                if e.unmountTask != nil { throw MountError.unmountInProgress(e.url) }
+                if e.isLive {
+                    try await awaitReady(e.id)
+                    return e.url
+                }
+                await reap(e.id) // died, exit callback not handled yet
+                continue
+            }
+            url = paths.mountPoint(for: shoot, alreadyMounted: allMounts)
+            if let cleanup = cleanups[url.standardizedFileURL.path] {
+                await cleanup.value
+                continue // state may have changed while suspended
+            }
+            break
+        }
         if unmounter.isMountPoint(url) { throw MountError.mountPointBusy(url) }
         let port = try freePort()
 
@@ -89,7 +154,8 @@ public actor MountManager {
         if fixBadPixels { args.append("--bad-pix") }
         if !fixFocusPixels { args.append("--no-focus-pixels") }
         args += [mode.engineFlag, "--fpm-dir=\(fpmDir.path)", "--index-dir=\(indexDir.path)",
-                 "--port=\(port)", "-o", "ro", "-o", "volname=\(shoot.name)",
+                 "--port=127.0.0.1:\(port)", // web GUI on loopback only
+                 "-o", "ro", "-o", "volname=\(shoot.name)",
                  "-f"] // foreground: otherwise mlvfs daemonizes and we lose the process
 
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -101,62 +167,80 @@ public actor MountManager {
             throw error
         }
         let id = UUID()
-        entries[id] = Entry(id: id, shoot: shoot, url: url, port: port, process: process)
+        let box = ExitBox()
+        entries[id] = Entry(id: id, shoot: shoot, url: url, port: port, process: process, exitStatus: box)
         process.onExit = { [weak self] status in
+            box.set(status)
             guard let self else { return }
-            Task { await self.processExited(id, status: status) }
+            Task { await self.processExited(id) }
         }
-        // The process may have died between launch and installing the handler.
-        if !process.isRunning { processExited(id, status: -1) }
+        try await awaitReady(id)
         return url
     }
 
     /// Unmounts the shoot's path, stops its process and removes the empty
     /// mount-point directory. Throws (and keeps the shoot mounted) when the
     /// volume cannot be unmounted, e.g. because files are in use.
-    public func unmount(_ shoot: Shoot) throws {
+    public func unmount(_ shoot: Shoot) async throws {
         guard let e = entry(for: shoot) else { return }
-        try unmounter.unmount(e.url)
-        entries[e.id] = nil
-        e.process.onExit = nil
-        if e.process.isRunning { e.process.terminate() }
-        removeIfEmpty(e.url)
+        if let running = e.unmountTask { return try await running.value }
+        guard e.isLive else { return await reap(e.id) }
+        let id = e.id
+        let task = Task { try await self.performUnmount(id, force: false) }
+        e.unmountTask = task
+        try await task.value
     }
 
-    public func unmountAll() {
-        for e in entries.values { try? unmount(e.shoot) }
+    public func unmountAll() async {
+        for e in Array(entries.values) { try? await unmount(e.shoot) }
     }
 
-    /// Switches the dual ISO mode of every running mlvfs live. Unreachable
-    /// processes are ignored.
-    public func setMode(_ mode: DualISOMode) async {
-        let urls = entries.values.compactMap {
-            URL(string: "http://127.0.0.1:\($0.port)/set_value?dual_iso=\(mode.rawValue)")
-        }
+    /// Switches the dual ISO mode of every running mlvfs live. Returns the
+    /// shoots whose engine did not accept the change.
+    @discardableResult
+    public func setMode(_ mode: DualISOMode) async -> [Shoot] {
+        let targets = entries.values.filter { $0.isLive && $0.unmountTask == nil }.map { ($0.shoot, $0.port) }
         let http = self.http
-        await withTaskGroup(of: Void.self) { group in
-            for url in urls { group.addTask { try? await http(url) } }
+        return await withTaskGroup(of: Shoot?.self) { group in
+            for (shoot, port) in targets {
+                group.addTask {
+                    guard let url = URL(string: "http://127.0.0.1:\(port)/set_value?dual_iso=\(mode.rawValue)")
+                    else { return shoot }
+                    do { try await http(url); return nil } catch { return shoot }
+                }
+            }
+            var failed: [Shoot] = []
+            for await f in group { if let f { failed.append(f) } }
+            return failed
         }
     }
 
     /// Unmounts mount points under `paths.root` that no live process of this
     /// manager owns, then removes empty non-mounted child directories.
-    /// Non-empty regular directories are never touched.
-    public func cleanStaleMounts() throws {
-        let owned = Set(entries.values.filter { $0.process.isRunning }
-            .map { $0.url.standardizedFileURL.path })
+    /// Symlinks, files and non-empty directories are never touched.
+    public func cleanStaleMounts() async throws {
+        for e in Array(entries.values) where !e.isLive && e.unmountTask == nil { await reap(e.id) }
         let fm = FileManager.default
         guard fm.fileExists(atPath: paths.root.path) else { return }
         let children = try fm.contentsOfDirectory(at: paths.root, includingPropertiesForKeys: nil)
-        for child in children where !owned.contains(child.standardizedFileURL.path) {
+        for child in children {
+            var st = stat()
+            guard lstat(child.path, &st) == 0, (st.st_mode & S_IFMT) == S_IFDIR else { continue }
+            let key = child.standardizedFileURL.path
+            let owned = Set(entries.values.map { $0.url.standardizedFileURL.path })
+            guard !owned.contains(key), cleanups[key] == nil else { continue }
             if unmounter.isMountPoint(child) {
-                try? unmounter.unmount(child)
+                try? await unmountOffActor(child, force: false)
             }
             removeIfEmpty(child)
         }
     }
 
     // MARK: Private
+
+    private var allMounts: [Shoot: URL] {
+        Dictionary(entries.values.map { ($0.shoot, $0.url) }, uniquingKeysWith: { a, _ in a })
+    }
 
     private func entry(for shoot: Shoot) -> Entry? {
         let key = shoot.folder.standardizedFileURL
@@ -171,22 +255,93 @@ public actor MountManager {
         return port
     }
 
-    private func processExited(_ id: UUID, status: Int32) {
-        guard let e = entries.removeValue(forKey: id) else { return } // already unmounted by us
-        try? unmounter.unmount(e.url)
+    /// Polls until the mount point is mounted and the web-GUI port is bound.
+    /// On failure the entry is torn down before throwing.
+    private func awaitReady(_ id: UUID) async throws {
+        let clock = ContinuousClock()
+        let deadline = clock.now + readinessTimeout
+        guard let initial = entries[id] else { throw MountError.exitedDuringStartup(status: -1) }
+        let (url, port, process, box) = (initial.url, initial.port, initial.process, initial.exitStatus)
+        var mountSeen = false
+        while true {
+            let current = entries[id]
+            if current == nil || !process.isRunning {
+                if let current, current.unmountTask == nil { await reap(id) }
+                throw MountError.exitedDuringStartup(status: box.get() ?? -1)
+            }
+            mountSeen = unmounter.isMountPoint(url)
+            if mountSeen && !isPortFree(port) { return }
+            if clock.now >= deadline {
+                if let current, current.unmountTask == nil {
+                    let task = Task { try await self.performUnmount(id, force: false) }
+                    current.unmountTask = task
+                    try? await task.value
+                }
+                throw mountSeen ? MountError.webGUIUnavailable(port: port) : MountError.startupTimedOut(url)
+            }
+            try? await Task.sleep(for: pollInterval)
+        }
+    }
+
+    /// Deliberate unmount. Ordering: unmount the path (off-actor), then drop
+    /// the entry, then stop the process, then remove the empty directory.
+    private func performUnmount(_ id: UUID, force: Bool) async throws {
+        guard let e = entries[id] else { return }
+        do {
+            try await unmountOffActor(e.url, force: force)
+        } catch {
+            e.unmountTask = nil
+            if !e.isLive { await reap(id) } // engine died meanwhile
+            throw error
+        }
+        entries[id] = nil
+        e.process.onExit = nil
+        if e.process.isRunning { e.process.terminate() }
         removeIfEmpty(e.url)
     }
 
-    /// Removes `url` only if it is an empty directory and not a mount point.
+    private func processExited(_ id: UUID) async {
+        guard let e = entries[id], e.unmountTask == nil else { return } // deliberate unmount owns it
+        await reap(id)
+    }
+
+    /// Unexpected exit: drop the entry, report it, force-unmount the path.
+    private func reap(_ id: UUID) async {
+        guard let e = entries.removeValue(forKey: id) else { return }
+        e.process.onExit = nil
+        eventSink.yield(.exited(e.shoot, status: e.exitStatus.get() ?? -1))
+        let url = e.url
+        let key = url.standardizedFileURL.path
+        let cleanup = Task { _ = try? await self.unmountOffActor(url, force: true) }
+        cleanups[key] = cleanup
+        await cleanup.value
+        cleanups[key] = nil
+        removeIfEmpty(url)
+    }
+
+    private nonisolated func unmountOffActor(_ url: URL, force: Bool) async throws {
+        let unmounter = self.unmounter
+        try await Task.detached { try unmounter.unmount(url, force: force) }.value
+    }
+
+    /// Removes `url` only if it is a real empty directory and not a mount point.
     private func removeIfEmpty(_ url: URL) {
-        let fm = FileManager.default
-        var isDir: ObjCBool = false
-        guard fm.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue,
+        var st = stat()
+        guard lstat(url.path, &st) == 0, (st.st_mode & S_IFMT) == S_IFDIR,
               !unmounter.isMountPoint(url),
-              let contents = try? fm.contentsOfDirectory(atPath: url.path), contents.isEmpty
+              let contents = try? FileManager.default.contentsOfDirectory(atPath: url.path),
+              contents.isEmpty
         else { return }
         rmdir(url.path)
     }
+}
+
+/// Exit status recorded synchronously by the process callback.
+final class ExitBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var status: Int32?
+    func set(_ s: Int32) { lock.withLock { status = s } }
+    func get() -> Int32? { lock.withLock { status } }
 }
 
 // MARK: - Real implementations
@@ -273,18 +428,31 @@ final class FoundationProcess: RunningProcess, @unchecked Sendable {
 }
 
 /// `/sbin/umount`, falling back to `/usr/sbin/diskutil unmount force`.
+/// Each tool is bounded by a timeout so a dead localhost NFS server cannot
+/// hang the caller indefinitely.
 public struct UmountUnmounter: Unmounter {
-    public init() {}
+    let umountTimeout: TimeInterval
+    let forceTimeout: TimeInterval
 
-    public func unmount(_ path: URL) throws {
+    public init(umountTimeout: TimeInterval = 5, forceTimeout: TimeInterval = 10) {
+        self.umountTimeout = umountTimeout
+        self.forceTimeout = forceTimeout
+    }
+
+    public func unmount(_ path: URL, force: Bool) throws {
         guard isMountPoint(path) else { return }
-        if run("/sbin/umount", [path.path]) == 0, !isMountPoint(path) { return }
-        _ = run("/usr/sbin/diskutil", ["unmount", "force", path.path])
+        if !force, run("/sbin/umount", [path.path], timeout: umountTimeout) == 0, !isMountPoint(path) {
+            return
+        }
+        _ = run("/usr/sbin/diskutil", ["unmount", "force", path.path], timeout: forceTimeout)
         if isMountPoint(path) { throw MountError.unmountFailed(path) }
     }
 
-    /// True when `path` is the root of a mounted file system (`statfs` f_mntonname).
+    /// True when `path` is the root of a mounted file system (`statfs`
+    /// f_mntonname). Symlinks are never mount points here.
     public func isMountPoint(_ path: URL) -> Bool {
+        var st = stat()
+        guard lstat(path.path, &st) == 0, (st.st_mode & S_IFMT) != S_IFLNK else { return false }
         guard let real = realpath(path.path, nil) else { return false }
         defer { free(real) }
         var fs = statfs()
@@ -295,14 +463,22 @@ public struct UmountUnmounter: Unmounter {
         return mountedOn == String(cString: real)
     }
 
-    private func run(_ tool: String, _ args: [String]) -> Int32 {
+    /// Exit status, or nil if the tool could not start or timed out (it is
+    /// then terminated, and killed if it ignores SIGTERM).
+    private func run(_ tool: String, _ args: [String], timeout: TimeInterval) -> Int32? {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: tool)
         p.arguments = args
         p.standardOutput = FileHandle.nullDevice
         p.standardError = FileHandle.nullDevice
-        do { try p.run() } catch { return -1 }
-        p.waitUntilExit()
+        let done = DispatchSemaphore(value: 0)
+        p.terminationHandler = { _ in done.signal() }
+        do { try p.run() } catch { return nil }
+        if done.wait(timeout: .now() + timeout) == .timedOut {
+            p.terminate()
+            if done.wait(timeout: .now() + 1) == .timedOut { kill(p.processIdentifier, SIGKILL) }
+            return nil
+        }
         return p.terminationStatus
     }
 }

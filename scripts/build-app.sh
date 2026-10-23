@@ -13,7 +13,8 @@ xcodebuild -project "mlv2dng.xcodeproj" -scheme "mlv2dng" -configuration Release
   -derivedDataPath "$ROOT/build/DerivedData" \
   CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES \
   MARKETING_VERSION="${MARKETING_VERSION:-0.1.0}" CURRENT_PROJECT_VERSION="${BUILD_NUMBER:-1}" \
-  build | tail -n 5
+  build > "$ROOT/build/xcodebuild.log" 2>&1 || { grep -E "error:" "$ROOT/build/xcodebuild.log" | head -30; tail -n 30 "$ROOT/build/xcodebuild.log"; exit 1; }
+tail -n 3 "$ROOT/build/xcodebuild.log"
 
 APP="$ROOT/build/DerivedData/Build/Products/Release/mlv2dng.app"
 rm -rf "$ROOT/build/mlv2dng.app"

@@ -1,0 +1,48 @@
+name: MLV Switch
+options:
+  bundleIdPrefix: net.mlvswitch
+  deploymentTarget:
+    macOS: "14.0"
+packages:
+  MLVSwitchCore:
+    path: .
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    DEVELOPMENT_TEAM: ""
+    ENABLE_HARDENED_RUNTIME: NO
+targets:
+  MLV Switch:
+    type: application
+    platform: macOS
+    sources:
+      - MLVSwitch
+    dependencies:
+      - package: MLVSwitchCore
+    info:
+      path: MLVSwitch/Info.plist
+      properties:
+        CFBundleName: MLV Switch
+        CFBundleDisplayName: MLV Switch
+        LSUIElement: true
+        LSMinimumSystemVersion: "14.0"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: net.mlvswitch.app
+        PRODUCT_NAME: MLV Switch
+        GENERATE_INFOPLIST_FILE: NO
+    postBuildScripts:
+      - name: Bundle mlvfs engine
+        basedOnDependencyAnalysis: false
+        script: |
+          set -e
+          REPO="${SRCROOT}/.."
+          RES="${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Resources"
+          mkdir -p "$RES"
+          cp "$REPO/build/engine/mlvfs" "$RES/mlvfs"
+          rm -rf "$RES/fpm"
+          cp -R "$REPO/engine/mlvfs/fpm" "$RES/fpm"
+          codesign --force -s - "$RES/mlvfs"
+          codesign --force --deep -s - "${TARGET_BUILD_DIR}/${FULL_PRODUCT_NAME}"

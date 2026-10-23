@@ -14,3 +14,7 @@ __pycache__/
 engine/mlvfs-bin
 *.o
 *.IDX
+app/.build/
+app/*.xcodeproj
+app/MLVSwitch/Info.plist
+DerivedData/

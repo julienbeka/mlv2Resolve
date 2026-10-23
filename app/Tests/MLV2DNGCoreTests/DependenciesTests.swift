@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import XCTest
-@testable import MLVSwitchCore
+@testable import MLV2DNGCore
 
 final class DependenciesTests: XCTestCase {
     private let dylib = "/usr/local/lib/libfuse-t.dylib"

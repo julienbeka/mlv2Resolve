@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import SwiftUI
 import AppKit
-import MLVSwitchCore
+import MLV2DNGCore
 
-/// Launch with `-MLVSwitchForceOnboarding YES` to force the "FUSE-T missing" state (manual testing).
+/// Launch with `-MLV2DNGForceOnboarding YES` to force the "FUSE-T missing" state (manual testing).
 enum OnboardingSupport {
-    static var forced: Bool { UserDefaults.standard.bool(forKey: "MLVSwitchForceOnboarding") }
+    static var forced: Bool { UserDefaults.standard.bool(forKey: "MLV2DNGForceOnboarding") }
     static func currentState() -> DependencyState {
         forced ? .fuseTMissing : Dependencies.live.check()
     }
@@ -50,7 +50,7 @@ final class OnboardingModel: ObservableObject {
     private var session: URLSession?
 
     private var cacheDir: URL {
-        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("MLV Switch")
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("mlv2dng")
     }
     private var pkgURL: URL { cacheDir.appendingPathComponent(Dependencies.fuseTInstaller.lastPathComponent) }
 
@@ -126,8 +126,8 @@ struct OnboardingView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Bienvenue dans MLV Switch").font(.title2.bold())
-            Text("Pour afficher vos MLV en DNG, MLV Switch a besoin de FUSE-T, un composant gratuit qui ne modifie pas la sécurité de votre Mac. L'installation demande votre mot de passe une seule fois.")
+            Text("Bienvenue dans mlv2dng").font(.title2.bold())
+            Text("Pour afficher vos MLV en DNG, mlv2dng a besoin de FUSE-T, un composant gratuit qui ne modifie pas la sécurité de votre Mac. L'installation demande votre mot de passe une seule fois.")
                 .fixedSize(horizontal: false, vertical: true)
             if case let .fuseTOutdated(found, minimum) = model.state {
                 Text("La version de FUSE-T installée (\(found)) est trop ancienne (minimum \(minimum)).")
@@ -187,7 +187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if mainWindow == nil {
             let hosting = NSHostingController(rootView: MainWindowView(state: AppCore.shared.state))
             let w = NSWindow(contentViewController: hosting)
-            w.title = "MLV Switch"
+            w.title = "mlv2dng"
             w.styleMask = [.titled, .closable]
             w.isReleasedWhenClosed = false
             w.setContentSize(hosting.view.fittingSize)
@@ -226,7 +226,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // FUSE-T missing: the menu shows the alert icon and « Installer FUSE-T… »; closing the
         // onboarding window keeps a quiet background check that starts the app once ready.
         AppCore.shared.state.needsFuseT = true
-        NSLog("MLV Switch: FUSE-T not ready (\(String(describing: model.state))), waiting")
+        NSLog("mlv2dng: FUSE-T not ready (\(String(describing: model.state))), waiting")
         model.onReady = { [weak self] in self?.becomeReady() }
         startBackgroundCheck()
         showOnboarding()
@@ -237,7 +237,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if window == nil {
             let hosting = NSHostingController(rootView: OnboardingView(model: model))
             let w = NSWindow(contentViewController: hosting)
-            w.title = "MLV Switch"
+            w.title = "mlv2dng"
             w.styleMask = [.titled, .closable]
             w.isReleasedWhenClosed = false
             w.delegate = self
@@ -272,7 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         model.stopPolling()
         window?.close()
         AppCore.shared.state.needsFuseT = false
-        NSLog("MLV Switch: FUSE-T ready, starting")
+        NSLog("mlv2dng: FUSE-T ready, starting")
         AppCore.shared.start()
         showMainWindowIfFirstLaunch()
     }

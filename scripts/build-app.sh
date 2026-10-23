@@ -1,6 +1,6 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Builds "build/MLV Switch.app" (engine + Xcode project + ad-hoc signature).
+# Builds "build/mlv2dng.app" (engine + Xcode project + ad-hoc signature).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -9,13 +9,13 @@ cd "$ROOT"
 
 cd "$ROOT/app"
 xcodegen generate --quiet
-xcodebuild -project "MLV Switch.xcodeproj" -scheme "MLV Switch" -configuration Release \
+xcodebuild -project "mlv2dng.xcodeproj" -scheme "mlv2dng" -configuration Release \
   -derivedDataPath "$ROOT/build/DerivedData" \
   CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES \
   build | tail -n 5
 
-APP="$ROOT/build/DerivedData/Build/Products/Release/MLV Switch.app"
-rm -rf "$ROOT/build/MLV Switch.app"
-cp -R "$APP" "$ROOT/build/MLV Switch.app"
-codesign --force --deep -s - "$ROOT/build/MLV Switch.app"
-echo "Built: $ROOT/build/MLV Switch.app"
+APP="$ROOT/build/DerivedData/Build/Products/Release/mlv2dng.app"
+rm -rf "$ROOT/build/mlv2dng.app"
+cp -R "$APP" "$ROOT/build/mlv2dng.app"
+codesign --force --deep -s - "$ROOT/build/mlv2dng.app"
+echo "Built: $ROOT/build/mlv2dng.app"

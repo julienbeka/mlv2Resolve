@@ -16,5 +16,5 @@ engine/mlvfs-bin
 *.IDX
 app/.build/
 app/*.xcodeproj
-app/MLVSwitch/Info.plist
+app/MLV2DNG/Info.plist
 DerivedData/

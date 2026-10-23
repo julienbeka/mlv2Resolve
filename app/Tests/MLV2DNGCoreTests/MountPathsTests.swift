@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import XCTest
-@testable import MLVSwitchCore
+@testable import MLV2DNGCore
 
 final class MountPathsTests: XCTestCase {
-    let root = URL(fileURLWithPath: "/tmp/MLV Switch", isDirectory: true)
+    let root = URL(fileURLWithPath: "/tmp/MLV Mounts", isDirectory: true)
 
     func shoot(_ name: String, volume: String, folder: String? = nil) -> Shoot {
         Shoot(name: name,

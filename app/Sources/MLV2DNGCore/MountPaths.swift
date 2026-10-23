@@ -8,9 +8,20 @@ public struct MountPaths: Sendable {
         self.root = root
     }
 
-    public static var defaultRoot: URL {
+    /// Name of the mount root folder in the user's home. Deliberately
+    /// product-neutral: DaVinci Resolve stores these paths in its projects, so
+    /// this name must NEVER change again, even if the app is renamed.
+    public static let rootFolderName = "MLV Mounts"
+
+    /// Mount root of the pre-mlv2dng app ("MLV Switch"), cleaned up once at launch.
+    public static var legacyRoot: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("MLV Switch", isDirectory: true)
+    }
+
+    public static var defaultRoot: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(rootFolderName, isDirectory: true)
     }
 
     /// Pure: no filesystem access.

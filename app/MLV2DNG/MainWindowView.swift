@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import SwiftUI
 import AppKit
-import MLVSwitchCore
+import MLV2DNGCore
 
 /// The main window: the same commands as the menu-bar menu, for when the icon is hidden (notch, full menu bar).
 struct MainWindowView: View {
@@ -60,7 +60,7 @@ struct MainWindowView: View {
                 }
                 Spacer()
             }
-            Text("MLV Switch reste disponible dans la barre des menus (icône pellicule). Si l'icône n'apparaît pas, la barre des menus est peut-être pleine : cette fenêtre s'ouvre aussi en double-cliquant sur l'app.")
+            Text("mlv2dng reste disponible dans la barre des menus (icône pellicule). Si l'icône n'apparaît pas, la barre des menus est peut-être pleine : cette fenêtre s'ouvre aussi en double-cliquant sur l'app.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import Foundation
-@testable import MLVSwitchCore
+@testable import MLV2DNGCore
 
 /// Tiny lock-protected box so fakes can be Sendable under Swift 6.
 final class Locked<Value>: @unchecked Sendable {

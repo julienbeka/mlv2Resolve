@@ -3,13 +3,13 @@
 import PackageDescription
 
 let package = Package(
-    name: "MLVSwitchCore",
+    name: "MLV2DNGCore",
     platforms: [.macOS(.v14)],
     products: [
-        .library(name: "MLVSwitchCore", targets: ["MLVSwitchCore"]),
+        .library(name: "MLV2DNGCore", targets: ["MLV2DNGCore"]),
     ],
     targets: [
-        .target(name: "MLVSwitchCore"),
-        .testTarget(name: "MLVSwitchCoreTests", dependencies: ["MLVSwitchCore"]),
+        .target(name: "MLV2DNGCore"),
+        .testTarget(name: "MLV2DNGCoreTests", dependencies: ["MLV2DNGCore"]),
     ]
 )

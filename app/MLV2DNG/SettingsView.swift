@@ -2,7 +2,7 @@
 import SwiftUI
 import AppKit
 import ServiceManagement
-import MLVSwitchCore
+import MLV2DNGCore
 
 enum LaunchAtLogin {
     static let initKey = "launchAtLoginInitialized"

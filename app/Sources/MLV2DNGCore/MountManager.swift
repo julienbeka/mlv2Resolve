@@ -224,10 +224,22 @@ public actor MountManager {
     /// manager owns, then removes empty non-mounted child directories.
     /// Symlinks, files and non-empty directories are never touched.
     public func cleanStaleMounts() async throws {
+        try await cleanStaleMounts(in: paths.root)
+    }
+
+    /// One-time cleanup of the previous app's mount root: unmounts stale mount
+    /// points inside it, removes empty child directories, then the root itself
+    /// if it ended up empty (`rmdir` only, never recursive).
+    public func cleanLegacyRoot(_ root: URL) async {
+        try? await cleanStaleMounts(in: root)
+        rmdir(root.path)
+    }
+
+    private func cleanStaleMounts(in root: URL) async throws {
         for e in Array(entries.values) where !e.isLive && e.unmountTask == nil { await reap(e.id) }
         let fm = FileManager.default
-        guard fm.fileExists(atPath: paths.root.path) else { return }
-        let children = try fm.contentsOfDirectory(at: paths.root, includingPropertiesForKeys: nil)
+        guard fm.fileExists(atPath: root.path) else { return }
+        let children = try fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
         for child in children {
             var st = stat()
             guard lstat(child.path, &st) == 0, (st.st_mode & S_IFMT) == S_IFDIR else { continue }
@@ -247,7 +259,7 @@ public actor MountManager {
     static func volumeName(_ name: String) -> String {
         let replaced = String(name.map { ",\\=".contains($0) ? " " : $0 })
         let collapsed = replaced.split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
-        return collapsed.isEmpty ? "MLV Switch" : collapsed
+        return collapsed.isEmpty ? "mlv2dng" : collapsed
     }
 
     // MARK: Private

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import AppKit
-import MLVSwitchCore
+import MLV2DNGCore
 
 /// The real MountManager, the shared AppState and the disk-event wiring.
 @MainActor
@@ -12,20 +12,21 @@ final class AppCore {
     private var started = false
     private var observers: [NSObjectProtocol] = []
 
-    /// `-MLVSwitchRoot <path>` overrides the mount root (testing only).
+    /// `-MLV2DNGRoot <path>` overrides the mount root (testing only).
     static var mountRoot: URL {
-        if let p = UserDefaults.standard.string(forKey: "MLVSwitchRoot") {
+        if let p = UserDefaults.standard.string(forKey: "MLV2DNGRoot") {
             return URL(fileURLWithPath: p, isDirectory: true)
         }
         return MountPaths.defaultRoot
     }
 
     private init() {
+        LegacyMigration.migrateDefaults(into: .standard)
         let resources = Bundle.main.resourceURL ?? Bundle.main.bundleURL
         let mlvfs = Bundle.main.url(forResource: "mlvfs", withExtension: nil)
             ?? resources.appendingPathComponent("mlvfs")
         let indexDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("MLV Switch", isDirectory: true)
+            .appendingPathComponent("mlv2dng", isDirectory: true)
             .appendingPathComponent("index", isDirectory: true)
         try? FileManager.default.createDirectory(at: indexDir, withIntermediateDirectories: true)
         manager = MountManager(mlvfs: mlvfs,
@@ -55,7 +56,12 @@ final class AppCore {
         observe(NSWorkspace.willUnmountNotification) { await $0.volumeWillUnmount($1) }
         // A yanked disk may only send didUnmount; the call is a no-op when nothing is affected.
         observe(NSWorkspace.didUnmountNotification) { await $0.volumeWillUnmount($1) }
-        Task { await state.restore() }
+        let manager = self.manager
+        Task {
+            // One-time cleanup of the old "~/MLV Switch" mount root.
+            await manager.cleanLegacyRoot(MountPaths.legacyRoot)
+            await state.restore()
+        }
     }
 
     /// Quit: force-unmount everything this process mounted, keeping the saved

@@ -1,4 +1,10 @@
-# MLV Switch
+# mlv2dng
+
+Edit Magic Lantern MLV footage directly in DaVinci Resolve: mlv2dng mounts your clips as CinemaDNG sequences on the fly — no conversion, no terminal.
+
+Montez vos rushs Magic Lantern (MLV) directement dans DaVinci Resolve : mlv2dng les présente à la volée en séquences CinemaDNG, sans conversion ni terminal.
+
+---
 
 Application de barre des menus macOS qui monte des tournages Magic Lantern (MLV) en séquences CinemaDNG virtuelles, pour les monter dans DaVinci Resolve, sans conversion ni copie. Elle pilote le moteur MLVFS sur FUSE-T (FUSE sans extension noyau), sur Apple Silicon.
 
@@ -6,16 +12,16 @@ Application de barre des menus macOS qui monte des tournages Magic Lantern (MLV)
 
 ## Installation
 
-1. Ouvrez `MLV Switch.app` (placez-la dans `/Applications`).
+1. Ouvrez `mlv2dng.app` (placez-la dans `/Applications`).
 2. Tant que l'application n'est pas notarisée, macOS refuse la première ouverture : faites un clic droit sur l'app puis **Ouvrir**, ou allez dans Réglages Système > Confidentialité et sécurité et cliquez sur **Ouvrir quand même**.
 3. FUSE-T est géré par l'application : s'il manque, elle propose de le télécharger et de l'installer, puis continue toute seule.
-4. Cliquez sur l'icône de la barre des menus, **Choisir un dossier…**, puis cliquez sur un tournage pour le monter. Les DNG apparaissent dans `~/MLV Switch/<tournage>` (menu : « Afficher les DNG dans le Finder »). Les tournages montés sont remontés automatiquement au lancement et à la reconnexion du disque.
+4. Cliquez sur l'icône de la barre des menus, **Choisir un dossier…**, puis cliquez sur un tournage pour le monter. Les DNG apparaissent dans `~/MLV Mounts/<tournage>` (menu : « Afficher les DNG dans le Finder »). Les tournages montés sont remontés automatiquement au lancement et à la reconnexion du disque.
 
 ## Compiler
 
 Prérequis : Xcode (outils en ligne de commande), [XcodeGen](https://github.com/yonaskolb/XcodeGen) et FUSE-T (`brew install macos-fuse-t/homebrew-cask/fuse-t`).
 
-    scripts/build-app.sh       # produit build/MLV Switch.app (moteur + app, signature ad hoc)
+    scripts/build-app.sh       # produit build/mlv2dng.app (moteur + app, signature ad hoc)
     cd app && swift test       # tests du noyau
 
 Le moteur seul : `scripts/build-engine.sh` (écrit `build/engine/mlvfs`).

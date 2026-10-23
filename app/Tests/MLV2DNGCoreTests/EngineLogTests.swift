@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import XCTest
-@testable import MLVSwitchCore
+@testable import MLV2DNGCore
 
 final class EngineLogTests: XCTestCase {
     var dir: URL!
 
     override func setUpWithError() throws {
         dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("EngineLogTests-\(UUID().uuidString)/Logs/MLV Switch", isDirectory: true)
+            .appendingPathComponent("EngineLogTests-\(UUID().uuidString)/Logs/mlv2dng", isDirectory: true)
     }
 
     override func tearDownWithError() throws {

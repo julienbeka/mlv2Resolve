@@ -1,3 +1,5 @@
+> Note (23/10/2026) : l'app a été renommée mlv2dng ; le point de montage est désormais ~/MLV Mounts.
+
 # MLV Switch : monter ses MLV en DNG dans Resolve, sans terminal
 
 *Document de conception, version 1 — 23 octobre 2026*

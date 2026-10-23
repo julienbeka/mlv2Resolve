@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import SwiftUI
-import MLVSwitchCore
+import MLV2DNGCore
 
 @main
-struct MLVSwitchApp: App {
+struct MLV2DNGApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @ObservedObject private var state = AppCore.shared.state
 

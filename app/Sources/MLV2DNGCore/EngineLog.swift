@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import Foundation
 
-/// Per-shoot engine log files: `~/Library/Logs/MLV Switch/<mount name>.log`.
+/// Per-shoot engine log files: `~/Library/Logs/mlv2dng/<mount name>.log`.
 public enum EngineLog {
     /// Rotate to `<name>.log.1` when the log is larger than this at launch.
     public static let rotateBytes: Int64 = 5_000_000
 
     public static var defaultDirectory: URL {
         FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Logs/MLV Switch", isDirectory: true)
+            .appendingPathComponent("Library/Logs/mlv2dng", isDirectory: true)
     }
 
     /// Log file for a mount point folder name (already sanitized by MountPaths).

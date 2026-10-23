@@ -1,10 +1,10 @@
-name: MLV Switch
+name: mlv2dng
 options:
-  bundleIdPrefix: net.mlvswitch
+  bundleIdPrefix: net.mlv2dng
   deploymentTarget:
     macOS: "14.0"
 packages:
-  MLVSwitchCore:
+  MLV2DNGCore:
     path: .
 settings:
   base:
@@ -14,24 +14,24 @@ settings:
     DEVELOPMENT_TEAM: ""
     ENABLE_HARDENED_RUNTIME: NO
 targets:
-  MLV Switch:
+  mlv2dng:
     type: application
     platform: macOS
     sources:
-      - MLVSwitch
+      - MLV2DNG
     dependencies:
-      - package: MLVSwitchCore
+      - package: MLV2DNGCore
     info:
-      path: MLVSwitch/Info.plist
+      path: MLV2DNG/Info.plist
       properties:
-        CFBundleName: MLV Switch
-        CFBundleDisplayName: MLV Switch
+        CFBundleName: mlv2dng
+        CFBundleDisplayName: mlv2dng
         LSUIElement: true
         LSMinimumSystemVersion: "14.0"
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: net.mlvswitch.app
-        PRODUCT_NAME: MLV Switch
+        PRODUCT_BUNDLE_IDENTIFIER: net.mlv2dng.app
+        PRODUCT_NAME: mlv2dng
         GENERATE_INFOPLIST_FILE: NO
     postBuildScripts:
       - name: Bundle mlvfs engine

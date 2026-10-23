@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import XCTest
-@testable import MLVSwitchCore
+@testable import MLV2DNGCore
 
 final class MountManagerTests: XCTestCase {
     var root: URL!
@@ -93,7 +93,7 @@ final class MountManagerTests: XCTestCase {
         XCTAssertTrue(args.contains("volname=Paris jour 1"), "\(args)")
         XCTAssertFalse(args.contains { $0.hasPrefix("volname=") && $0.contains(",") })
         XCTAssertEqual(MountManager.volumeName("a=b\\c,,d"), "a b c d")
-        XCTAssertEqual(MountManager.volumeName(" , "), "MLV Switch")
+        XCTAssertEqual(MountManager.volumeName(" , "), "mlv2dng")
         XCTAssertEqual(MountManager.volumeName("Tournage été 2026 🎬"), "Tournage été 2026 🎬")
     }
 
@@ -420,8 +420,8 @@ final class MountManagerTests: XCTestCase {
     // MARK: - Integration
 
     func testRealMountOfTestClip() async throws {
-        try XCTSkipUnless(ProcessInfo.processInfo.environment["MLVSWITCH_INTEGRATION"] == "1",
-                          "set MLVSWITCH_INTEGRATION=1 to run")
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["MLV2DNG_INTEGRATION"] == "1",
+                          "set MLV2DNG_INTEGRATION=1 to run")
         let repo = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()

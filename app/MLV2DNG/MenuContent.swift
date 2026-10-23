@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import SwiftUI
 import AppKit
-import MLVSwitchCore
+import MLV2DNGCore
 
 private func frenchSizes(_ bytes: Int64) -> String {
     // ByteCountFormatter follows the formatter's locale via the system; French units (Go/Mo) via Bundle language is not
@@ -54,7 +54,7 @@ enum MenuActions {
         NSApp.activate(ignoringOtherApps: true)
         let a = NSAlert()
         a.alertStyle = style
-        a.messageText = "MLV Switch"
+        a.messageText = "mlv2dng"
         a.informativeText = text
         a.addButton(withTitle: "OK")
         a.runModal()
@@ -117,7 +117,7 @@ struct MenuContent: View {
             Task { await state.unmountAll() }
         }
         .disabled(state.mounted.isEmpty)
-        Button("Ouvrir la fenêtre MLV Switch") { AppDelegate.shared?.showMainWindow() }
+        Button("Ouvrir la fenêtre mlv2dng") { AppDelegate.shared?.showMainWindow() }
         Button("Réglages…") {
             AppDelegate.shared?.showSettings(state: state)
         }

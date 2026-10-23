@@ -1,65 +1,58 @@
 # mlv2dng
 
+*[Version française](README.fr.md)*
+
 Edit Magic Lantern MLV footage directly in DaVinci Resolve: mlv2dng mounts your clips as CinemaDNG sequences on the fly — no conversion, no terminal.
 
-Montez vos rushs Magic Lantern (MLV) directement dans DaVinci Resolve : mlv2dng les présente à la volée en séquences CinemaDNG, sans conversion ni terminal.
+mlv2dng is a macOS menu-bar app that mounts Magic Lantern (MLV) shoots as virtual CinemaDNG sequences so you can edit them in DaVinci Resolve without converting or copying anything. It drives the MLVFS engine on FUSE-T (FUSE without a kernel extension), on Apple Silicon.
 
----
+The interface follows the macOS language (English by default, French available). You can also pick the language in **Settings… → Language**.
 
-Application de barre des menus macOS qui monte des tournages Magic Lantern (MLV) en séquences CinemaDNG virtuelles, pour les monter dans DaVinci Resolve, sans conversion ni copie. Elle pilote le moteur MLVFS sur FUSE-T (FUSE sans extension noyau), sur Apple Silicon.
+## Download
 
-*A macOS menu-bar app that mounts Magic Lantern MLV shoots as virtual CinemaDNG sequences for DaVinci Resolve, using MLVFS on FUSE-T (Apple Silicon).*
+Download the latest `mlv2dng-<version>-macos-arm64.zip` from the [Releases](https://github.com/julienbeka/mlv2dng/releases) page (Apple Silicon Mac, macOS 14 or later). Check it against the attached `.sha256` file: `shasum -a 256 -c <file>.sha256`.
 
-L'interface suit la langue de macOS : anglais par défaut, français disponible. / *The app follows the macOS language: English by default, French available.*
+1. Unzip it and move `mlv2dng.app` to `/Applications`.
+2. The app is not notarized yet: on first launch, macOS blocks it. Open System Settings > Privacy & Security and click **Open Anyway**.
+3. If FUSE-T is missing, the app offers to download and install it on first launch (your administrator password is asked once), then carries on by itself.
 
-## Téléchargement / Download
+To build from source, see [Building](#building).
 
-Téléchargez le dernier `mlv2dng-<version>-macos-arm64.zip` depuis la page [Releases](https://github.com/julienbeka/mlv2dng/releases) (Mac Apple Silicon, macOS 14+). Vérifiez l'empreinte avec le fichier `.sha256` joint : `shasum -a 256 -c <fichier>.sha256`.
+## Usage
 
-*Download the latest `mlv2dng-<version>-macos-arm64.zip` from [Releases](https://github.com/julienbeka/mlv2dng/releases) (Apple Silicon, macOS 14+), and check it against the attached `.sha256`.*
+1. Click the menu-bar icon (or double-click the app to open the mlv2dng window if the icon is hidden behind the notch), then **Choose Folder…**. The folder can be a single shoot or a parent folder containing several shoots.
+2. Click a shoot to mount it. The DNGs appear in `~/MLV Mounts/<shoot>` (**Show DNGs in Finder**). Import them into Resolve from there.
+3. Mounted shoots are remounted automatically at launch and when their disk is plugged back in, always at the same path, so Resolve finds its clips again.
+4. **Dual ISO**: use **Smooth Editing** while editing and **Grading Quality** before grading. The switch is applied live; in Resolve, select the clips and right-click → Refresh.
+5. 1x3 anamorphic footage: set the clip's pixel aspect ratio to 3:1 in Resolve (Clip Attributes); the app reminds you when you mount such a shoot.
 
-1. Décompressez et placez `mlv2dng.app` dans `/Applications`. / *Unzip and move `mlv2dng.app` to `/Applications`.*
-2. L'app n'est pas notarisée : au premier lancement, allez dans Réglages Système > Confidentialité et sécurité, cliquez sur **Ouvrir quand même** (*System Settings > Privacy & Security > **Open Anyway***).
-3. FUSE-T est installé par l'app au premier lancement s'il manque. / *FUSE-T is installed by the app on first launch if missing.*
+Your original MLV files are never modified: the mounts are read-only and the engine refuses every write.
 
-Pour compiler depuis les sources, voir [Compiler](#compiler).
+## Building
 
-## Installation
+Requirements: Xcode (command-line tools), [XcodeGen](https://github.com/yonaskolb/XcodeGen) and FUSE-T (`brew install macos-fuse-t/homebrew-cask/fuse-t`).
 
-1. Ouvrez `mlv2dng.app` (placez-la dans `/Applications`).
-2. Tant que l'application n'est pas notarisée, macOS refuse la première ouverture : faites un clic droit sur l'app puis **Ouvrir**, ou allez dans Réglages Système > Confidentialité et sécurité et cliquez sur **Ouvrir quand même**.
-3. FUSE-T est géré par l'application : s'il manque, elle propose de le télécharger et de l'installer, puis continue toute seule.
-4. Cliquez sur l'icône de la barre des menus, **Choisir un dossier…**, puis cliquez sur un tournage pour le monter. Les DNG apparaissent dans `~/MLV Mounts/<tournage>` (menu : « Afficher les DNG dans le Finder »). Les tournages montés sont remontés automatiquement au lancement et à la reconnexion du disque.
+    scripts/build-app.sh       # builds build/mlv2dng.app (engine + app, ad-hoc signed)
+    cd app && swift test       # core tests
 
-## Compiler
+Engine only: `scripts/build-engine.sh` (writes `build/engine/mlvfs`).
 
-Prérequis : Xcode (outils en ligne de commande), [XcodeGen](https://github.com/yonaskolb/XcodeGen) et FUSE-T (`brew install macos-fuse-t/homebrew-cask/fuse-t`).
+Every push to `main` is built and tested by GitHub Actions; every `v*` tag publishes a release with the zipped app.
 
-    scripts/build-app.sh       # produit build/mlv2dng.app (moteur + app, signature ad hoc)
-    cd app && swift test       # tests du noyau
+## Credits
 
-Le moteur seul : `scripts/build-engine.sh` (écrit `build/engine/mlvfs`).
+- Inspired by Switch by Danne.
+- MLVFS by David Milligan ([repository](https://github.com/davidmilligan/MLVFS), vendored in `engine/mlvfs/`).
+- Focus-pixel maps and LJ92 decoder from MLV App (ilia3101 and contributors).
 
-## Crédits
+## License
 
-- Inspiré de Switch par Danne.
-- MLVFS par David Milligan ([dépôt](https://github.com/davidmilligan/MLVFS), intégré dans `engine/mlvfs/`).
-- Cartes de focus pixels et décodeur LJ92 issus de MLV App (ilia3101 et contributeurs).
+The code specific to this repository (app, scripts, tests, engine additions) is licensed under GPL-3.0-or-later. See `LICENSE`.
 
-## Licence
+The engine (`engine/mlvfs/`) contains third-party code, all compatible with GPL-3.0:
 
-Le code propre à ce dépôt (app, scripts, tests, ajouts au moteur) est sous licence
-GPL-3.0-or-later. Voir `LICENSE`.
+- MLVFS (David Milligan) and the Magic Lantern code it reuses (dual ISO, chroma smoothing, pattern noise…): GPL-2.0-or-later, used here under GPL-3.0-or-later.
+- Code ported from MLV App (focus-pixel maps, LJ92 decoder) and AMaZE (RawTherapee): GPL-3.0.
+- LZMA SDK (Igor Pavlov): public domain. DNG tag headers: Adobe DNG SDK license (permissive).
 
-Le moteur (`engine/mlvfs/`) contient du code tiers, tout compatible GPL-3.0 :
-
-- MLVFS (David Milligan) et le code Magic Lantern qu'il reprend (dual ISO, chroma smoothing,
-  pattern noise…) : GPL-2.0-or-later, utilisé ici sous GPL-3.0-or-later.
-- Code porté de MLV App (cartes de focus pixels, décodeur LJ92) et AMaZE (RawTherapee) : GPL-3.0.
-- LZMA SDK (Igor Pavlov) : domaine public. En-têtes de tags DNG : licence Adobe DNG SDK (permissive).
-
-Aucun composant GPL-2.0-only : le serveur web `mongoose/` (interface de réglage) et `slre/`
-(expressions régulières), fournis avec MLVFS sous GPL-2.0-only, ont été retirés. Le mode dual ISO
-se change désormais par signal (SIGUSR1 = montage fluide, SIGUSR2 = qualité étalonnage) et la
-correspondance des noms de dossiers Resolve utilise `<regex.h>` POSIX. Le binaire `mlvfs` (et donc
-l'application) est distribuable sous **GPL-3.0**.
+No GPL-2.0-only component remains: the `mongoose/` web server (settings UI) and `slre/` (regular expressions), shipped with MLVFS under GPL-2.0-only, have been removed. The dual ISO mode is now switched by signal (SIGUSR1 = smooth editing, SIGUSR2 = grading quality) and Resolve folder-name matching uses POSIX `<regex.h>`. The `mlvfs` binary, and therefore the app, can be distributed under **GPL-3.0**.

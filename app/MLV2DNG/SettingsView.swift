@@ -87,6 +87,7 @@ struct SettingsView: View {
                 }
             }
             Section("About") {
+                Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"))")
                 Text("Inspired by Switch by Danne · MLVFS by David Milligan · focus pixel maps and LJ92 decoder from MLV App (ilia3101 and contributors)")
                 Text("Free software under the GPL-3.0-or-later license.")
             }

@@ -1,0 +1,69 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.1.0); must already exist'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Install FUSE-T and XcodeGen
+        run: |
+          brew install --cask macos-fuse-t/homebrew-cask/fuse-t
+          brew install xcodegen
+          ls -l /usr/local/include/fuse /usr/local/lib/libfuse-t.dylib
+
+      - name: Swift tests
+        working-directory: app
+        run: swift test
+
+      - name: Engine C tests (no clip needed)
+        working-directory: engine
+        run: |
+          make -f Makefile.arm64 resolve-name-test
+          make -f Makefile.arm64 dual-iso-cache-test
+
+      - name: Build app
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          export MARKETING_VERSION="${TAG#v}"
+          scripts/build-app.sh
+
+      - name: Package
+        run: |
+          VERSION="${TAG#v}"
+          ZIP="mlv2dng-${VERSION}-macos-arm64.zip"
+          ditto -c -k --keepParent build/mlv2dng.app "$ZIP"
+          shasum -a 256 "$ZIP" > "$ZIP.sha256"
+          cat "$ZIP.sha256"
+          sed -e "s/@VERSION@/${VERSION}/g" -e "s/@TAG@/${TAG}/g" \
+              -e "s#@REPO@#${GITHUB_REPOSITORY}#g" scripts/release-notes.md > notes.md
+          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
+
+      - name: Create or update release
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ZIP" "$ZIP.sha256" --clobber
+            gh release edit "$TAG" --notes-file notes.md
+          else
+            gh release create "$TAG" "$ZIP" "$ZIP.sha256" \
+              --title "mlv2dng ${TAG#v}" --notes-file notes.md --verify-tag
+          fi

@@ -14,6 +14,8 @@ settings:
     CODE_SIGN_IDENTITY: "-"
     DEVELOPMENT_TEAM: ""
     ENABLE_HARDENED_RUNTIME: NO
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
 targets:
   mlv2dng:
     type: application
@@ -29,6 +31,8 @@ targets:
         CFBundleLocalizations: [en, fr]
         CFBundleName: mlv2dng
         CFBundleDisplayName: mlv2dng
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         LSUIElement: true
         LSMinimumSystemVersion: "14.0"
     settings:

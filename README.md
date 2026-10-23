@@ -12,6 +12,18 @@ Application de barre des menus macOS qui monte des tournages Magic Lantern (MLV)
 
 L'interface suit la langue de macOS : anglais par défaut, français disponible. / *The app follows the macOS language: English by default, French available.*
 
+## Téléchargement / Download
+
+Téléchargez le dernier `mlv2dng-<version>-macos-arm64.zip` depuis la page [Releases](https://github.com/julienbeka/mlv2dng/releases) (Mac Apple Silicon, macOS 14+). Vérifiez l'empreinte avec le fichier `.sha256` joint : `shasum -a 256 -c <fichier>.sha256`.
+
+*Download the latest `mlv2dng-<version>-macos-arm64.zip` from [Releases](https://github.com/julienbeka/mlv2dng/releases) (Apple Silicon, macOS 14+), and check it against the attached `.sha256`.*
+
+1. Décompressez et placez `mlv2dng.app` dans `/Applications`. / *Unzip and move `mlv2dng.app` to `/Applications`.*
+2. L'app n'est pas notarisée : au premier lancement, allez dans Réglages Système > Confidentialité et sécurité, cliquez sur **Ouvrir quand même** (*System Settings > Privacy & Security > **Open Anyway***).
+3. FUSE-T est installé par l'app au premier lancement s'il manque. / *FUSE-T is installed by the app on first launch if missing.*
+
+Pour compiler depuis les sources, voir [Compiler](#compiler).
+
 ## Installation
 
 1. Ouvrez `mlv2dng.app` (placez-la dans `/Applications`).

@@ -62,7 +62,7 @@ struct MainWindowView: View {
                 }
                 Spacer()
             }
-            Text("mlv2dng stays available in the menu bar (film icon). If the icon doesn't appear, the menu bar may be full: this window also opens when you double-click the app.")
+            Text("mlv2dng stays available in the menu bar (∞ icon). If the icon doesn't appear, the menu bar may be full: this window also opens when you double-click the app.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

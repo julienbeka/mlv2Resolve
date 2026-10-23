@@ -205,19 +205,19 @@
         }
       }
     },
-    "mlv2dng stays available in the menu bar (film icon). If the icon doesn't appear, the menu bar may be full: this window also opens when you double-click the app.": {
+    "mlv2dng stays available in the menu bar (∞ icon). If the icon doesn't appear, the menu bar may be full: this window also opens when you double-click the app.": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "mlv2dng stays available in the menu bar (film icon). If the icon doesn't appear, the menu bar may be full: this window also opens when you double-click the app."
+            "value": "mlv2dng stays available in the menu bar (∞ icon). If the icon doesn't appear, the menu bar may be full: this window also opens when you double-click the app."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "mlv2dng reste disponible dans la barre des menus (icône pellicule). Si l'icône n'apparaît pas, la barre des menus est peut-être pleine : cette fenêtre s'ouvre aussi en double-cliquant sur l'app."
+            "value": "mlv2dng reste disponible dans la barre des menus (icône ∞). Si l'icône n'apparaît pas, la barre des menus est peut-être pleine : cette fenêtre s'ouvre aussi en double-cliquant sur l'app."
           }
         }
       }

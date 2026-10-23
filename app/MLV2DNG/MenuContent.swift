@@ -72,7 +72,7 @@ struct MenuLabel: View {
             Image(systemName: "exclamationmark.triangle")
         } else {
             HStack(spacing: 2) {
-                Image(systemName: "film.stack")
+                Image(systemName: "infinity")
                 if !state.mounted.isEmpty { Text("\(state.mounted.count)") }
             }
         }

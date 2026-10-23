@@ -6,7 +6,9 @@
  * Taken from MLV App (https://github.com/ilia3101/MLV-App, src/mlv/liblj92/lj92.c,
  * commit d1c8921), itself derived from Andrew Baldwin's lj92 (MIT notice below).
  * MLVFS changes: separate row-cache rows for multi-component images, per-component
- * left neighbour for predictors 4-7, pred-6 fast path only for single-component images.
+ * left neighbour for predictors 4-7, pred-6 fast path only for single-component images,
+ * bounds checks on all header fields and on the entropy-coded data (truncated or malformed
+ * frames return LJ92_ERROR_CORRUPT instead of reading past the end of the input).
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * This program is free software: you can redistribute it and/or modify it
@@ -61,6 +63,7 @@ typedef struct _ljp {
     int y; // Height
     int bits; // Bit depth
     int components;  // Components(Nf)
+    int overrun;     // Set when the entropy decoder needed bytes past datalen, or saw an invalid code
     int writelen; // Write rows this long
     int skiplen; // Skip this many values after each row
     u16* linearize; // Linearization table
@@ -90,7 +93,8 @@ typedef struct _ljp {
 static int find(ljp* self) {
     int ix = self->ix;
     u8* data = self->data;
-    while (data[ix] != 0xFF && ix<(self->datalen-1)) {
+    if (ix < 0 || ix >= self->datalen) return -1;
+    while (ix<(self->datalen-1) && data[ix] != 0xFF) {
         ix += 1;
     }
     ix += 2;
@@ -103,11 +107,12 @@ static int find(ljp* self) {
 
 static int parseHuff(ljp* self) {
     int ret = LJ92_ERROR_CORRUPT;
+    if (self->ix + 19 >= self->datalen) return ret;
     u8* huffhead = &self->data[self->ix]; // xstruct.unpack('>HB16B',self.data[self.ix:self.ix+19])
     u8* bits = &huffhead[2];
     bits[0] = 0; // Because table starts from 1
     int hufflen = BEH(huffhead[0]);
-    if ((self->ix + hufflen) >= self->datalen) return ret;
+    if (hufflen < 19 || (self->ix + hufflen) >= self->datalen) return ret;
 #ifdef SLOW_HUFF
     u8* huffval = calloc(hufflen - 19,sizeof(u8));
     if (huffval == NULL) return LJ92_ERROR_NO_MEMORY;
@@ -238,9 +243,12 @@ static int parseHuff(ljp* self) {
         if (bits[maxbits]) break;
         maxbits--;
     }
+    if (maxbits == 0) return LJ92_ERROR_CORRUPT;
+    int nvals = hufflen - 19;
     self->huffbits = maxbits;
-    /* Now fill the lut */
-    u16* hufflut = malloc((1<<maxbits) * sizeof(u16));
+    /* Now fill the lut (zeroed: codes not covered by an incomplete table decode as invalid) */
+    free(self->hufflut);
+    u16* hufflut = calloc((1<<maxbits), sizeof(u16));
     if (hufflut == NULL) return LJ92_ERROR_NO_MEMORY;
     self->hufflut = hufflut;
     int i = 0;
@@ -270,7 +278,9 @@ static int parseHuff(ljp* self) {
 #endif
             continue;
         }
+        if (hv >= nvals) return LJ92_ERROR_CORRUPT;
         hcode = huffvals[hv];
+        if (hcode > 16) return LJ92_ERROR_CORRUPT;
         hufflut[i] = hcode<<8 | bitsused;
         //printf("%d %d %d\n",i,bitsused,hcode);
         i++;
@@ -282,16 +292,22 @@ static int parseHuff(ljp* self) {
 }
 
 static int parseSof3(ljp* self) {
-    if (self->ix+6 >= self->datalen) return LJ92_ERROR_CORRUPT;
+    if (self->ix+7 >= self->datalen) return LJ92_ERROR_CORRUPT;
+    int len = BEH(self->data[self->ix]);
     self->y = BEH(self->data[self->ix+3]);
     self->x = BEH(self->data[self->ix+5]);
     self->bits = self->data[self->ix+2];
     self->components = self->data[self->ix + 7];
-    self->ix += BEH(self->data[self->ix]);
+    if (self->x <= 0 || self->y <= 0 || self->bits < 2 || self->bits > 16 ||
+        self->components < 1 || self->components > 4 || len < 8 + 3 * self->components)
+        return LJ92_ERROR_CORRUPT;
+    self->ix += len;
+    if (self->ix >= self->datalen) return LJ92_ERROR_CORRUPT;
     return LJ92_ERROR_NONE;
 }
 
 static int parseBlock(ljp* self) {
+    if (self->ix + 1 >= self->datalen) return LJ92_ERROR_CORRUPT;
     self->ix += BEH(self->data[self->ix]);
     if (self->ix >= self->datalen) return LJ92_ERROR_CORRUPT;
     return LJ92_ERROR_NONE;
@@ -346,12 +362,20 @@ static int receive(ljp* self,int ssss) {
 static int extend(ljp* self,int v,int t) {
     int vt = 1<<(t-1);
     if (v < vt) {
-        vt = (-1 << t) + 1;
+        vt = 1 - (1 << t);
         v = v + vt;
     }
     return v;
 }
 #endif
+
+/* Next two entropy-coded bytes (little-endian, as the original *(u16*) read); past the end of
+ * the input, missing bytes read as 0 and the overrun flag is set so the scan fails. */
+inline static int fetch16(ljp* self, int ix) {
+    if (__builtin_expect(ix + 1 < self->datalen, 1)) return self->data[ix] | (self->data[ix + 1] << 8);
+    self->overrun = 1;
+    return ix < self->datalen ? self->data[ix] : 0;
+}
 
 inline static int nextdiff(ljp* self) {
 #ifdef SLOW_HUFF
@@ -365,7 +389,7 @@ inline static int nextdiff(ljp* self) {
     int ix = self->ix;
     int next;
     while (cnt < huffbits) {
-        next = *(u16*)&self->data[ix];
+        next = fetch16(self, ix);
         int one = next&0xFF;
         int two = next>>8;
         b = (b<<16)|(one<<8)|two;
@@ -382,15 +406,22 @@ inline static int nextdiff(ljp* self) {
     int usedbits = ssssused&0xFF;
     int t = ssssused>>8;
     //self->sssshist[t]++;
+    if (__builtin_expect(usedbits == 0, 0)) { // code not in the table
+        self->overrun = 1;
+        usedbits = 1;
+        t = 0;
+    }
     cnt -= usedbits;
     int keepbitsmask = (1 << cnt)-1;
     b &= keepbitsmask;
     int diff;
     if (t == 16) {
         diff = 1 << 15;
+    } else if (t == 0) {
+        diff = 0;
     } else {
         while (cnt < t) {
-            next = *(u16*)&self->data[ix];
+            next = fetch16(self, ix);
             int one = next&0xFF;
             int two = next>>8;
             b = (b<<16)|(one<<8)|two;
@@ -405,7 +436,7 @@ inline static int nextdiff(ljp* self) {
         diff = b >> cnt;
         int vt = 1<<(t-1);
         if (diff < vt) {
-            vt = (-1 << t) + 1;
+            vt = 1 - (1 << t);
             diff += vt;
         }
     }
@@ -495,7 +526,7 @@ static int parsePred6(ljp* self) {
         thisrow[col++] = left;
         //printf("%d %d %d %d\n",col,diff,left,lastrow[col]);
         out[c++] = linear;
-        if (self->ix >= self->datalen) break;
+        if (self->ix >= self->datalen || self->overrun) break;
         rowcount = self->x-1;
         if (--write==0) {
             out += self->skiplen;
@@ -522,9 +553,9 @@ static int parsePred6(ljp* self) {
         temprow = lastrow;
         lastrow = thisrow;
         thisrow = temprow;
-        if (self->ix >= self->datalen) break;
+        if (self->ix >= self->datalen || self->overrun) break;
     }
-    if (c >= pixels) ret = LJ92_ERROR_NONE;
+    if (c >= pixels && !self->overrun) ret = LJ92_ERROR_NONE;
     return ret;
 }
 
@@ -532,7 +563,15 @@ static int parseScan(ljp* self) {
     int ret = LJ92_ERROR_CORRUPT;
     //memset(self->sssshist,0,sizeof(self->sssshist));
     self->ix = self->scanstart;
+    self->overrun = 0;
+#ifndef SLOW_HUFF
+    if (self->hufflut == NULL) return ret; // no DHT before SOS
+#endif
+    if (self->ix + 2 >= self->datalen) return ret;
+    int scanlen = BEH(self->data[self->ix]);
     int compcount = self->data[self->ix+2];
+    if (compcount != self->components || scanlen < 6 + 2 * compcount ||
+        self->ix + scanlen >= self->datalen) return ret;
     int pred = self->data[self->ix+3+2*compcount];
     if (pred<0 || pred>7) return ret;
     if (pred==6 && self->components==1) return parsePred6(self); // Fast path
@@ -610,6 +649,7 @@ static int parseScan(ljp* self) {
         thisrow = temprow;
 
         out += self->x * self->components + self->skiplen;
+        if (self->overrun) return LJ92_ERROR_CORRUPT; // truncated or corrupt entropy-coded data
     } // row
 
     ret = LJ92_ERROR_NONE;
@@ -626,8 +666,10 @@ static int parseImage(ljp* self) {
             ret = parseSof3(self);
         else if (nextMarker == 0xfe)// Comment
             ret = parseBlock(self);
-        else if (nextMarker == 0xd9) // End of image
+        else if (nextMarker == 0xd9) { // End of image before any scan
+            ret = LJ92_ERROR_CORRUPT;
             break;
+        }
         else if (nextMarker == 0xda) {
             self->scanstart = self->ix;
             ret = LJ92_ERROR_NONE;
@@ -682,6 +724,7 @@ int lj92_open(lj92* lj,
     self->datalen = datalen;
 
     int ret = findSoI(self);
+    if (ret == LJ92_ERROR_NONE && (self->x <= 0 || self->components <= 0)) ret = LJ92_ERROR_CORRUPT; // no SOF3
 
     if (ret == LJ92_ERROR_NONE) {
         u16* rowcache = (u16*)calloc(self->x * self->components * 2, sizeof(u16));

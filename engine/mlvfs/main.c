@@ -593,11 +593,16 @@ size_t get_image_data(struct frame_headers * frame_headers, FILE * file, uint8_t
             return 0;
         }
         
-        fread(frame_buffer, sizeof(uint8_t), frame_size, file);
+        size_t frame_read = fread(frame_buffer, sizeof(uint8_t), frame_size, file);
         if(ferror(file))
         {
             int err = errno;
             err_printf("fread error: %s\n", strerror(err));
+        }
+        else if(frame_read != frame_size)
+        {
+            /* e.g. a clip cut off by a full card: never decode the uninitialised rest of the buffer */
+            err_printf("short frame read: %zu of %zu bytes\n", frame_read, frame_size);
         }
         else
         {
@@ -622,7 +627,8 @@ size_t get_image_data(struct frame_headers * frame_headers, FILE * file, uint8_t
             }
             else if(lj92_compressed)
             {
-                /* Current Magic Lantern lossless: the VIDF payload is a plain LJ92 stream (no size
+                /* Decode as in MLV App (https://github.com/ilia3101/MLV-App, src/mlv/video_mlv.c, GPL-3.0-or-later).
+                 * Current Magic Lantern lossless: the VIDF payload is a plain LJ92 stream (no size
                  * prefix, no tiling); ML writes each Bayer row as N/2 columns x 2 components, so the
                  * decoded interleaved samples are already the raw frame in row-major order. */
                 lj92 handle;
@@ -899,6 +905,7 @@ static void deflicker(struct frame_headers * frame_headers, int target, uint16_t
 
 static int process_frame(struct image_buffer * image_buffer)
 {
+    int frame_ok = 1;
     char * mlv_filename = NULL;
     char * path_in_mlv = NULL;
     const char * path = image_buffer->dng_filename;
@@ -924,14 +931,31 @@ static int process_frame(struct image_buffer * image_buffer)
             image_buffer->header_size = dng_get_header_size();
             image_buffer->header = (uint8_t*)malloc(image_buffer->header_size);
             
-            char * mlv_basename = copy_string(image_buffer->dng_filename);
+            char * mlv_basename = NULL;
+            size_t image_bytes = 0;
+            if(image_buffer->data && image_buffer->header)
+            {
+                image_bytes = get_image_data(&frame_headers, chunk_files[frame_headers.fileNumber], (uint8_t*) image_buffer->data, 0, image_buffer->size);
+            }
+            if(image_bytes == 0)
+            {
+                /* leave data NULL so the read handler returns -EIO instead of serving uninitialised memory */
+                err_printf("%s: frame %d could not be decoded\n", mlv_filename, frame_number);
+                free(image_buffer->data);
+                image_buffer->data = NULL;
+                free(image_buffer->header);
+                image_buffer->header = NULL;
+                frame_ok = 0;
+                goto frame_done;
+            }
+            
+            mlv_basename = copy_string(image_buffer->dng_filename);
             if(mlv_basename != NULL)
             {
                 char * dir = find_last_separator(mlv_basename);
                 if(dir != NULL) *dir = 0;
             }
             
-            get_image_data(&frame_headers, chunk_files[frame_headers.fileNumber], (uint8_t*) image_buffer->data, 0, image_buffer->size);
             if(mlvfs.deflicker) deflicker(&frame_headers, mlvfs.deflicker, image_buffer->data, image_buffer->size);
             dng_get_header_data(&frame_headers, image_buffer->header, 0, image_buffer->header_size, mlvfs.fps, mlv_basename);
             
@@ -997,13 +1021,14 @@ static int process_frame(struct image_buffer * image_buffer)
                 }
                 stripes_apply_correction(&frame_headers, correction, image_buffer->data, 0, image_buffer->size / 2);
             }
+        frame_done:
             mlvfs_close_chunks(chunk_files, chunk_count);
             free(mlv_basename);
         }
         free(mlv_filename);
         free(path_in_mlv);
     }
-    return 1;
+    return frame_ok;
 }
 
 int create_preview(struct image_buffer * image_buffer)
@@ -1467,21 +1492,21 @@ static int mlvfs_read(const char *path, char *buf, size_t size, FUSE_OFF_T offse
                 err_printf("DNG image_buffer is NULL\n");
                 free(mlv_filename);
                 free(path_in_mlv);
-                return 0;
+                return -EIO;
             }
             if (!image_buffer->header)
             {
                 err_printf("DNG image_buffer->header is NULL\n");
                 free(mlv_filename);
                 free(path_in_mlv);
-                return 0;
+                return -EIO;
             }
             if (!image_buffer->data)
             {
                 err_printf("DNG image_buffer->data is NULL\n");
                 free(mlv_filename);
                 free(path_in_mlv);
-                return 0;
+                return -EIO;
             }
 
             /* cache the expensive locking/lookup for a potential next read */

@@ -17,13 +17,26 @@ OBJS = $(addprefix $(SRC)/, dng.o index.o wav.o stripes.o cs.o amaze_demosaic_RT
   mongoose/mongoose.o webgui.o resource_manager.o lj92.o gif.o patternnoise.o focus_pixels.o slre/slre.o) \
   $(addprefix $(SRC)/LZMA/, $(addsuffix .o, $(LZMA_SRCS)))
 
+HDRS = $(wildcard $(SRC)/*.h)
+TEST_BIN = ../build/engine/lj92_truncation_test
+
 default: mlvfs-bin
 
-mlvfs-bin: $(SRC)/main.c $(OBJS)
-	$(CC) $(CFLAGS) $^ $(LIBS) -o mlvfs-bin
+.PHONY: default clean lj92-test
 
-$(SRC)/%.o: $(SRC)/%.c
+mlvfs-bin: $(SRC)/main.c $(OBJS) $(HDRS)
+	$(CC) $(CFLAGS) $(SRC)/main.c $(OBJS) $(LIBS) -o mlvfs-bin
+
+# coarse header dependency: any header change rebuilds every object (no stale binaries)
+$(SRC)/%.o: $(SRC)/%.c $(HDRS)
 	$(CC) -c $(CFLAGS) $< -o $@
 
+# LJ92 truncation regression test (no FUSE needed): make -f Makefile.arm64 lj92-test
+lj92-test: $(TEST_BIN)
+
+$(TEST_BIN): tests/lj92_truncation_test.c $(SRC)/lj92.c $(SRC)/lj92.h
+	mkdir -p $(dir $@)
+	$(CC) $(ARCH) -O1 -g -Wall -std=gnu99 -fsanitize=undefined -I$(SRC) tests/lj92_truncation_test.c $(SRC)/lj92.c -o $@
+
 clean:
-	rm -f mlvfs-bin $(OBJS)
+	rm -f mlvfs-bin $(OBJS) $(TEST_BIN)

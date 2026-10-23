@@ -8,6 +8,9 @@ For each requested frame number, finds the VIDF block in the (single-chunk) MLV,
 32-byte VIDF header + frameSpace padding, decodes it with imagecodecs.ljpeg_decode (current Magic Lantern
 lossless = standard LJ92 with 2 interleaved components per row), reshapes (h, w/2, 2) -> (h, w) and writes
 <ref_dir>/<clip>_<frame>.u16 as little-endian uint16, row-major.
+
+Frame layout as decoded by MLV App (https://github.com/ilia3101/MLV-App, src/mlv/video_mlv.c).
+SPDX-License-Identifier: GPL-3.0-or-later
 """
 import os, struct, sys
 

@@ -18,3 +18,11 @@ Pixel checks:
 - `--expect-raw build/ref`: exact comparison of DNG frames 0 and 160 against references written by
   `make_reference.py <clip.MLV> build/ref 0 160` (dev-only, needs numpy + imagecodecs). Implies `--no-bad-pix` and
   `--no-focus-pixels`. `--no-bad-pix` alone mounts without `--bad-pix`.
+
+Robustness (truncated / corrupt frames):
+- `make -C engine -f Makefile.arm64 lj92-test && build/engine/lj92_truncation_test <clip.MLV> [build/ref/<clip>_0.u16]`:
+  no FUSE; decodes frame 0's payload from a buffer ending at a PROT_NONE guard page (built with UBSan). Intact must
+  decode (and match the reference); 98%, 50%, every cut in the first 2048 bytes and every 1/64 must return an error;
+  corrupted DHT/SOF/SOS fields must not crash.
+- `python3 engine/tests/truncated_clip_test.py <clip.MLV> [--cut-frame 5]`: mounts a copy cut mid-frame; earlier
+  frames read and pass the sanity check, the cut frame returns EIO, mlvfs survives and unmounts.

@@ -1888,6 +1888,7 @@ static const struct fuse_opt_ex mlvfs_opts_ex[] =
     MLVFS_OPTION("--cs3x3",             chroma_smooth,            3, "3x3 chroma smoothing", 0),
     MLVFS_OPTION("--cs5x5",             chroma_smooth,            5, "5x5 chroma smoothing", 0),
     MLVFS_OPTION("--fpm-dir=%s",        fpm_dir,                  0, "Directory with focus pixel maps (.fpm, MLV App format)", 0),
+    MLVFS_OPTION("--index-dir=%s",      index_dir,                0, "Directory for MLVFS index (.IDX) files instead of next to the MLV files", 0),
     MLVFS_OPTION("--no-focus-pixels",   no_focus_pixels,          1, "Do not fix focus pixels", 0),
     MLVFS_OPTION("--bad-pix",           fix_bad_pixels,           1, "Fix bad pixels (autodetected)", 0),
     MLVFS_OPTION("--really-bad-pix",    fix_bad_pixels,           2, "Aggressive bad pixel fix", 0),
@@ -1964,6 +1965,24 @@ int main(int argc, char **argv)
     if (fuse_opt_parse(&args, &mlvfs, mlvfs_opts, NULL) == -1)
     {
         exit(1);
+    }
+
+    if (mlvfs.index_dir)
+    {
+        // FUSE may chdir("/"), so make the path absolute now
+        char abs_idx[PATH_MAX];
+        if (realpath(mlvfs.index_dir, abs_idx))
+            mlvfs_index_dir = strdup(abs_idx);
+        else if (mlvfs.index_dir[0] == '/')
+            mlvfs_index_dir = strdup(mlvfs.index_dir);
+        else
+        {
+            char cwd[PATH_MAX];
+            size_t n = strlen(mlvfs.index_dir) + PATH_MAX + 2;
+            mlvfs_index_dir = (char*)malloc(n);
+            if (mlvfs_index_dir && getcwd(cwd, sizeof(cwd)))
+                snprintf(mlvfs_index_dir, n, "%s/%s", cwd, mlvfs.index_dir);
+        }
     }
 
     if (mlvfs.version)

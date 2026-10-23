@@ -133,6 +133,14 @@ def unmount(mnt, proc):
             proc.wait()
 
 
+def snapshot(folder):
+    snap = {}
+    for n in sorted(os.listdir(folder)):
+        st = os.lstat(os.path.join(folder, n))
+        snap[n] = (st.st_size, st.st_mtime_ns)
+    return snap
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("clip")
@@ -148,6 +156,9 @@ def main():
     ap.add_argument("--no-bad-pix", action="store_true", help="mount without --bad-pix")
     ap.add_argument("--expect-raw", metavar="REF_DIR")
     ap.add_argument("--expect-sane", action="store_true")
+    ap.add_argument("--index-dir", help="pass --index-dir to mlvfs; asserts .IDX files land there")
+    ap.add_argument("--assert-source-untouched", action=argparse.BooleanOptionalAction, default=True,
+                    help="assert the source folder is identical (names, sizes, mtimes) after unmount")
     a = ap.parse_args()
     if a.expect_raw:
         if a.expect_fpm:
@@ -156,6 +167,7 @@ def main():
 
     clip = os.path.abspath(a.clip)
     folder, name = os.path.dirname(clip), os.path.splitext(os.path.basename(clip))[0]
+    before = snapshot(folder)
     mnt = tempfile.mkdtemp(prefix="mlvmnt_")
     log = tempfile.NamedTemporaryFile(prefix="mlvfs_log_", delete=False)
     cmd = [MLVFS, mnt, "--mlv-dir=" + folder, "--resolve-naming", "-f"]
@@ -165,6 +177,8 @@ def main():
         cmd += ["--fpm-dir=" + a.fpm_dir]
     if a.no_focus_pixels:
         cmd += ["--no-focus-pixels"]
+    if a.index_dir:
+        cmd += ["--index-dir=" + a.index_dir]
     if a.backend:
         cmd += ["-o", "backend=" + a.backend]
     proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT)
@@ -228,6 +242,20 @@ def main():
     finally:
         unmount(mnt, proc)
         time.sleep(0.5)
+        if a.assert_source_untouched:
+            after = snapshot(folder)
+            if after != before:
+                changed = sorted(n for n in set(before) | set(after) if before.get(n) != after.get(n))
+                print("FAIL: source folder modified:", changed)
+                ok = False
+            else:
+                print("source folder untouched")
+        if a.index_dir:
+            idx = [f for f in os.listdir(a.index_dir) if f.endswith(".IDX")] if os.path.isdir(a.index_dir) else []
+            print("index dir .IDX files:", idx)
+            if not idx:
+                print("FAIL: no .IDX file in", a.index_dir)
+                ok = False
         try:
             leftover = os.listdir(mnt)
         except OSError as e:

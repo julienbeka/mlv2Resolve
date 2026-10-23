@@ -26,7 +26,60 @@
 
 #include "raw.h"
 #include "mlv.h"
+#include <limits.h>
+#include <sys/stat.h>
 #include "mlvfs.h"
+
+/* Optional directory for IDX files (set from --index-dir). NULL = next to the MLV. */
+char *mlvfs_index_dir = NULL;
+
+/* Returns a malloc'd path of the IDX file for base_filename, or NULL on error. */
+static char *index_file_path(const char *base_filename)
+{
+    size_t len = strlen(base_filename);
+    if (!mlvfs_index_dir)
+    {
+        char *f = (char*)malloc(len + 1);
+        if (!f) { err_printf("malloc error (requested size %zu)\n", len + 1); return NULL; }
+        memcpy(f, base_filename, len + 1);
+        if (len >= 3) strcpy(&f[len - 3], "IDX");
+        return f;
+    }
+
+    char abs_path[PATH_MAX];
+    const char *src = realpath(base_filename, abs_path) ? abs_path : base_filename;
+    struct stat st;
+    unsigned long long size = (stat(base_filename, &st) == 0) ? (unsigned long long)st.st_size : 0;
+    uint64_t h = 1469598103934665603ULL; /* FNV-1a 64 */
+    for (const unsigned char *c = (const unsigned char*)src; *c; c++)
+    {
+        h ^= *c;
+        h *= 1099511628211ULL;
+    }
+    size_t n = strlen(mlvfs_index_dir) + 64;
+    char *f = (char*)malloc(n);
+    if (!f) { err_printf("malloc error (requested size %zu)\n", n); return NULL; }
+    snprintf(f, n, "%s/%016llx_%llu.IDX", mlvfs_index_dir, (unsigned long long)h, size);
+    return f;
+}
+
+static void make_index_dir(void)
+{
+    if (!mlvfs_index_dir) return;
+    char *tmp = strdup(mlvfs_index_dir);
+    if (!tmp) return;
+    for (char *p = tmp + 1; *p; p++)
+    {
+        if (*p == '/')
+        {
+            *p = 0;
+            mkdir(tmp, 0755);
+            *p = '/';
+        }
+    }
+    mkdir(tmp, 0755);
+    free(tmp);
+}
 
 /* helper macros */
 #define MIN(a,b) (((a)<(b))?(a):(b))
@@ -99,20 +152,11 @@ void xref_sort(frame_xref_t *table, uint32_t entries)
 
 mlv_xref_hdr_t *load_index(const char *base_filename)
 {
-    size_t filename_size = (strlen(base_filename) + 1) * sizeof(char);
-    char * filename = (char*)malloc(filename_size);
-    
-    if(!filename)
-    {
-        err_printf("malloc error (requested size %zu)\n", filename_size);
-        return NULL;
-    }
-    strncpy(filename, base_filename, filename_size);
+    char *filename = index_file_path(base_filename);
+    if(!filename) return NULL;
     
     mlv_xref_hdr_t *block_hdr = NULL;
     FILE *in_file = NULL;
-
-    strcpy(&filename[strlen(filename) - 3], "IDX");
 
     in_file = fopen(filename, "rb");
     
@@ -174,19 +218,11 @@ mlv_xref_hdr_t *load_index(const char *base_filename)
 
 void save_index(const char *base_filename, mlv_file_hdr_t *ref_file_hdr, int fileCount, mlv_xref_hdr_t *index)
 {
-    size_t filename_size = (strlen(base_filename) + 1) * sizeof(char);
-    char * filename = (char*)malloc(filename_size);
-    
-    if(!filename)
-    {
-        err_printf("malloc error (requested size %zu)\n", filename_size);
-        return;
-    }
-    strncpy(filename, base_filename, filename_size);
+    char *filename = index_file_path(base_filename);
+    if(!filename) return;
+    make_index_dir();
     
     FILE *out_file = NULL;
-
-    strcpy(&filename[strlen(filename) - 3], "IDX");
 
     out_file = fopen(filename, "wb+");
     

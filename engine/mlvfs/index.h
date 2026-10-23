@@ -28,6 +28,9 @@
 #include "mlv.h"
 
 //Retrieves the index from an IDX file, generating the file if necessary
+/* Directory for IDX files (NULL = next to the MLV file) */
+extern char *mlvfs_index_dir;
+
 mlv_xref_hdr_t *get_index(const char *base_filename);
 
 //Retrieves the index without using an IDX file

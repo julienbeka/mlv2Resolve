@@ -46,6 +46,7 @@ struct mlvfs
     int fix_pattern_noise;
     int version;
     char * fpm_dir;
+    char * index_dir;
     int no_focus_pixels;
 };
 

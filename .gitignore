@@ -13,3 +13,4 @@ fichiers tests/
 __pycache__/
 engine/mlvfs-bin
 *.o
+*.IDX

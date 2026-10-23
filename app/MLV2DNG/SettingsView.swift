@@ -25,9 +25,40 @@ enum LaunchAtLogin {
     }
 }
 
+enum LanguageSwitch {
+    static let choiceKey = "appLanguageChoice"
+    /// Current choice, read from the app's own persistent domain (what System Settings also writes).
+    static func current() -> AppLanguage {
+        let domain = Bundle.main.bundleIdentifier.flatMap { UserDefaults.standard.persistentDomain(forName: $0) }
+        return AppLanguage(appleLanguages: domain?["AppleLanguages"] as? [String])
+    }
+    static func apply(_ lang: AppLanguage) {
+        if let langs = lang.appleLanguages { UserDefaults.standard.set(langs, forKey: "AppleLanguages") }
+        else { UserDefaults.standard.removeObject(forKey: "AppleLanguages") }
+        UserDefaults.standard.set(lang.rawValue, forKey: choiceKey)
+        UserDefaults.standard.synchronize()
+    }
+    /// Spawns a detached helper that reopens the app after this instance has quit, then terminates.
+    static func relaunch() {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\"", Bundle.main.bundleURL.path]
+        try? p.run()
+        NSApp.terminate(nil)
+    }
+    static func promptRestart() {
+        let a = NSAlert()
+        a.messageText = String(localized: "mlv2dng needs to restart to change the language.")
+        a.addButton(withTitle: String(localized: "Restart Now"))
+        a.addButton(withTitle: String(localized: "Later"))
+        if a.runModal() == .alertFirstButtonReturn { relaunch() }
+    }
+}
+
 struct SettingsView: View {
     @ObservedObject var state: AppState
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
+    @State private var language = LanguageSwitch.current()
 
     var body: some View {
         Form {
@@ -35,6 +66,16 @@ struct SettingsView: View {
                 LaunchAtLogin.set(on)
                 launchAtLogin = LaunchAtLogin.isEnabled
             }))
+            Picker("Language", selection: Binding(get: { language }, set: { new in
+                guard new != language else { return }
+                language = new
+                LanguageSwitch.apply(new)
+                LanguageSwitch.promptRestart()
+            })) {
+                Text("System").tag(AppLanguage.system)
+                Text(verbatim: "English").tag(AppLanguage.en)
+                Text(verbatim: "Français").tag(AppLanguage.fr)
+            }
             DisclosureGroup("Advanced") {
                 Toggle("Fix Dead Pixels", isOn: $state.fixBadPixels)
                 Toggle("Fix Focus Pixels", isOn: $state.fixFocusPixels)
@@ -50,7 +91,7 @@ struct SettingsView: View {
                 Text("Free software under the GPL-3.0-or-later license.")
             }
         }
-        .onAppear { launchAtLogin = LaunchAtLogin.isEnabled }
+        .onAppear { launchAtLogin = LaunchAtLogin.isEnabled; language = LanguageSwitch.current() }
         .formStyle(.grouped)
         .frame(width: 440)
         .fixedSize(horizontal: false, vertical: true)

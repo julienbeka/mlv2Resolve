@@ -622,63 +622,49 @@ size_t get_image_data(struct frame_headers * frame_headers, FILE * file, uint8_t
             }
             else if(lj92_compressed)
             {
+                /* Current Magic Lantern lossless: the VIDF payload is a plain LJ92 stream (no size
+                 * prefix, no tiling); ML writes each Bayer row as N/2 columns x 2 components, so the
+                 * decoded interleaved samples are already the raw frame in row-major order. */
                 lj92 handle;
                 int lj92_width = 0;
                 int lj92_height = 0;
                 int lj92_bitdepth = 0;
-                int video_xRes = frame_headers->rawi_hdr.xRes;
-                int video_yRes = frame_headers->rawi_hdr.yRes;
+                int lj92_components = 0;
+                size_t frame_bytes = (size_t)frame_headers->rawi_hdr.xRes * frame_headers->rawi_hdr.yRes * sizeof(uint16_t);
                 
-                int ret = lj92_open(&handle, (uint8_t *)&frame_buffer[4], (int)frame_size - 4, &lj92_width, &lj92_height, &lj92_bitdepth);
-                
-                size_t out_size_stored = *(uint32_t *)frame_buffer;
-                size_t out_size = lj92_width * lj92_height * sizeof(uint16_t);
-                
-                if(out_size != out_size_stored)
-                {
-                    err_printf("LJ92: non-critical internal error occurred: frame size mismatch (%d != %d)\n", (uint32_t)out_size, (uint32_t)out_size_stored);
-                }
-                
+                int ret = lj92_open(&handle, frame_buffer, (int)frame_size, &lj92_width, &lj92_height, &lj92_bitdepth, &lj92_components);
                 if(ret == LJ92_ERROR_NONE)
                 {
-                    /* we need a temporary buffer so we dont overwrite source data */
-                    uint16_t *decompressed = malloc(out_size);
-                    if (!decompressed)
+                    size_t out_pixels = (size_t)lj92_width * lj92_height * lj92_components;
+                    if(out_pixels * sizeof(uint16_t) != frame_bytes)
                     {
-                        free(frame_buffer);
-                        err_printf("LJ92 malloc failed!\n");
-                        return 0;
+                        err_printf("LJ92: decoded size %dx%dx%d does not match RAWI %dx%d\n", lj92_width, lj92_height, lj92_components,
+                                   frame_headers->rawi_hdr.xRes, frame_headers->rawi_hdr.yRes);
+                        ret = LJ92_ERROR_CORRUPT;
                     }
-                    
-                    ret = lj92_decode(handle, decompressed, lj92_width * lj92_height, 0, NULL, 0);
-                    
+                    uint16_t *decompressed = ret == LJ92_ERROR_NONE ? malloc(out_pixels * sizeof(uint16_t)) : NULL;
+                    if(ret == LJ92_ERROR_NONE && !decompressed)
+                    {
+                        err_printf("LJ92 malloc failed!\n");
+                        ret = LJ92_ERROR_NO_MEMORY;
+                    }
                     if(ret == LJ92_ERROR_NONE)
                     {
-                        /* restore 16bpp pixel data and untile if necessary */
-                        //uint32_t shift_value = MIN(16,MAX(0, 16 - lj92_bitdepth));
-                        uint16_t *dst_buf = (uint16_t *)output_buffer;
-                        uint16_t *src_buf = (uint16_t *)decompressed;
-                        
-                        for(int y = 0; y < video_yRes; y++)
-                        {
-                            int dst_y = ((2 * y) % video_yRes) + ((2 * y) / video_yRes);
-                            
-                            uint16_t *src_line = &src_buf[y * video_xRes];
-                            uint16_t *dst_line = &dst_buf[dst_y * video_xRes];
-                            
-                            for(int x = 0; x < video_xRes; x++)
-                            {
-                                int dst_x = ((2 * x) % video_xRes) + ((2 * x) / video_xRes);
-                                dst_line[dst_x] = src_line[x];
-                            }
-                        }
-                        
-                        free(decompressed);
+                        ret = lj92_decode(handle, decompressed, (int)out_pixels, 0, NULL, 0);
                     }
-                    else
+                    lj92_close(handle);
+                    
+                    if(ret == LJ92_ERROR_NONE && offset >= 0 && (size_t)offset < frame_bytes)
+                    {
+                        size_t copy_size = MIN(max_size, frame_bytes - (size_t)offset);
+                        memcpy(output_buffer, (uint8_t *)decompressed + offset, copy_size);
+                        result = copy_size;
+                    }
+                    else if(ret != LJ92_ERROR_NONE)
                     {
                         err_printf("LJ92: Failed (%d)\n", ret);
                     }
+                    free(decompressed);
                 }
                 else
                 {

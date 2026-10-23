@@ -27,7 +27,8 @@
 #define MLV_VIDEO_CLASS_JPEG         0x03
 #define MLV_VIDEO_CLASS_H264         0x04
 
-#define MLV_VIDEO_CLASS_FLAG_LJ92    0x100
+/* Magic Lantern writes 0x20 for in-camera lossless (as in MLV App src/mlv/mlv.h); 0x100 was a pre-release value */
+#define MLV_VIDEO_CLASS_FLAG_LJ92    0x20
 #define MLV_VIDEO_CLASS_FLAG_LZMA    0x80
 #define MLV_VIDEO_CLASS_FLAG_DELTA   0x40
 

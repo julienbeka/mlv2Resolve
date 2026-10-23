@@ -3,12 +3,17 @@
 
 Usage: mount_test.py <clip.MLV> [--expect-frames N] [--min-fps F] [--backend nfs|smb]
                      [--expect-scale H,V] [--expect-fpm] [--fpm-dir DIR] [--no-focus-pixels]
+                     [--no-bad-pix] [--expect-raw REF_DIR] [--expect-sane]
 --expect-scale 3,1  asserts the first DNG's DefaultScale (tag 50718) is 3/1, 1/1.
 --expect-fpm        asserts the mlvfs log contains "focus pixels: N corrected" with N > 0.
+--expect-raw DIR    asserts DNG frames 0 and 160 equal DIR/<clip>_<frame>.u16 (from make_reference.py) exactly;
+                    implies --no-bad-pix and --no-focus-pixels so MLVFS outputs the decoded sensor values untouched.
+--expect-sane       stdlib-only plausibility check on frame 0: black < median < white, and the median absolute
+                    difference between same-colour horizontal neighbours is small relative to white - black.
 mlvfs stdout and stderr both go to one log file (tail printed at the end).
 Exit 0 = pass.
 """
-import argparse, os, re, shutil, struct, subprocess, sys, tempfile, time
+import argparse, array, os, re, shutil, struct, subprocess, sys, tempfile, time
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 MLVFS = os.path.join(REPO, "build", "engine", "mlvfs")
@@ -54,6 +59,68 @@ def read_ifd0(path):
     return tags
 
 
+def read_raw(path):
+    """Return (tags, pixels as array('H'), width, height) for an uncompressed single-strip DNG."""
+    tags = read_ifd0(path)
+    width, height = tags[256][0], tags[257][0]
+    bps, comp = tags[258][0], tags.get(259, [1])[0]
+    assert comp == 1, "DNG Compression=%s, expected 1 (uncompressed)" % comp
+    assert bps == 16, "BitsPerSample=%s; only 16-bit little-endian strips are supported" % bps
+    offsets, counts = tags[273], tags[279]
+    pix = array.array("H")
+    with open(path, "rb") as f:
+        for off, cnt in zip(offsets, counts):
+            f.seek(off)
+            pix.frombytes(f.read(cnt))
+    if sys.byteorder != "little":
+        pix.byteswap()
+    assert len(pix) == width * height, "strip holds %d samples, expected %d" % (len(pix), width * height)
+    return tags, pix, width, height
+
+
+def check_raw(cdir, dngs, ref_dir, name, frames=(0, 160)):
+    for n in frames:
+        ref_path = os.path.join(ref_dir, "%s_%d.u16" % (name, n))
+        ref = array.array("H")
+        with open(ref_path, "rb") as f:
+            ref.frombytes(f.read())
+        if sys.byteorder != "little":
+            ref.byteswap()
+        _, pix, w, h = read_raw(os.path.join(cdir, dngs[n]))
+        assert len(ref) == len(pix), "frame %d: ref has %d samples, DNG %d" % (n, len(ref), len(pix))
+        if pix != ref:
+            bad = [i for i in range(len(pix)) if pix[i] != ref[i]]
+            i = bad[0]
+            raise AssertionError("frame %d: %d of %d pixels differ; first at x=%d y=%d: dng=%d ref=%d" % (
+                n, len(bad), len(pix), i % w, i // w, pix[i], ref[i]))
+        print("raw frame %d (%s): exact match with %s (%dx%d)" % (n, dngs[n], os.path.basename(ref_path), w, h))
+
+
+def sanity_numbers(pix, w, h, black, white):
+    """Return (median, neighbour MAD / (white - black)) over every 4th row."""
+    vals, diffs = [], []
+    for y in range(0, h, 4):
+        row = pix[y * w:(y + 1) * w]
+        vals.extend(row)
+        diffs.extend(abs(row[x] - row[x + 2]) for x in range(w - 2))
+    vals.sort()
+    diffs.sort()
+    return vals[len(vals) // 2], diffs[len(diffs) // 2] / float(white - black)
+
+
+SANE_MAX_REL_MAD = 0.01
+
+
+def check_sane(cdir, dngs):
+    tags, pix, w, h = read_raw(os.path.join(cdir, dngs[0]))
+    black, white = tags[50714][0], tags[50717][0]
+    med, rel = sanity_numbers(pix, w, h, black, white)
+    print("sanity frame 0: black=%d white=%d median=%d neighbour_mad/range=%.5f (max %.3f)" % (
+        black, white, med, rel, SANE_MAX_REL_MAD))
+    assert black < med < white, "median %d not between black %d and white %d" % (med, black, white)
+    assert rel <= SANE_MAX_REL_MAD, "same-colour neighbour MAD %.5f of range > %.3f (noise?)" % (rel, SANE_MAX_REL_MAD)
+
+
 def unmount(mnt, proc):
     r = subprocess.run(["umount", mnt], capture_output=True)
     if r.returncode != 0:
@@ -78,13 +145,22 @@ def main():
     ap.add_argument("--expect-fpm", action="store_true")
     ap.add_argument("--fpm-dir", default=FPM_DIR)
     ap.add_argument("--no-focus-pixels", action="store_true")
+    ap.add_argument("--no-bad-pix", action="store_true", help="mount without --bad-pix")
+    ap.add_argument("--expect-raw", metavar="REF_DIR")
+    ap.add_argument("--expect-sane", action="store_true")
     a = ap.parse_args()
+    if a.expect_raw:
+        if a.expect_fpm:
+            ap.error("--expect-raw disables focus pixel correction; run --expect-fpm separately")
+        a.no_bad_pix = a.no_focus_pixels = True
 
     clip = os.path.abspath(a.clip)
     folder, name = os.path.dirname(clip), os.path.splitext(os.path.basename(clip))[0]
     mnt = tempfile.mkdtemp(prefix="mlvmnt_")
     log = tempfile.NamedTemporaryFile(prefix="mlvfs_log_", delete=False)
-    cmd = [MLVFS, mnt, "--mlv-dir=" + folder, "--resolve-naming", "--bad-pix", "-f"]
+    cmd = [MLVFS, mnt, "--mlv-dir=" + folder, "--resolve-naming", "-f"]
+    if not a.no_bad_pix:
+        cmd += ["--bad-pix"]
     if a.fpm_dir:
         cmd += ["--fpm-dir=" + a.fpm_dir]
     if a.no_focus_pixels:
@@ -142,6 +218,10 @@ def main():
             print("focus pixel log lines:", len(hits), "N =", hits[:3])
             assert hits, "no 'focus pixels: N corrected' line in mlvfs log"
             assert all(int(n) > 0 for n in hits), "focus pixel count not > 0: %s" % hits
+        if a.expect_sane:
+            check_sane(cdir, dngs)
+        if a.expect_raw:
+            check_raw(cdir, dngs, os.path.abspath(a.expect_raw), name)
         ok = True
     except AssertionError as e:
         print("FAIL:", e)

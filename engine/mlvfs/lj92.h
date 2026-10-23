@@ -1,4 +1,20 @@
 /*
+ * Lossless JPEG (LJ92) codec as used by MLV App, which decodes current Magic Lantern
+ * in-camera lossless (MLV videoClass RAW|LJ92) clips: multi-component scans (ML writes
+ * 2 interleaved components per row), SSSS=16 difference category, 16-bit wrap-around.
+ *
+ * Taken from MLV App (https://github.com/ilia3101/MLV-App, src/mlv/liblj92/lj92.h,
+ * commit d1c8921), itself derived from Andrew Baldwin's lj92 (MIT notice below).
+ * MLVFS changes: separate row-cache rows for multi-component images, per-component
+ * left neighbour for predictors 4-7, pred-6 fast path only for single-component images.
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * This program is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation, either version 3 of the License, or (at your option)
+ * any later version. See <https://www.gnu.org/licenses/>.
+ */
+/*
 lj92.h
 (c) Andrew Baldwin 2014
 
@@ -29,6 +45,8 @@ enum LJ92_ERRORS {
     LJ92_ERROR_CORRUPT = -1,
     LJ92_ERROR_NO_MEMORY = -2,
     LJ92_ERROR_BAD_HANDLE = -3,
+    LJ92_ERROR_TOO_WIDE = -4,
+    LJ92_ERROR_ENCODER = -5
 };
 
 typedef struct _ljp* lj92;
@@ -41,7 +59,7 @@ typedef struct _ljp* lj92;
  */
 int lj92_open(lj92* lj, // Return handle here
               uint8_t* data,int datalen, // The encoded data
-              int* width,int* height,int* bitdepth); // Width, height and bitdepth
+              int* width,int* height,int* bitdepth,int* components); // Width, height, bitdepth and components
 
 /* Release a decoder object */
 void lj92_close(lj92 lj);

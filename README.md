@@ -28,4 +28,14 @@ Le moteur seul : `scripts/build-engine.sh` (écrit `build/engine/mlvfs`).
 
 ## Licence
 
-Logiciel libre sous licence GPL-3.0-or-later. Voir `LICENSE`.
+Le code propre à ce dépôt (app, scripts, tests, ajouts au moteur) est sous licence
+GPL-3.0-or-later. Voir `LICENSE`.
+
+Le moteur (`engine/mlvfs/`) contient du code tiers :
+
+- MLVFS (David Milligan) : GPL-2.0-or-later, utilisé ici sous GPL-3.0-or-later.
+- Code porté de MLV App (cartes de focus pixels, décodeur LJ92) : GPL-3.0.
+- Deux bibliothèques fournies avec MLVFS sont **GPL-2.0-only** : `mongoose/` (serveur web de
+  l'interface de réglage) et `slre/` (expressions régulières). GPL-2.0-only n'est pas compatible
+  avec GPL-3.0 : elles doivent être remplacées (ou relicenciées) **avant toute distribution publique
+  d'un binaire**. Suivi : tâche de suivi « remplacer mongoose et slre » (non faite en v1).

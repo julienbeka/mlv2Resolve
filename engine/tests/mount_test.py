@@ -4,20 +4,28 @@
 Usage: mount_test.py <clip.MLV> [--expect-frames N] [--min-fps F] [--backend nfs|smb]
                      [--expect-scale H,V] [--expect-fpm] [--fpm-dir DIR] [--no-focus-pixels]
                      [--no-bad-pix] [--expect-raw REF_DIR] [--expect-sane]
+                     [--expect-readonly] [--expect-sidecars] [--index-dir DIR]
 --expect-scale 3,1  asserts the first DNG's DefaultScale (tag 50718) is 3/1, 1/1.
 --expect-fpm        asserts the mlvfs log contains "focus pixels: N corrected" with N > 0.
 --expect-raw DIR    asserts DNG frames 0 and 160 equal DIR/<clip>_<frame>.u16 (from make_reference.py) exactly;
                     implies --no-bad-pix and --no-focus-pixels so MLVFS outputs the decoded sensor values untouched.
---expect-readonly   asserts the engine itself refuses writes (the harness never passes -o ro): touch, mkdir, mv of
-                    the clip folder, rm of a DNG, rm of a real (non-virtual) file and an in-place DNG write all fail,
-                    and nothing they targeted changed (the source folder snapshot is checked as usual).
+--expect-readonly   asserts the engine itself refuses writes to protected entries (the harness never passes -o ro):
+                    mkdir, mv/rmdir of the clip folder, rm/touch/truncate of a DNG, an in-place DNG write, Finder
+                    metadata and mv of a real folder all fail, and nothing they targeted changed (the source folder
+                    snapshot is checked as usual).
+--expect-sidecars   mounts an APFS clone (cp -c) of the clip (plus a second clone <clip>B.MLV and a user file
+                    lens.json, a sub-folder Audio/) instead of the clip's folder, then checks sidecar files: files written in the clip
+                    folder land next to the MLV and are listed there (prefix rule or .mlv2dng-sidecars.json index),
+                    overwrite/rename/delete work, protected entries (MLV, DNG, clip folder, index) refuse every
+                    change, the other clip does not list them, root writes land in the source root, and the
+                    MLV's SHA-256 is unchanged. The original folder must stay untouched.
 --dual-iso-preview  pass --dual-iso-preview to mlvfs (forces the dual ISO code path, even on a normal clip).
 --expect-sane       stdlib-only plausibility check on frame 0: black < median < white, and the median absolute
                     difference between same-colour horizontal neighbours is small relative to white - black.
 mlvfs stdout and stderr both go to one log file (tail printed at the end).
 Exit 0 = pass.
 """
-import argparse, array, os, re, shutil, struct, subprocess, sys, tempfile, time
+import argparse, array, hashlib, os, re, shutil, struct, subprocess, sys, tempfile, time
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 MLVFS = os.path.join(REPO, "build", "engine", "mlvfs")
@@ -125,66 +133,236 @@ def check_sane(cdir, dngs):
     assert rel <= SANE_MAX_REL_MAD, "same-colour neighbour MAD %.5f of range > %.3f (noise?)" % (rel, SANE_MAX_REL_MAD)
 
 
-def check_readonly(mnt, cdir, dngs, src_folder):
-    """Every mutating operation through the mount must fail; return the list of failures."""
-    # a real (non-virtual) sub-folder of the rushes folder, passed through by MLVFS, with a real file in it
-    real_dir = next((d for d in sorted(os.listdir(mnt)) if not d.startswith(".") and d not in (os.path.basename(cdir),)
-                     and os.path.isdir(os.path.join(mnt, d)) and "MLV_" not in d), None)
-    real = []
-    if real_dir:
-        real = sorted(f for f in os.listdir(os.path.join(mnt, real_dir))
-                      if not f.startswith(".") and os.path.isfile(os.path.join(mnt, real_dir, f)))[:1]
-    print("mount root:", sorted(os.listdir(mnt))[:8], "real probe:", real_dir, real)
+def try_op(label, fn, failures, expect_ok=False):
+    """Run fn(); record a failure if it succeeds while it should fail (or the reverse)."""
+    try:
+        fn()
+        ok, msg = True, "ok"
+    except OSError as e:
+        ok, msg = False, "refused: %s" % (e.strerror or e)
+    print("%s: %-44s %s" % ("write" if expect_ok else "protect", label, msg))
+    if ok != expect_ok:
+        failures.append(("refused: " if expect_ok else "accepted: ") + label)
+    return ok
+
+
+def write_file(path, data, mode="wb"):
+    with open(path, mode) as f:
+        f.write(data)
+
+
+def read_file(path):
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def check_protected(mnt, cdir, dngs, failures):
+    """Mutations of protected entries (virtual files, clip folder, directories, Finder metadata) all fail."""
     dng = os.path.join(cdir, dngs[0])
     size_before = os.path.getsize(dng)
-    attempts = [
-        ("touch new file at root", ["touch", os.path.join(mnt, "mlvswitch_ro_probe.txt")]),
-        ("touch new file in clip folder", ["touch", os.path.join(cdir, "mlvswitch_ro_probe.txt")]),
-        ("mkdir at root", ["mkdir", os.path.join(mnt, "mlvswitch_ro_dir")]),
-        ("mkdir in clip folder", ["mkdir", os.path.join(cdir, "mlvswitch_ro_dir")]),
-        ("mv clip folder", ["mv", cdir, os.path.join(mnt, "mlvswitch_ro_renamed")]),
-        ("rm DNG", ["rm", "-f", dng]),
-    ]
-    probes = [os.path.join(mnt, "mlvswitch_ro_probe.txt"), os.path.join(cdir, "mlvswitch_ro_probe.txt"),
-              os.path.join(mnt, "mlvswitch_ro_dir"), os.path.join(cdir, "mlvswitch_ro_dir"),
-              os.path.join(mnt, "mlvswitch_ro_renamed")]
-    if real_dir:
-        rd = os.path.join(mnt, real_dir)
-        attempts.append(("touch in real folder " + real_dir, ["touch", os.path.join(rd, "mlvswitch_ro_probe.txt")]))
-        attempts.append(("mkdir in real folder " + real_dir, ["mkdir", os.path.join(rd, "mlvswitch_ro_dir")]))
-        attempts.append(("mv real folder " + real_dir, ["mv", rd, rd + ".mlvswitch_ro"]))
-        probes += [os.path.join(rd, "mlvswitch_ro_probe.txt"), os.path.join(rd, "mlvswitch_ro_dir"), rd + ".mlvswitch_ro"]
-    if real:
-        # reversible (rename within the same folder) rather than rm, so a broken engine cannot destroy a real file
-        rf = os.path.join(mnt, real_dir, real[0])
-        attempts.append(("mv real file " + real[0], ["mv", rf, rf + ".mlvswitch_ro"]))
-        probes.append(rf + ".mlvswitch_ro")
-    failures = []
-    src_real_dir = os.path.join(src_folder, real_dir) if real_dir else None
-    for label, cmd in attempts:
-        r = subprocess.run(cmd, capture_output=True, text=True)
-        err = (r.stderr.strip().splitlines() or [""])[-1]
-        print("readonly: %-34s rc=%d %s" % (label, r.returncode, err))
-        if r.returncode == 0:
-            failures.append(label)
-    try:
-        with open(dng, "r+b") as f:
-            f.write(b"\0")
-        failures.append("open DNG for writing")
-        print("readonly: open DNG r+b                  SUCCEEDED")
-    except OSError as e:
-        print("readonly: open DNG r+b                  refused: %s" % e.strerror)
+    probes = [os.path.join(mnt, "mlvswitch_ro_dir"), os.path.join(cdir, "mlvswitch_ro_dir"),
+              os.path.join(mnt, "mlvswitch_ro_renamed"), os.path.join(cdir, "renamed.dng"),
+              os.path.join(cdir, "new_probe.dng"), os.path.join(cdir, ".DS_Store"), os.path.join(mnt, ".DS_Store"),
+              os.path.join(cdir, "._probe")]
+    try_op("mkdir at root", lambda: os.mkdir(probes[0]), failures)
+    try_op("mkdir in clip folder", lambda: os.mkdir(probes[1]), failures)
+    try_op("mv clip folder", lambda: os.rename(cdir, probes[2]), failures)
+    try_op("rmdir clip folder", lambda: os.rmdir(cdir), failures)
+    try_op("rm DNG", lambda: os.unlink(dng), failures)
+    try_op("mv DNG", lambda: os.rename(dng, probes[3]), failures)
+    try_op("open DNG r+b and write", lambda: write_file(dng, b"\0", "r+b"), failures)
+    try_op("truncate DNG", lambda: os.truncate(dng, 0), failures)
+    try_op("touch (utimes) DNG", lambda: os.utime(dng, (0, 0)), failures)
+    try_op("create new .dng in clip folder", lambda: write_file(probes[4], b"x"), failures)
+    try_op("create .DS_Store in clip folder", lambda: write_file(probes[5], b"x"), failures)
+    try_op("create .DS_Store at root", lambda: write_file(probes[6], b"x"), failures)
+    try_op("create ._ AppleDouble in clip folder", lambda: write_file(probes[7], b"x"), failures)
     for p in probes:
-        if os.path.exists(p):
+        # any *.dng name in a clip folder resolves to a virtual frame, so check those by listing
+        if (os.path.basename(p) in os.listdir(os.path.dirname(p)) if p.endswith(".dng") else os.path.lexists(p)):
             failures.append("exists after refusal: " + p)
     if not os.path.exists(dng) or os.path.getsize(dng) != size_before:
         failures.append("DNG missing or resized")
-    if src_real_dir and not os.path.isdir(src_real_dir):
-        failures.append("real folder gone from source: " + src_real_dir)
-        if os.path.isdir(src_real_dir + ".mlvswitch_ro"):
-            os.rename(src_real_dir + ".mlvswitch_ro", src_real_dir)  # undo
-    if real and not os.path.exists(os.path.join(mnt, real_dir, real[0])):
-        failures.append("real file gone: " + real[0])
+
+
+def check_readonly(mnt, cdir, dngs, src_folder):
+    """Protected entries refuse every mutation (on the real source folder: only refused operations are tried)."""
+    failures = []
+    check_protected(mnt, cdir, dngs, failures)
+    # a real (non-virtual) sub-folder of the rushes folder, passed through by MLVFS: directories stay read-only
+    real_dir = next((d for d in sorted(os.listdir(mnt)) if not d.startswith(".") and d != os.path.basename(cdir)
+                     and os.path.isdir(os.path.join(mnt, d)) and "MLV_" not in d), None)
+    print("mount root:", sorted(os.listdir(mnt))[:8], "real folder probe:", real_dir)
+    if real_dir:
+        rd = os.path.join(mnt, real_dir)
+        try_op("mkdir in real folder " + real_dir, lambda: os.mkdir(os.path.join(rd, "mlvswitch_ro_dir")), failures)
+        try_op("mv real folder " + real_dir, lambda: os.rename(rd, rd + ".mlvswitch_ro"), failures)
+        for p in (os.path.join(rd, "mlvswitch_ro_dir"), rd + ".mlvswitch_ro"):
+            if os.path.lexists(p):
+                failures.append("exists after refusal: " + p)
+        src_real_dir = os.path.join(src_folder, real_dir)
+        if not os.path.isdir(src_real_dir):
+            failures.append("real folder gone from source: " + src_real_dir)
+            if os.path.isdir(src_real_dir + ".mlvswitch_ro"):
+                os.rename(src_real_dir + ".mlvswitch_ro", src_real_dir)  # undo
+    return failures
+
+
+def sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 22), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+INDEX_NAME = ".mlv2dng-sidecars.json"
+
+
+def check_sidecars(mnt, cdir, dngs, src, name, mlv_sha):
+    """Sidecar files on a mounted clone `src` (see --expect-sidecars). Returns the list of failures."""
+    failures = []
+
+    def expect(cond, what):
+        print("sidecar: %-60s %s" % (what, "ok" if cond else "FAILED"))
+        if not cond:
+            failures.append(what)
+
+    other = next((d for d in os.listdir(mnt) if d.startswith(name + "BMLV")), None)
+    expect(other is not None, "second clip folder %sBMLV_* listed" % name)
+    odir = os.path.join(mnt, other) if other else None
+    listing = lambda d: set(os.listdir(d))
+    expect("lens.json" in listing(mnt) and "lens.json" not in listing(cdir), "user lens.json at root, not in clip")
+    expect(INDEX_NAME not in listing(mnt), "no index listed at root initially")
+
+    # 1. prefix-named sidecar written in the clip folder -> next to the MLV, listed in this clip only
+    gyro = name + ".gyroflow"
+    try_op("create " + gyro + " in clip folder", lambda: write_file(os.path.join(cdir, gyro), b"version X"),
+           failures, expect_ok=True)
+    expect(os.path.isfile(os.path.join(src, gyro)) and read_file(os.path.join(src, gyro)) == b"version X",
+           "%s stored in source folder with content X" % gyro)
+    expect(gyro in listing(cdir), gyro + " listed in clip folder")
+    expect(read_file(os.path.join(cdir, gyro)) == b"version X", gyro + " reads back through the mount")
+    expect(not os.path.exists(os.path.join(src, INDEX_NAME)), "prefix-named sidecar needs no index")
+    # 2. overwrite (as a re-export does): shorter content, so truncation must happen
+    try_op("overwrite " + gyro, lambda: write_file(os.path.join(cdir, gyro), b"Y"), failures, expect_ok=True)
+    expect(read_file(os.path.join(src, gyro)) == b"Y", "overwrite truncated and rewrote the source file")
+    try_op("append to " + gyro, lambda: write_file(os.path.join(cdir, gyro), b"Z", "ab"), failures, expect_ok=True)
+    expect(read_file(os.path.join(src, gyro)) == b"YZ", "append landed in the source file")
+    # Resolve-style long name also counts as this clip's sidecar
+    long_name = os.path.basename(cdir) + ".gcsv"
+    try_op("create " + long_name, lambda: write_file(os.path.join(cdir, long_name), b"t,x\n"), failures, expect_ok=True)
+    expect(os.path.isfile(os.path.join(src, long_name)) and long_name in listing(cdir), long_name + " stored + listed")
+
+    # 3. a name that does not start with the clip name -> stored in source, remembered by the index
+    odd = "odd-name.txt"
+    try_op("create " + odd + " in clip folder", lambda: write_file(os.path.join(cdir, odd), b"odd"), failures,
+           expect_ok=True)
+    expect(read_file(os.path.join(src, odd)) == b"odd", odd + " stored in source folder")
+    expect(odd in listing(cdir), odd + " listed in clip folder (index)")
+    expect(os.path.isfile(os.path.join(src, INDEX_NAME)), "index file written in source folder")
+    expect(odd in read_file(os.path.join(src, INDEX_NAME)).decode(), "index names " + odd)
+    expect(INDEX_NAME not in listing(cdir) and INDEX_NAME not in listing(mnt), "index hidden from listings")
+    for where in (mnt, cdir):
+        try_op("read index through " + ("root" if where == mnt else "clip folder"),
+               lambda: read_file(os.path.join(where, INDEX_NAME)), failures)
+        try_op("write index through " + ("root" if where == mnt else "clip folder"),
+               lambda: write_file(os.path.join(where, INDEX_NAME), b"{}"), failures)
+    expect(odd in read_file(os.path.join(src, INDEX_NAME)).decode(), "index intact after refused writes")
+
+    # 3b. cp -p of a file carrying an extended attribute: the macOS NFS client stores it as an AppleDouble
+    # "._<name>" next to the sidecar; that companion is accepted, hidden, and removed with the file
+    xsrc = os.path.join(os.path.dirname(src), os.path.basename(src) + "_xattr_src.json")
+    write_file(xsrc, b'{"x": 1}')
+    subprocess.run(["xattr", "-w", "com.mlv2dng.test", "1", xsrc], check=True)
+    copied = name + "_copied.json"
+    r = subprocess.run(["cp", "-p", xsrc, os.path.join(cdir, copied)], capture_output=True, text=True)
+    os.unlink(xsrc)
+    expect(r.returncode == 0, "cp -p with an xattr into the clip folder (%s)" % (r.stderr.strip() or "rc 0"))
+    expect(read_file(os.path.join(src, copied)) == b'{"x": 1}' and copied in listing(cdir), copied + " stored + listed")
+    # best effort only: the FUSE-T NFS client caches attributes, so a read-back is informative, not asserted
+    xr = subprocess.run(["xattr", "-p", "com.mlv2dng.test", os.path.join(cdir, copied)], capture_output=True, text=True)
+    print("sidecar: xattr read back through the mount (info): %s" % (xr.stdout.strip() or xr.stderr.strip()))
+    expect(not any(n.startswith("._") for n in listing(cdir) | listing(mnt)), "AppleDouble files hidden")
+    try_op("create ._ for a DNG", lambda: write_file(os.path.join(cdir, "._" + dngs[0]), b"x"), failures)
+
+    # 4. the other clip does not list the first clip's sidecars, and vice versa (prefix M29-0615 vs M29-0615B)
+    if odir:
+        ol = listing(odir)
+        expect(not ({gyro, odd, long_name} & ol), "other clip folder does not list them")
+        gyro_b = name + "B.gyroflow"
+        try_op("create " + gyro_b + " in other clip", lambda: write_file(os.path.join(odir, gyro_b), b"B"),
+               failures, expect_ok=True)
+        expect(gyro_b in listing(odir) and gyro_b not in listing(cdir), gyro_b + " listed only in its clip")
+        expect(gyro not in listing(odir), gyro + " still not in other clip")
+    # sidecars show at the mount root too (mirror of the source folder), except names in the Resolve clip
+    # folder format, which would collide with the clip folder itself
+    expect({gyro, odd} <= listing(mnt) and long_name not in listing(mnt), "sidecars mirrored at the mount root")
+
+    # 5. rename and delete sidecars
+    renamed = "odd-renamed.txt"
+    try_op("rename %s -> %s" % (odd, renamed), lambda: os.rename(os.path.join(cdir, odd), os.path.join(cdir, renamed)),
+           failures, expect_ok=True)
+    expect(not os.path.exists(os.path.join(src, odd)) and read_file(os.path.join(src, renamed)) == b"odd",
+           "rename applied in source folder")
+    expect(renamed in listing(cdir) and odd not in listing(cdir), "renamed sidecar listed under its new name")
+    gyro2 = name + "_v2.gyroflow"
+    try_op("rename %s -> %s" % (gyro, gyro2), lambda: os.rename(os.path.join(cdir, gyro), os.path.join(cdir, gyro2)),
+           failures, expect_ok=True)
+    expect(read_file(os.path.join(src, gyro2)) == b"YZ" and gyro2 in listing(cdir), gyro2 + " renamed + listed")
+    # renames onto protected names or into the virtual namespace are refused
+    try_op("rename sidecar onto <clip>.MLV", lambda: os.rename(os.path.join(cdir, gyro2), os.path.join(cdir, name + ".MLV")),
+           failures)
+    try_op("rename sidecar onto root <clip>.MLV", lambda: os.rename(os.path.join(cdir, gyro2), os.path.join(mnt, name + ".MLV")),
+           failures)
+    try_op("rename sidecar onto <clip>.M00", lambda: os.rename(os.path.join(cdir, gyro2), os.path.join(mnt, name + ".M00")),
+           failures)
+    try_op("rename sidecar onto a DNG", lambda: os.rename(os.path.join(cdir, gyro2), os.path.join(cdir, dngs[0])),
+           failures)
+    try_op("rename sidecar onto the index", lambda: os.rename(os.path.join(cdir, gyro2), os.path.join(mnt, INDEX_NAME)),
+           failures)
+    try_op("rename sidecar into a new folder", lambda: os.rename(os.path.join(cdir, gyro2), os.path.join(cdir, "sub", "x")),
+           failures)
+    expect(read_file(os.path.join(src, gyro2)) == b"YZ", "sidecar intact after refused renames")
+    for n in (renamed, gyro2, long_name, copied):
+        try_op("delete " + n, lambda: os.unlink(os.path.join(cdir, n)), failures, expect_ok=True)
+        expect(not os.path.exists(os.path.join(src, n)) and n not in listing(cdir), n + " gone from source + clip")
+    expect(not os.path.exists(os.path.join(src, INDEX_NAME)), "index removed once it is empty")
+
+    # 6. protected entries: MLV (through the root), virtual DNG, clip folder, new MLV-family names
+    mlv_at_root = os.path.join(mnt, name + ".MLV")
+    try_op("truncate <clip>.MLV via root", lambda: os.truncate(mlv_at_root, 0), failures)
+    try_op("open <clip>.MLV for writing", lambda: write_file(mlv_at_root, b"x", "r+b"), failures)
+    try_op("rm <clip>.MLV via root", lambda: os.unlink(mlv_at_root), failures)
+    try_op("rename <clip>.MLV via root", lambda: os.rename(mlv_at_root, os.path.join(mnt, "x.MLV")), failures)
+    try_op("create new.MLV at root", lambda: write_file(os.path.join(mnt, "new.MLV"), b"x"), failures)
+    try_op("create %s.M00 in clip folder" % name, lambda: write_file(os.path.join(cdir, name + ".M00"), b"x"), failures)
+    try_op("create x.IDX at root", lambda: write_file(os.path.join(mnt, "x.IDX"), b"x"), failures)
+    failures += check_readonly(mnt, cdir, dngs, src)  # protected entries + the real sub-folder "Audio"
+    for n in ("new.MLV", "x.MLV", name + ".M00", "x.IDX"):
+        if os.path.lexists(os.path.join(src, n)):
+            failures.append("protected name created in source: " + n)
+
+    # 7. the mount root mirrors the source root: new files, and existing user files may be overwritten
+    note = "root-note.txt"
+    try_op("create " + note + " at root", lambda: write_file(os.path.join(mnt, note), b"root"), failures, expect_ok=True)
+    expect(read_file(os.path.join(src, note)) == b"root" and note in listing(mnt), note + " stored in source root + listed")
+    expect(note not in listing(cdir), note + " not listed in the clip folder")
+    try_op("overwrite lens.json at root", lambda: write_file(os.path.join(mnt, "lens.json"), b"{\"new\": 1}"),
+           failures, expect_ok=True)
+    expect(read_file(os.path.join(src, "lens.json")) == b'{"new": 1}', "lens.json overwritten in source")
+    try_op("delete " + note, lambda: os.unlink(os.path.join(mnt, note)), failures, expect_ok=True)
+    expect(not os.path.exists(os.path.join(src, note)), note + " deleted from source")
+
+    expect(sha256(os.path.join(src, name + ".MLV")) == mlv_sha, "MLV SHA-256 unchanged")
+    expect(read_file(os.path.join(mnt, "Audio", "take1.txt")) == b"take", "file in a real sub-folder readable")
+    try_op("write a file in real sub-folder", lambda: write_file(os.path.join(mnt, "Audio", "take2.txt"), b"t2"),
+           failures, expect_ok=True)
+    expect(read_file(os.path.join(src, "Audio", "take2.txt")) == b"t2", "sub-folder file stored in source sub-folder")
+    kept = {name + ".MLV", name + "B.MLV", "lens.json", name + "B.gyroflow", "Audio"}
+    # "._x" attribute files may remain only for files that remain (renames and deletes carry them)
+    left = sorted(n for n in os.listdir(src) if n not in kept and not (n.startswith("._") and n[2:] in kept))
+    expect(not left, "source folder holds nothing else (extra: %s)" % left)
     return failures
 
 
@@ -224,6 +402,7 @@ def main():
     ap.add_argument("--expect-raw", metavar="REF_DIR")
     ap.add_argument("--expect-sane", action="store_true")
     ap.add_argument("--expect-readonly", action="store_true")
+    ap.add_argument("--expect-sidecars", action="store_true")
     ap.add_argument("--dual-iso-preview", action="store_true")
     ap.add_argument("--index-dir", help="pass --index-dir to mlvfs; asserts .IDX files land there")
     ap.add_argument("--assert-source-untouched", action=argparse.BooleanOptionalAction, default=True,
@@ -237,9 +416,26 @@ def main():
     clip = os.path.abspath(a.clip)
     folder, name = os.path.dirname(clip), os.path.splitext(os.path.basename(clip))[0]
     before = snapshot(folder)
+    mount_folder, clone_dir, mlv_sha = folder, None, None
+    if a.expect_sidecars:
+        # never write to the real rushes: mount an APFS clone of the clip (+ a second clip and a user file)
+        clone_dir = tempfile.mkdtemp(prefix="mlvsrc_")
+        for n in sorted(os.listdir(folder)):
+            stem, ext = os.path.splitext(n)
+            if stem == name and re.fullmatch(r"\.(MLV|M\d\d)", ext, re.I):
+                subprocess.run(["cp", "-c", os.path.join(folder, n), os.path.join(clone_dir, n)], check=True)
+        subprocess.run(["cp", "-c", clip, os.path.join(clone_dir, name + "B.MLV")], check=True)
+        write_file(os.path.join(clone_dir, "lens.json"), b'{"lens": "user file"}')
+        os.mkdir(os.path.join(clone_dir, "Audio"))
+        write_file(os.path.join(clone_dir, "Audio", "take1.txt"), b"take")
+        mount_folder = clone_dir
+        if not a.index_dir:  # as the app does: .IDX files go to an index dir, never into the source folder
+            a.index_dir = tempfile.mkdtemp(prefix="mlvidx_")
+        mlv_sha = sha256(os.path.join(clone_dir, name + ".MLV"))
+        print("sidecar source clone:", clone_dir, "MLV sha256", mlv_sha[:16])
     mnt = tempfile.mkdtemp(prefix="mlvmnt_")
     log = tempfile.NamedTemporaryFile(prefix="mlvfs_log_", delete=False)
-    cmd = [MLVFS, mnt, "--mlv-dir=" + folder, "--resolve-naming", "-f"]
+    cmd = [MLVFS, mnt, "--mlv-dir=" + mount_folder, "--resolve-naming", "-f"]
     if not a.no_bad_pix:
         cmd += ["--bad-pix"]
     if a.fpm_dir:
@@ -310,7 +506,14 @@ def main():
         if a.expect_readonly:
             failures = check_readonly(mnt, cdir, dngs, folder)
             assert not failures, "mount accepted mutating operations: %s" % failures
-            print("readonly: all mutating operations refused")
+            print("readonly: all mutating operations on protected entries refused")
+        if a.expect_sidecars:
+            try:
+                failures = check_sidecars(mnt, cdir, dngs, mount_folder, name, mlv_sha)
+            except OSError as e:
+                failures = ["unexpected OSError: %s" % e]
+            assert not failures, "sidecar checks failed: %s" % failures
+            print("sidecars: all checks passed")
         ok = True
     except AssertionError as e:
         print("FAIL:", e)
@@ -340,6 +543,8 @@ def main():
             ok = False
         else:
             shutil.rmtree(mnt, ignore_errors=True)
+        if clone_dir:
+            shutil.rmtree(clone_dir, ignore_errors=True)
         log.close()
         # skip the bare "x y" coordinate lines MLVFS prints for detected bad pixels
         lines = [l for l in open(log.name, errors="replace").read().splitlines()

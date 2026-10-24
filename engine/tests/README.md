@@ -27,7 +27,20 @@ Robustness (truncated / corrupt frames):
 - `python3 engine/tests/truncated_clip_test.py <clip.MLV> [--cut-frame 5]`: mounts a copy cut mid-frame; earlier
   frames read and pass the sanity check, the cut frame returns EIO, mlvfs survives and unmounts.
 
+Sidecars (`--expect-sidecars`): mounts an APFS clone (`cp -c`, in a temp dir) of the clip plus a second clone
+`<clip>B.MLV`, a user file `lens.json` and a sub-folder `Audio/`, never the real folder. Through the mount it writes
+`<clip>.gyroflow` (stored next to the MLV, listed in the clip folder only), overwrites/appends it, writes a non-prefix
+name (`odd-name.txt`, remembered by `.mlv2dng-sidecars.json`, which is hidden and never served), `cp -p`s a file with
+an extended attribute (AppleDouble `._x` stored next to it, moved/deleted with it), renames and deletes sidecars
+(index removed when empty), and checks that the MLV (SHA-256), DNGs, clip folders, folders, `.DS_Store` and
+MLV-family names refuse every change, that the other clip lists none of them, and that root writes land in the
+source root. Implies a temporary `--index-dir` (as the app). `--expect-readonly` now runs only the protected-entry
+part on the real folder.
+
 Unit tests (no FUSE needed):
+- `make -C engine -f Makefile.arm64 sidecar-test`: sidecar name rules (protected MLV family/.IDX/.MLD/index,
+  hidden Finder metadata, virtual names, clip prefix rule) and the `.mlv2dng-sidecars.json` index (JSON round trip
+  with awkward names, malformed input, removal deleting the empty index, nothing created just to remove).
 - `make -C engine -f Makefile.arm64 resolve-name-test`: `--resolve-naming` folder name -> MLV base path matching
   (POSIX `<regex.h>`, replaces SLRE): canonical names, lowercase `mlv`/`c`, spaces and accents, non-matching names.
 - `make -C engine -f Makefile.arm64 dual-iso-cache-test`: live dual ISO switching by signals (SIGUSR1 -> mode 1,

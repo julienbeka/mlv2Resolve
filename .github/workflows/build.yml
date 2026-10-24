@@ -33,6 +33,7 @@ jobs:
         working-directory: engine
         run: |
           make -f Makefile.arm64 resolve-name-test
+          make -f Makefile.arm64 sidecar-test
           make -f Makefile.arm64 dual-iso-cache-test
 
       - name: Build app

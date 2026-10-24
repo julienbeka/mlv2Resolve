@@ -215,7 +215,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return true
     }
 
+    /// One mlv2dng at a time, whatever copy was opened: two instances would fight over the
+    /// same mounts. A second launch hands over to the running one (which shows its window
+    /// through the reopen event) and quits before starting anything.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        let me = NSRunningApplication.current
+        guard let id = Bundle.main.bundleIdentifier,
+              let other = NSRunningApplication.runningApplications(withBundleIdentifier: id)
+                .first(where: { $0.processIdentifier != me.processIdentifier && !$0.isTerminated }),
+              let url = other.bundleURL else { return }
+        NSLog("mlv2dng: already running (pid \(other.processIdentifier)), handing over")
+        handingOver = true // applicationDidFinishLaunching must not start (stale-mount cleanup would hit the other instance)
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = true
+        NSWorkspace.shared.openApplication(at: url, configuration: config) { _, _ in exit(0) }
+    }
+
+    private var handingOver = false
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard !handingOver else { return }
         AppDelegate.shared = self
         LaunchAtLogin.initializeIfNeeded()
         #if DEBUG

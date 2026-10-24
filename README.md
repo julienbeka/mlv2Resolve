@@ -40,12 +40,20 @@ appear automatically in that clip's folder of the mount:
   folder shows it (deleted when it becomes empty).
 - The mount root mirrors the original folder: files saved there land in it, and its other files are listed there.
 
-What can be written through a mount: new files, and the shoot folder's other files (`.gyroflow`, `.json`, `.gcsv`,
-logs…), which can be overwritten, renamed and deleted. What can never be written, renamed or deleted: the `.MLV`
-files and their chunks (`.M00`–`.M99`), `.IDX`, `.MLD`, the virtual DNG/WAV files, the clip folders, folders in
-general (no folder can be created or removed), `.mlv2dng-sidecars.json` and `.DS_Store`. Your original MLV files
-are never modified. Since every name maps to one file in the original folder, two clip folders saving the same file
-name share one file.
+What can be written through a mount:
+
+- **New files** of any name except the protected ones below.
+- **Existing files**, which may be overwritten, truncated, renamed or deleted, only if they were created through the
+  mount or have one of these extensions: `gyroflow`, `gcsv`, `json`, `csv`, `txt`, `xml`, `log`, `cube`, `srt`
+  (any case). Every other existing file of the shoot folder (`.wav`, `.mov`, `.mp4`, `.dng`, `.cr2`, `.bin`…) is
+  read-only through the mount.
+
+What can never be written, renamed or deleted: the `.MLV` files and their chunks (`.M00`–`.M99`), `.IDX`, `.MLD`
+(any case), the virtual DNG/WAV files, the clip folders, folders in general (no folder can be created or removed),
+`.mlv2dng-sidecars.json`, `.DS_Store`, symbolic links and files with several hard links. Nothing is ever read or
+written outside the shoot folder, even through a symbolic link. Your original MLV files are never modified. Since
+every name maps to one file in the original folder, two clip folders cannot use the same file name: the file belongs
+to the clip folder that created it.
 
 ## Building
 

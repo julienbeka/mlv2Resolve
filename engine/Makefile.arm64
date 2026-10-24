@@ -10,7 +10,7 @@ FUSE_LIB ?= /usr/local/lib
 CFLAGS = $(ARCH) -O2 -Wall -Wno-deprecated-declarations -Wno-unused-function -Wno-unused-variable \
   -D_FILE_OFFSET_BITS=64 -DFUSE_USE_VERSION=26 -DVERSION="\"$(GIT_VERSION)\"" \
   -std=gnu99 -I$(FUSE_INC) -I$(SRC)
-LIBS = -L$(FUSE_LIB) -lfuse-t -lz -pthread -Wl,-rpath,$(FUSE_LIB)
+LIBS = -L$(FUSE_LIB) -lfuse-t -lz -pthread -framework CoreFoundation -Wl,-rpath,$(FUSE_LIB)
 
 LZMA_SRCS = 7zAlloc 7zBuf 7zBuf2 7zCrc 7zCrcOpt 7zDec 7zFile 7zIn 7zStream Alloc Bcj2 Bra Bra86 BraIA64 CpuArch Delta LzFind Lzma2Dec Lzma2Enc Lzma86Dec Lzma86Enc LzmaDec LzmaEnc LzmaLib Ppmd7 Ppmd7Dec Ppmd7Enc Sha256 Xz XzCrc64
 OBJS = $(addprefix $(SRC)/, dng.o index.o wav.o stripes.o cs.o amaze_demosaic_RT.o hdr.o histogram.o \
@@ -55,7 +55,7 @@ sidecar-test: $(SIDECAR_TEST_BIN)
 
 $(SIDECAR_TEST_BIN): tests/sidecar_test.c $(SRC)/sidecar.c $(SRC)/sidecar.h
 	mkdir -p $(dir $@)
-	$(CC) $(ARCH) -O1 -g -Wall -std=gnu99 -fsanitize=undefined -I$(SRC) tests/sidecar_test.c $(SRC)/sidecar.c -pthread -o $@
+	$(CC) $(ARCH) -O1 -g -Wall -std=gnu99 -fsanitize=undefined -I$(SRC) tests/sidecar_test.c $(SRC)/sidecar.c -pthread -framework CoreFoundation -o $@
 
 # Live dual ISO switch (signals) + image buffer cache generation test: make -f Makefile.arm64 dual-iso-cache-test
 # Runs the UBSan build, then the same binary under Guard Malloc (freed memory unmapped: a use-after-free

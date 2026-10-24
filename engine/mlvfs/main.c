@@ -1048,20 +1048,48 @@ int create_preview(struct image_buffer * image_buffer)
     return 1;
 }
 
-/*
- * AppleDouble companion "._<name>" (how the macOS NFS client stores extended attributes on the FUSE-T mount):
- * returns the malloc'ed path with the "._" removed from the last component, or NULL if `path` is not one.
- */
-static char *appledouble_subject(const char *path)
+#define appledouble_subject sidecar_appledouble_subject
+
+/* realpath of --mlv-dir, resolved once at startup: nothing outside it is ever served or written */
+static char *mlvfs_real_root = NULL;
+
+/* 1 if `real` (an existing path) resolves inside the shoot folder; a missing path counts as inside */
+static int real_inside_shoot(const char *real)
 {
-    const char *name = find_last_separator(path) ? find_last_separator(path) + 1 : path;
-    if (strncmp(name, "._", 2) != 0 || name[2] == 0 || strncmp(name + 2, "._", 2) == 0) return NULL;
-    size_t dir_len = (size_t)(name - path);
-    char *subject = malloc(strlen(path));
-    if (!subject) return NULL;
-    memcpy(subject, path, dir_len);
-    strcpy(subject + dir_len, name + 2);
-    return subject;
+    if (!real || !mlvfs_real_root) return 0;
+    char buf[PATH_MAX];
+    if (!realpath(real, buf)) return errno == ENOENT || errno == ENOTDIR;
+    size_t n = strlen(mlvfs_real_root);
+    return strncmp(buf, mlvfs_real_root, n) == 0 && (buf[n] == 0 || buf[n] == '/' || mlvfs_real_root[n - 1] == '/');
+}
+
+/*
+ * 1 if the real folder `dir` is the shoot folder or below it through real folders only: every component
+ * after --mlv-dir is lstat'ed (no symlink anywhere) and the realpath must stay inside the shoot.
+ */
+static int dir_inside_shoot(const char *dir)
+{
+    size_t n = strlen(mlvfs.mlv_path);
+    if (!dir || strncmp(dir, mlvfs.mlv_path, n) != 0 || (dir[n] != 0 && dir[n] != '/' && mlvfs.mlv_path[n - 1] != '/'))
+        return 0;
+    char *tmp = copy_string(dir);
+    if (!tmp) return 0;
+    int ok = 1;
+    for (char *p = tmp + n; ok && *p; p++)
+    {
+        if (*p != '/' || p == tmp + n) continue;
+        *p = 0;
+        struct stat st;
+        if (lstat(tmp, &st) != 0 || !S_ISDIR(st.st_mode)) ok = 0;
+        *p = '/';
+    }
+    if (ok && strlen(tmp) > n)
+    {
+        struct stat st;
+        if (lstat(tmp, &st) != 0 || !S_ISDIR(st.st_mode)) ok = 0;
+    }
+    free(tmp);
+    return ok && real_inside_shoot(dir);
 }
 
 /* inserts "._" before the last component of a real path (malloc'ed) */
@@ -1185,6 +1213,10 @@ static int mlvfs_writable_target(const char *path, struct mlvfs_target *t)
 {
     memset(t, 0, sizeof(*t));
 
+    /* name policy (protected/hidden names, ".", "..", .MLD/.IDX components; "._x" follows x): sidecar.c */
+    int policy = sidecar_path_check(path);
+    if (policy != 0) return policy;
+
     /* "._x" (extended attributes of x): only for a writable name x (create also wants x to exist) */
     char *subject = appledouble_subject(path);
     if (subject)
@@ -1201,19 +1233,6 @@ static int mlvfs_writable_target(const char *path, struct mlvfs_target *t)
     }
 
     const char *name = find_last_separator(path) ? find_last_separator(path) + 1 : path;
-    if (*name == 0 || sidecar_name_hidden(name) || sidecar_name_protected(name)) return -EACCES;
-
-    /* intermediate components: no . / .., no Finder metadata, nothing inside .MLD / .IDX */
-    char *tmp = copy_string(path);
-    if (!tmp) return -ENOMEM;
-    int bad = 0;
-    for (char *comp = strtok(tmp, "/"); comp && !bad; comp = strtok(NULL, "/"))
-    {
-        if (comp == tmp + (name - path)) break;
-        if (sidecar_name_hidden(comp) || string_ends_with(comp, ".MLD") || string_ends_with(comp, ".IDX")) bad = 1;
-    }
-    free(tmp);
-    if (bad) return -EACCES;
 
     char *mlv_filename = NULL;
     char *path_in_mlv = NULL;
@@ -1251,6 +1270,8 @@ static int mlvfs_writable_target(const char *path, struct mlvfs_target *t)
         }
     }
     if (result == 0 && (!t->real || !t->dir || !t->name)) result = -ENOMEM;
+    /* never through a symlinked folder, never outside the shoot */
+    if (result == 0 && !dir_inside_shoot(t->dir)) result = -EACCES;
     if (result != 0) target_free(t);
     return result;
 }
@@ -1266,20 +1287,77 @@ static int target_owned(const struct mlvfs_target *t)
     return owned;
 }
 
-/* 0 if the target exists as a regular file, -ENOENT if missing, -EACCES for directories and symlinks */
+/* st of an acceptable existing file: regular, not a symlink, single link (a hard link could be an MLV) */
+static int regular_single(const struct stat *st)
+{
+    if (!S_ISREG(st->st_mode)) return -EACCES;
+    return st->st_nlink > 1 ? -EACCES : 0;
+}
+
+/* 0 if the target exists as a regular single-link file, -ENOENT if missing, -EACCES otherwise */
 static int target_is_regular(const struct mlvfs_target *t)
 {
     struct stat st;
     if (lstat(t->real, &st) != 0) return -errno;
-    return S_ISREG(st.st_mode) ? 0 : -EACCES;
+    return regular_single(&st);
 }
 
-/* records which clip folder `t` belongs to (index entry only when the prefix rule does not say it) */
-static int target_associate(const struct mlvfs_target *t)
+/*
+ * Allowlist: an existing file may be modified through the mount only if it was created through it (recorded
+ * in the index) or its extension is in SIDECAR_MODIFIABLE_EXTS. "._x" follows x.
+ */
+static int target_modifiable(const struct mlvfs_target *t)
+{
+    if (sidecar_ext_modifiable(t->name)) return 1;
+    struct sidecar_index idx;
+    int r = sidecar_index_load(t->dir, &idx);
+    int created = r == 0 && sidecar_index_created(&idx, t->name);
+    sidecar_index_free(&idx);
+    return created;
+}
+
+/* everything an existing target must satisfy before it is changed: owned, regular single link, allowlisted */
+static int target_check_existing(const struct mlvfs_target *t)
+{
+    if (!target_owned(t)) return -ENOENT;
+    int r = target_is_regular(t);
+    if (r != 0) return r;
+    return target_modifiable(t) ? 0 : -EACCES;
+}
+
+/* index changes for a file that now exists at `t` (created or renamed there through the mount) */
+static int target_record(const struct mlvfs_target *t)
 {
     if (t->appledouble) return 0;
-    if (!t->clip) return sidecar_index_update(t->dir, t->name, NULL);
-    return sidecar_index_update(t->dir, t->name, sidecar_prefix_match(t->clip, t->name) ? NULL : t->clip);
+    struct sidecar_change c = { t->name, SIDECAR_CLEAR, NULL,
+                                sidecar_ext_modifiable(t->name) ? SIDECAR_KEEP : SIDECAR_SET };
+    if (t->clip && !sidecar_prefix_match(t->clip, t->name))
+    {
+        c.clip_op = SIDECAR_SET;
+        c.clip = t->clip;
+    }
+    return sidecar_index_apply(t->dir, &c, 1);
+}
+
+/* index changes for a file that no longer exists at `t` */
+static void target_forget(const struct mlvfs_target *t)
+{
+    if (t->appledouble) return;
+    struct sidecar_change c = { t->name, SIDECAR_CLEAR, NULL, SIDECAR_CLEAR };
+    sidecar_index_apply(t->dir, &c, 1);
+}
+
+/* opens an existing target for writing: never follows a symlink, refuses anything but a single-link file */
+static int open_existing_for_write(const char *real, int flags)
+{
+    /* O_TRUNC is applied only after the checks, on the descriptor that was checked */
+    int fd = open(real, (flags & ~(O_TRUNC | O_CREAT | O_EXCL)) | O_NOFOLLOW | O_NONBLOCK | O_BINARY);
+    if (fd < 0) return -errno;
+    struct stat st;
+    int r = fstat(fd, &st) == 0 ? regular_single(&st) : -errno;
+    if (r == 0 && (flags & O_TRUNC) && ftruncate(fd, 0) != 0) r = -errno;
+    if (r != 0) { close(fd); return r; }
+    return fd;
 }
 
 /**
@@ -1345,14 +1423,21 @@ static char *mlvfs_resolve_virtual(const char *path)
     {
         /* this file is not within a virtual directory, so just get it from the existing one */
         const char *name = find_last_separator(path) ? find_last_separator(path) + 1 : path;
-        if (strcmp(name, SIDECAR_INDEX_NAME) != 0) /* the sidecar index is never served */
+        /* the sidecar index (and its temp files) is never served, whatever the case */
+        if (strncasecmp(name, SIDECAR_INDEX_PREFIX, strlen(SIDECAR_INDEX_PREFIX)) != 0)
         {
             char *tmp_path = path_slashfix(copy_string(path));
             resolved_filename = path_append((const char*)mlvfs.mlv_path, (const char*)tmp_path);
             free(tmp_path);
         }
     }
-    
+
+    /* a symlink (or a path through a symlinked folder) is never followed out of the shoot */
+    if (resolved_filename && !is_mlv_file(resolved_filename) && !real_inside_shoot(resolved_filename))
+    {
+        free(resolved_filename);
+        resolved_filename = NULL;
+    }
     return resolved_filename;
 }
 
@@ -1570,12 +1655,11 @@ static int mlvfs_open(const char *path, struct fuse_file_info *fi)
     {
         struct mlvfs_target t;
         int r = mlvfs_writable_target(path, &t);
-        if (r == 0 && !target_owned(&t)) r = -ENOENT;
-        if (r == 0) r = target_is_regular(&t);
+        if (r == 0) r = target_check_existing(&t);
         if (r == 0)
         {
-            int fd = open(t.real, (fi->flags & (O_ACCMODE | O_TRUNC | O_APPEND)) | O_NOFOLLOW | O_BINARY);
-            if (fd < 0) r = -errno;
+            int fd = open_existing_for_write(t.real, fi->flags & (O_ACCMODE | O_TRUNC | O_APPEND));
+            if (fd < 0) r = fd;
             else close(fd);
         }
         target_free(&t);
@@ -1698,6 +1782,11 @@ static int mlvfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, FU
         char *tmp_path = path_slashfix(copy_string(path));
         real_path = path_append((const char*)mlvfs.mlv_path, (const char*)tmp_path);
         free(tmp_path);
+        if (real_path && !real_inside_shoot(real_path)) /* never list a folder outside the shoot */
+        {
+            free(real_path);
+            real_path = NULL;
+        }
     }
 
     if (real_path)
@@ -1933,11 +2022,14 @@ static int mlvfs_read(const char *path, char *buf, size_t size, FUSE_OFF_T offse
 }
 
 /*
- * mlv2dng: the mount is writable for sidecars only (sidecar.h). Regular files of the source folder that are
- * not protected may be created, written, truncated, renamed and deleted through the mount root or a clip
- * folder (stored next to the MLV); virtual files, clip folders, the MLV family, .IDX, .MLD, the sidecar
- * index and .DS_Store are refused with EACCES, directories are never created or removed (EROFS).
- * Writes are plain POSIX calls on the real file, opened and closed per call (as MLVFS always did).
+ * mlv2dng: the mount is writable for sidecars only (sidecar.h). Through the mount root or a clip folder:
+ *  - a NEW file of any non-protected name may be created (stored next to the MLV / in the source folder);
+ *  - an EXISTING file may be written, truncated, renamed, deleted only if it is a regular single-link file
+ *    (never a symlink, never a hard link: it could be an MLV), owned by the clip folder addressed, and either
+ *    created through the mount (index) or of an allowlisted extension (SIDECAR_MODIFIABLE_EXTS);
+ *  - protected names (MLV family, .IDX, .MLD, index, .DS_Store), virtual files, clip folders and anything
+ *    through a symlinked folder or outside the shoot are refused with EACCES; mkdir/rmdir return EROFS.
+ * Writes are plain POSIX calls on the real file, opened (O_NOFOLLOW, then fstat-checked) and closed per call.
  */
 static int mlvfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 {
@@ -1946,25 +2038,46 @@ static int mlvfs_create(const char *path, mode_t mode, struct fuse_file_info *fi
     int r = mlvfs_writable_target(path, &t);
     if (r != 0) return r;
     struct stat st;
-    if (lstat(t.real, &st) == 0 && !S_ISREG(st.st_mode)) r = -EACCES;
-    if (r == 0 && t.appledouble)
+    if (t.appledouble)
     {
-        /* extended attributes only for an existing regular file: t.real minus its "._" */
+        /* extended attributes only for an existing regular single-link file that may be modified */
         char *subject = copy_string(t.real);
         char *name = subject ? find_last_separator(subject) : NULL;
         if (name) memmove(name + 1, name + 3, strlen(name + 3) + 1);
-        if (!subject || !name || lstat(subject, &st) != 0 || !S_ISREG(st.st_mode)) r = -EACCES;
+        if (!subject || !name || lstat(subject, &st) != 0 || regular_single(&st) != 0 || !target_modifiable(&t))
+            r = -EACCES;
         free(subject);
     }
-    if (r == 0)
+    if (r == 0 && lstat(t.real, &st) == 0)
     {
-        int flags = O_CREAT | O_WRONLY | O_NOFOLLOW | O_BINARY | (fi->flags & (O_EXCL | O_TRUNC));
-        int fd = open(t.real, flags, (mode & 0777) ? (mode & 0777) : 0644);
-        if (fd < 0) r = -errno;
-        else close(fd);
+        /* create over an existing file = modify it */
+        if (fi->flags & O_EXCL) r = -EEXIST;
+        else r = target_check_existing(&t);
+        if (r == 0)
+        {
+            int fd = open_existing_for_write(t.real, O_WRONLY | (fi->flags & O_TRUNC));
+            if (fd < 0) r = fd;
+            else close(fd);
+        }
     }
-    /* through a clip folder: remember the clip (a root create keeps any existing association) */
-    if (r == 0 && t.clip) r = target_associate(&t);
+    else if (r == 0)
+    {
+        /* a new file: make sure its index entry can be written before creating it */
+        int needs_index = !t.appledouble && (!sidecar_ext_modifiable(t.name)
+                                             || (t.clip && !sidecar_prefix_match(t.clip, t.name)));
+        if (needs_index) r = sidecar_index_writable(t.dir);
+        if (r == 0)
+        {
+            int fd = open(t.real, O_CREAT | O_EXCL | O_WRONLY | O_NOFOLLOW | O_BINARY, (mode & 0777) ? (mode & 0777) : 0644);
+            if (fd < 0) r = -errno;
+            else
+            {
+                close(fd);
+                r = target_record(&t);
+                if (r != 0) unlink(t.real); /* not recorded: do not leave an untracked file behind */
+            }
+        }
+    }
     target_free(&t);
     return r;
 }
@@ -1995,25 +2108,27 @@ static int mlvfs_rename(const char *from, const char *to)
     if (r != 0) return r;
     r = mlvfs_writable_target(to, &t);
     if (r != 0) { target_free(&f); return r; }
-    if (!target_owned(&f)) r = -ENOENT;
-    if (r == 0) r = target_is_regular(&f);
-    if (r == 0)
+    if (f.appledouble != t.appledouble) r = -EACCES; /* "._x" only renames to another "._y" */
+    if (r == 0) r = target_check_existing(&f);
+    struct stat st;
+    if (r == 0 && lstat(t.real, &st) == 0) r = target_check_existing(&t); /* replacing = modifying */
+    if (r == 0 && !f.appledouble)
     {
-        int dest = target_is_regular(&t);
-        if (dest != 0 && dest != -ENOENT) r = dest; /* never replace a directory or a symlink */
+        r = sidecar_index_writable(f.dir);
+        if (r == 0) r = sidecar_index_writable(t.dir);
     }
-    if (r == 0 && f.appledouble != t.appledouble) r = -EACCES; /* "._x" only renames to another "._y" */
     if (r == 0 && rename(f.real, t.real) != 0) r = -errno;
     if (r == 0 && !f.appledouble)
     {
         /* carry the "._x" attribute file along ourselves: the NFS client does not always do it */
         char *fad = appledouble_of(f.real), *tad = appledouble_of(t.real);
-        struct stat st;
-        if (fad && tad && lstat(fad, &st) == 0 && S_ISREG(st.st_mode)) rename(fad, tad);
+        if (fad && tad && lstat(fad, &st) == 0 && regular_single(&st) == 0
+            && (lstat(tad, &st) != 0 || regular_single(&st) == 0))
+            rename(fad, tad);
         free(fad);
         free(tad);
-        sidecar_index_update(f.dir, f.name, NULL);
-        r = target_associate(&t);
+        target_forget(&f);
+        r = target_record(&t);
     }
     target_free(&f);
     target_free(&t);
@@ -2030,17 +2145,16 @@ static int mlvfs_unlink(const char *path)
     struct mlvfs_target t;
     int r = mlvfs_writable_target(path, &t);
     if (r != 0) return r;
-    if (!target_owned(&t)) r = -ENOENT;
-    if (r == 0) r = target_is_regular(&t);
+    r = target_check_existing(&t);
     if (r == 0 && unlink(t.real) != 0) r = -errno;
     if (r == 0 && !t.appledouble)
     {
         /* never leave an orphan "._x" attribute file next to the rushes */
         char *ad = appledouble_of(t.real);
         struct stat st;
-        if (ad && lstat(ad, &st) == 0 && S_ISREG(st.st_mode)) unlink(ad);
+        if (ad && lstat(ad, &st) == 0 && regular_single(&st) == 0) unlink(ad);
         free(ad);
-        sidecar_index_update(t.dir, t.name, NULL);
+        target_forget(&t);
     }
     target_free(&t);
     return r;
@@ -2051,11 +2165,11 @@ static int mlvfs_truncate(const char *path, FUSE_OFF_T offset)
     struct mlvfs_target t;
     int r = mlvfs_writable_target(path, &t);
     if (r != 0) return r;
-    r = target_is_regular(&t);
+    r = target_check_existing(&t);
     if (r == 0)
     {
-        int fd = open(t.real, O_WRONLY | O_NOFOLLOW | O_BINARY);
-        if (fd < 0) r = -errno;
+        int fd = open_existing_for_write(t.real, O_WRONLY);
+        if (fd < 0) r = fd;
         else
         {
             if (ftruncate(fd, offset) != 0) r = -errno;
@@ -2076,13 +2190,18 @@ static int mlvfs_write(const char *path, const char *buf, size_t size, FUSE_OFF_
     struct mlvfs_target t;
     int r = mlvfs_writable_target(path, &t);
     if (r != 0) return r;
-    int fd = open(t.real, O_WRONLY | O_NOFOLLOW | O_BINARY);
-    if (fd < 0) r = -errno;
-    else
+    if (!target_owned(&t)) r = -ENOENT;
+    else if (!target_modifiable(&t)) r = -EACCES;
+    if (r == 0)
     {
-        ssize_t w = pwrite(fd, buf, size, offset);
-        r = w < 0 ? -errno : (int)w;
-        close(fd);
+        int fd = open_existing_for_write(t.real, O_WRONLY); /* fstat-checked: regular, single link */
+        if (fd < 0) r = fd;
+        else
+        {
+            ssize_t w = pwrite(fd, buf, size, offset);
+            r = w < 0 ? -errno : (int)w;
+            close(fd);
+        }
     }
     target_free(&t);
     return r;
@@ -2093,7 +2212,7 @@ static int mlvfs_utimens(const char *path, const struct timespec tv[2])
     struct mlvfs_target t;
     int r = mlvfs_writable_target(path, &t);
     if (r != 0) return r;
-    r = target_is_regular(&t);
+    r = target_check_existing(&t);
     if (r == 0 && utimensat(AT_FDCWD, t.real, tv, AT_SYMLINK_NOFOLLOW) != 0) r = -errno;
     target_free(&t);
     return r;
@@ -2105,7 +2224,7 @@ static int mlvfs_chmod(const char *path, mode_t mode)
     struct mlvfs_target t;
     int r = mlvfs_writable_target(path, &t);
     if (r != 0) return r;
-    r = target_is_regular(&t);
+    r = target_check_existing(&t);
     target_free(&t);
     return r;
 }
@@ -2420,6 +2539,16 @@ int main(int argc, char **argv)
             else
             {
                 err_printf("MLVFS: mlv path is not a directory\n");
+            }
+        }
+
+        if(!res)
+        {
+            mlvfs_real_root = realpath(mlvfs.mlv_path, NULL);
+            if(!mlvfs_real_root)
+            {
+                err_printf("MLVFS: cannot resolve the mlv path\n");
+                res = 1;
             }
         }
 

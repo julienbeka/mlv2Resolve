@@ -40,12 +40,20 @@ d'origine du tournage, à côté du `.MLV`, et apparaissent automatiquement dans
   quel dossier de plan l'afficher (il est supprimé quand il devient vide).
 - La racine du montage reflète le dossier d'origine : ce qu'on y enregistre y arrive, et ses autres fichiers y sont listés.
 
-Ce qu'on peut écrire via un montage : de nouveaux fichiers, et les autres fichiers du dossier du tournage
-(`.gyroflow`, `.json`, `.gcsv`, journaux…), qui peuvent être écrasés, renommés et supprimés. Ce qui ne peut jamais
-être écrit, renommé ni supprimé : les `.MLV` et leurs morceaux (`.M00`–`.M99`), `.IDX`, `.MLD`, les DNG/WAV
-virtuels, les dossiers de plan, les dossiers en général (aucun dossier ne peut être créé ni supprimé),
-`.mlv2dng-sidecars.json` et `.DS_Store`. Vos fichiers MLV d'origine ne sont jamais modifiés. Chaque nom correspondant
-à un seul fichier du dossier d'origine, deux dossiers de plan qui enregistrent le même nom partagent un même fichier.
+Ce qu'on peut écrire via un montage :
+
+- **De nouveaux fichiers**, de n'importe quel nom sauf les noms protégés ci-dessous.
+- **Des fichiers existants**, qui peuvent être écrasés, tronqués, renommés ou supprimés, seulement s'ils ont été créés
+  via le montage ou s'ils ont l'une de ces extensions : `gyroflow`, `gcsv`, `json`, `csv`, `txt`, `xml`, `log`,
+  `cube`, `srt` (sans distinction de casse). Tous les autres fichiers existants du dossier du tournage (`.wav`,
+  `.mov`, `.mp4`, `.dng`, `.cr2`, `.bin`…) sont en lecture seule via le montage.
+
+Ce qui ne peut jamais être écrit, renommé ni supprimé : les `.MLV` et leurs morceaux (`.M00`–`.M99`), `.IDX`, `.MLD`
+(quelle que soit la casse), les DNG/WAV virtuels, les dossiers de plan, les dossiers en général (aucun dossier ne
+peut être créé ni supprimé), `.mlv2dng-sidecars.json`, `.DS_Store`, les liens symboliques et les fichiers à plusieurs
+liens physiques. Rien n'est jamais lu ni écrit hors du dossier du tournage, même via un lien symbolique. Vos fichiers
+MLV d'origine ne sont jamais modifiés. Chaque nom correspondant à un seul fichier du dossier d'origine, deux dossiers
+de plan ne peuvent pas utiliser le même nom : le fichier appartient au dossier de plan qui l'a créé.
 
 ## Compiler
 

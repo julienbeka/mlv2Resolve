@@ -1,5 +1,5 @@
 /*
- * mlv2dng sidecar files: name rules and the per-folder index. See sidecar.h.
+ * mlv2dng sidecar files: name rules, path policy and the per-folder index. See sidecar.h.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * This program is free software: you can redistribute it and/or modify it
@@ -18,6 +18,9 @@
 #include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <CoreFoundation/CoreFoundation.h>
+#endif
 #include "sidecar.h"
 
 static int ends_with_ci(const char *s, const char *end)
@@ -29,7 +32,7 @@ static int ends_with_ci(const char *s, const char *end)
 int sidecar_name_protected(const char *name)
 {
     if (!name) return 1;
-    if (strcmp(name, SIDECAR_INDEX_NAME) == 0) return 1;
+    if (strncasecmp(name, SIDECAR_INDEX_PREFIX, strlen(SIDECAR_INDEX_PREFIX)) == 0) return 1;
     if (ends_with_ci(name, ".MLV") || ends_with_ci(name, ".IDX") || ends_with_ci(name, ".MLD")) return 1;
     size_t n = strlen(name);
     /* spanned MLV chunks: .M00 - .M99 */
@@ -42,8 +45,9 @@ int sidecar_name_protected(const char *name)
 int sidecar_name_hidden(const char *name)
 {
     if (!name) return 1;
-    return strcmp(name, ".") == 0 || strcmp(name, "..") == 0 || strcmp(name, SIDECAR_INDEX_NAME) == 0
-        || strcmp(name, ".DS_Store") == 0 || strncmp(name, "._", 2) == 0;
+    return strcmp(name, ".") == 0 || strcmp(name, "..") == 0
+        || strncasecmp(name, SIDECAR_INDEX_PREFIX, strlen(SIDECAR_INDEX_PREFIX)) == 0
+        || strcasecmp(name, ".DS_Store") == 0 || strncmp(name, "._", 2) == 0;
 }
 
 int sidecar_name_virtual(const char *name)
@@ -64,49 +68,160 @@ int sidecar_prefix_match(const char *base, const char *name)
     return strncasecmp(rest, "MLV", 3) == 0;
 }
 
+int sidecar_ext_modifiable(const char *name)
+{
+    static const char *exts[] = SIDECAR_MODIFIABLE_EXTS;
+    const char *dot = name ? strrchr(name, '.') : NULL;
+    if (!dot || dot == name) return 0;
+    for (size_t i = 0; i < sizeof(exts) / sizeof(*exts); i++)
+        if (strcasecmp(dot + 1, exts[i]) == 0) return 1;
+    return 0;
+}
+
+int sidecar_name_equal(const char *a, const char *b)
+{
+    if (!a || !b) return 0;
+    if (strcmp(a, b) == 0) return 1;
+#ifdef __APPLE__
+    CFStringRef sa = CFStringCreateWithCString(NULL, a, kCFStringEncodingUTF8);
+    CFStringRef sb = CFStringCreateWithCString(NULL, b, kCFStringEncodingUTF8);
+    int eq = 0;
+    if (sa && sb)
+        eq = CFStringCompare(sa, sb, kCFCompareNonliteral | kCFCompareCaseInsensitive) == kCFCompareEqualTo;
+    if (sa) CFRelease(sa);
+    if (sb) CFRelease(sb);
+    return eq;
+#else
+    return strcasecmp(a, b) == 0;
+#endif
+}
+
+char *sidecar_appledouble_subject(const char *path)
+{
+    if (!path) return NULL;
+    const char *slash = strrchr(path, '/');
+    const char *name = slash ? slash + 1 : path;
+    if (strncmp(name, "._", 2) != 0 || name[2] == 0 || strncmp(name + 2, "._", 2) == 0) return NULL;
+    size_t dir_len = (size_t)(name - path);
+    char *subject = malloc(strlen(path));
+    if (!subject) return NULL;
+    memcpy(subject, path, dir_len);
+    strcpy(subject + dir_len, name + 2);
+    return subject;
+}
+
+int sidecar_path_check(const char *path)
+{
+    if (!path) return -EACCES;
+    char *subject = sidecar_appledouble_subject(path);
+    if (subject)
+    {
+        int r = sidecar_path_check(subject);
+        free(subject);
+        return r;
+    }
+    const char *slash = strrchr(path, '/');
+    const char *name = slash ? slash + 1 : path;
+    if (*name == 0 || sidecar_name_hidden(name) || sidecar_name_protected(name)) return -EACCES;
+
+    /* every intermediate component: not ".", "..", empty-after-root, hidden, or a .MLD/.IDX folder */
+    const char *p = path;
+    while (*p == '/') p++;
+    while (p < name)
+    {
+        const char *end = strchr(p, '/');
+        if (!end || end > name) end = name;
+        size_t len = (size_t)(end - p);
+        if (len > 0)
+        {
+            char comp[1024];
+            if (len >= sizeof(comp)) return -EACCES;
+            memcpy(comp, p, len);
+            comp[len] = 0;
+            if (sidecar_name_hidden(comp) || ends_with_ci(comp, ".MLD") || ends_with_ci(comp, ".IDX")) return -EACCES;
+        }
+        p = end + 1;
+    }
+    return 0;
+}
+
 /* ---- in-memory index ---- */
+
+static struct sidecar_entry *find_entry(const struct sidecar_index *idx, const char *name)
+{
+    if (!idx || !name) return NULL;
+    for (size_t i = 0; i < idx->count; i++)
+        if (strcmp(idx->entries[i].name, name) == 0) return &idx->entries[i];
+    for (size_t i = 0; i < idx->count; i++)
+        if (sidecar_name_equal(idx->entries[i].name, name)) return &idx->entries[i];
+    return NULL;
+}
 
 const char *sidecar_index_get(const struct sidecar_index *idx, const char *name)
 {
-    if (!idx) return NULL;
-    for (size_t i = 0; i < idx->count; i++)
-        if (strcmp(idx->names[i], name) == 0) return idx->clips[i];
-    return NULL;
+    struct sidecar_entry *e = find_entry(idx, name);
+    return e ? e->clip : NULL;
+}
+
+int sidecar_index_created(const struct sidecar_index *idx, const char *name)
+{
+    struct sidecar_entry *e = find_entry(idx, name);
+    return e ? e->created : 0;
+}
+
+static struct sidecar_entry *add_entry(struct sidecar_index *idx, const char *name)
+{
+    struct sidecar_entry *entries = realloc(idx->entries, (idx->count + 1) * sizeof(*entries));
+    if (!entries) return NULL;
+    idx->entries = entries;
+    char *n = strdup(name);
+    if (!n) return NULL;
+    struct sidecar_entry *e = &idx->entries[idx->count++];
+    e->name = n;
+    e->clip = NULL;
+    e->created = 0;
+    return e;
+}
+
+static void drop_if_empty(struct sidecar_index *idx, struct sidecar_entry *e)
+{
+    if (e->clip || e->created) return;
+    free(e->name);
+    *e = idx->entries[idx->count - 1];
+    idx->count--;
 }
 
 int sidecar_index_set(struct sidecar_index *idx, const char *name, const char *clip)
 {
-    for (size_t i = 0; i < idx->count; i++)
+    struct sidecar_entry *e = find_entry(idx, name);
+    if (!e)
     {
-        if (strcmp(idx->names[i], name) != 0) continue;
-        if (clip && strcmp(idx->clips[i], clip) == 0) return 0;
-        if (clip)
-        {
-            char *c = strdup(clip);
-            if (!c) return 0;
-            free(idx->clips[i]);
-            idx->clips[i] = c;
-            return 1;
-        }
-        free(idx->names[i]);
-        free(idx->clips[i]);
-        idx->names[i] = idx->names[idx->count - 1];
-        idx->clips[i] = idx->clips[idx->count - 1];
-        idx->count--;
-        return 1;
+        if (!clip) return 0;
+        e = add_entry(idx, name);
+        if (!e) return 0;
     }
-    if (!clip) return 0;
-    char **names = realloc(idx->names, (idx->count + 1) * sizeof(char *));
-    if (!names) return 0;
-    idx->names = names;
-    char **clips = realloc(idx->clips, (idx->count + 1) * sizeof(char *));
-    if (!clips) return 0;
-    idx->clips = clips;
-    char *n = strdup(name), *c = strdup(clip);
-    if (!n || !c) { free(n); free(c); return 0; }
-    idx->names[idx->count] = n;
-    idx->clips[idx->count] = c;
-    idx->count++;
+    if (clip && e->clip && strcmp(e->clip, clip) == 0) return 0;
+    if (!clip && !e->clip) return 0;
+    char *c = clip ? strdup(clip) : NULL;
+    if (clip && !c) return 0;
+    free(e->clip);
+    e->clip = c;
+    drop_if_empty(idx, e);
+    return 1;
+}
+
+int sidecar_index_set_created(struct sidecar_index *idx, const char *name, int created)
+{
+    struct sidecar_entry *e = find_entry(idx, name);
+    if (!e)
+    {
+        if (!created) return 0;
+        e = add_entry(idx, name);
+        if (!e) return 0;
+    }
+    if (!!e->created == !!created) return 0;
+    e->created = !!created;
+    drop_if_empty(idx, e);
     return 1;
 }
 
@@ -115,12 +230,11 @@ void sidecar_index_free(struct sidecar_index *idx)
     if (!idx) return;
     for (size_t i = 0; i < idx->count; i++)
     {
-        free(idx->names[i]);
-        free(idx->clips[i]);
+        free(idx->entries[i].name);
+        free(idx->entries[i].clip);
     }
-    free(idx->names);
-    free(idx->clips);
-    idx->names = idx->clips = NULL;
+    free(idx->entries);
+    idx->entries = NULL;
     idx->count = 0;
 }
 
@@ -223,35 +337,104 @@ static char *parse_string(const char **pp)
     return out;
 }
 
-int sidecar_index_parse(const char *json, struct sidecar_index *idx)
+/* a name with a separator can never be a sidecar of a flat folder */
+static int usable_name(const char *name)
 {
-    idx->count = 0;
-    idx->names = idx->clips = NULL;
-    if (!json) return 0;
-    const char *p = strstr(json, "\"files\"");
-    if (!p) return 0;
-    p = skip_ws(p + 7);
-    if (*p != ':') return 0;
-    p = skip_ws(p + 1);
+    return name && *name && !strchr(name, '/');
+}
+
+static int parse_files(const char **pp, struct sidecar_index *idx)
+{
+    const char *p = skip_ws(*pp);
     if (*p != '{') return 0;
     p = skip_ws(p + 1);
     while (*p != '}')
     {
         char *name = parse_string(&p);
-        if (!name) goto bad;
+        if (!name) return 0;
         p = skip_ws(p);
-        if (*p != ':') { free(name); goto bad; }
+        if (*p != ':') { free(name); return 0; }
         p = skip_ws(p + 1);
         char *clip = parse_string(&p);
-        if (!clip) { free(name); goto bad; }
-        /* a name with a separator can never be a sidecar of a flat folder: ignore it */
-        if (*name && *clip && !strchr(name, '/')) sidecar_index_set(idx, name, clip);
+        if (!clip) { free(name); return 0; }
+        if (usable_name(name) && *clip) sidecar_index_set(idx, name, clip);
         free(name);
         free(clip);
         p = skip_ws(p);
         if (*p == ',') p = skip_ws(p + 1);
+        else if (*p != '}') return 0;
+    }
+    *pp = p + 1;
+    return 1;
+}
+
+static int parse_created(const char **pp, struct sidecar_index *idx)
+{
+    const char *p = skip_ws(*pp);
+    if (*p != '[') return 0;
+    p = skip_ws(p + 1);
+    while (*p != ']')
+    {
+        char *name = parse_string(&p);
+        if (!name) return 0;
+        if (usable_name(name)) sidecar_index_set_created(idx, name, 1);
+        free(name);
+        p = skip_ws(p);
+        if (*p == ',') p = skip_ws(p + 1);
+        else if (*p != ']') return 0;
+    }
+    *pp = p + 1;
+    return 1;
+}
+
+/* skips any JSON scalar or string value (for the "about"/"version" keys) */
+static int skip_value(const char **pp)
+{
+    const char *p = skip_ws(*pp);
+    if (*p == '"')
+    {
+        char *s = parse_string(&p);
+        if (!s) return 0;
+        free(s);
+    }
+    else
+    {
+        const char *start = p;
+        while (*p && (isalnum((unsigned char)*p) || *p == '-' || *p == '.' || *p == '+')) p++;
+        if (p == start) return 0;
+    }
+    *pp = p;
+    return 1;
+}
+
+int sidecar_index_parse(const char *json, struct sidecar_index *idx)
+{
+    idx->count = 0;
+    idx->entries = NULL;
+    if (!json) return 0;
+    const char *p = skip_ws(json);
+    if (*p != '{') return 0;
+    p = skip_ws(p + 1);
+    int seen_files = 0;
+    while (*p != '}')
+    {
+        char *key = parse_string(&p);
+        if (!key) goto bad;
+        p = skip_ws(p);
+        if (*p != ':') { free(key); goto bad; }
+        p++;
+        int ok;
+        if (strcmp(key, "files") == 0) { ok = parse_files(&p, idx); seen_files = 1; }
+        else if (strcmp(key, "created") == 0) ok = parse_created(&p, idx);
+        else ok = skip_value(&p);
+        free(key);
+        if (!ok) goto bad;
+        p = skip_ws(p);
+        if (*p == ',') p = skip_ws(p + 1);
         else if (*p != '}') goto bad;
     }
+    if (*skip_ws(p + 1) != 0) goto bad;
+    if (!seen_files) goto bad;
     return 1;
 bad:
     sidecar_index_free(idx);
@@ -274,108 +457,173 @@ char *sidecar_index_serialize(const struct sidecar_index *idx)
 {
     static const char head[] =
         "{\n"
-        "  \"about\": \"mlv2dng: files saved through a clip folder of the mount, by file name -> clip (MLV name without extension)\",\n"
-        "  \"version\": 1,\n"
+        "  \"about\": \"mlv2dng: files saved through the mount. files: name -> clip folder showing it (MLV name without extension); created: names created through the mount\",\n"
+        "  \"version\": 2,\n"
         "  \"files\": {";
-    size_t cap = sizeof(head) + 16;
-    for (size_t i = 0; i < idx->count; i++) cap += 6 * (strlen(idx->names[i]) + strlen(idx->clips[i])) + 16;
+    size_t cap = sizeof(head) + 64;
+    for (size_t i = 0; i < idx->count; i++)
+        cap += 12 * (strlen(idx->entries[i].name) + (idx->entries[i].clip ? strlen(idx->entries[i].clip) : 0)) + 32;
     char *out = malloc(cap);
     if (!out) return NULL;
-    size_t len = 0;
-    memcpy(out, head, sizeof(head) - 1);
-    len = sizeof(head) - 1;
+    size_t len = sizeof(head) - 1;
+    memcpy(out, head, len);
+    int n = 0;
     for (size_t i = 0; i < idx->count; i++)
     {
-        len += (size_t)sprintf(out + len, "%s\n    ", i ? "," : "");
-        put_json_string(out, &len, idx->names[i]);
+        if (!idx->entries[i].clip) continue;
+        len += (size_t)sprintf(out + len, "%s\n    ", n++ ? "," : "");
+        put_json_string(out, &len, idx->entries[i].name);
         out[len++] = ':';
         out[len++] = ' ';
-        put_json_string(out, &len, idx->clips[i]);
+        put_json_string(out, &len, idx->entries[i].clip);
     }
-    len += (size_t)sprintf(out + len, "%s}\n}\n", idx->count ? "\n  " : "");
+    len += (size_t)sprintf(out + len, "%s},\n  \"created\": [", n ? "\n  " : "");
+    n = 0;
+    for (size_t i = 0; i < idx->count; i++)
+    {
+        if (!idx->entries[i].created) continue;
+        len += (size_t)sprintf(out + len, "%s\n    ", n++ ? "," : "");
+        put_json_string(out, &len, idx->entries[i].name);
+    }
+    len += (size_t)sprintf(out + len, "%s]\n}\n", n ? "\n  " : "");
     return out;
 }
 
 /* ---- disk ---- */
 
+/* FUSE is multithreaded: every load and update of any index goes through this lock */
 static pthread_mutex_t index_lock = PTHREAD_MUTEX_INITIALIZER;
+static unsigned long temp_counter = 0;
 
-static char *index_path(const char *dir)
+static char *dir_file(const char *dir, const char *name)
 {
-    size_t n = strlen(dir) + strlen(SIDECAR_INDEX_NAME) + 2;
+    size_t n = strlen(dir) + strlen(name) + 2;
     char *p = malloc(n);
-    if (p) snprintf(p, n, "%s/%s", dir, SIDECAR_INDEX_NAME);
+    if (p) snprintf(p, n, "%s/%s", dir, name);
     return p;
 }
 
-static void load_unlocked(const char *dir, struct sidecar_index *idx)
+/* 0 loaded or missing, -EIO malformed/unreadable, -EACCES not a regular file */
+static int load_unlocked(const char *dir, struct sidecar_index *idx)
 {
     idx->count = 0;
-    idx->names = idx->clips = NULL;
-    char *path = index_path(dir);
-    if (!path) return;
-    int fd = open(path, O_RDONLY);
+    idx->entries = NULL;
+    char *path = dir_file(dir, SIDECAR_INDEX_NAME);
+    if (!path) return -ENOMEM;
+    int fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
+    int err = errno;
     free(path);
-    if (fd < 0) return;
+    if (fd < 0) return err == ENOENT ? 0 : (err == ELOOP ? -EACCES : -EIO);
+    int result = -EIO;
     struct stat st;
-    if (fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && st.st_size > 0 && st.st_size < (16 << 20))
+    if (fstat(fd, &st) != 0) result = -EIO;
+    else if (!S_ISREG(st.st_mode) || st.st_nlink > 1) result = -EACCES;
+    else if (st.st_size == 0) result = 0;
+    else if (st.st_size < (16 << 20))
     {
         char *buf = malloc((size_t)st.st_size + 1);
         if (buf)
         {
             ssize_t got = pread(fd, buf, (size_t)st.st_size, 0);
-            if (got > 0)
+            if (got == st.st_size)
             {
                 buf[got] = 0;
-                sidecar_index_parse(buf, idx);
+                if (sidecar_index_parse(buf, idx)) result = 0;
             }
             free(buf);
         }
     }
     close(fd);
-}
-
-void sidecar_index_load(const char *dir, struct sidecar_index *idx)
-{
-    pthread_mutex_lock(&index_lock);
-    load_unlocked(dir, idx);
-    pthread_mutex_unlock(&index_lock);
-}
-
-int sidecar_index_update(const char *dir, const char *name, const char *clip)
-{
-    int result = 0;
-    pthread_mutex_lock(&index_lock);
-    struct sidecar_index idx;
-    load_unlocked(dir, &idx);
-    if (sidecar_index_set(&idx, name, clip))
+    if (result != 0)
     {
-        char *path = index_path(dir);
-        if (!path) result = -ENOMEM;
-        else if (idx.count == 0)
-        {
-            if (unlink(path) != 0 && errno != ENOENT) result = -errno;
-        }
+        sidecar_index_free(idx);
+        fprintf(stderr, "mlv2dng: sidecar index in %s is %s; it is kept as is and not updated\n", dir,
+                result == -EACCES ? "not a regular file" : "unreadable or malformed");
+    }
+    return result;
+}
+
+int sidecar_index_load(const char *dir, struct sidecar_index *idx)
+{
+    pthread_mutex_lock(&index_lock);
+    int r = load_unlocked(dir, idx);
+    pthread_mutex_unlock(&index_lock);
+    return r;
+}
+
+int sidecar_index_writable(const char *dir)
+{
+    struct sidecar_index idx;
+    int r = sidecar_index_load(dir, &idx);
+    sidecar_index_free(&idx);
+    return r;
+}
+
+static int write_all(int fd, const char *data, size_t len)
+{
+    size_t done = 0;
+    while (done < len)
+    {
+        ssize_t w = write(fd, data + done, len - done);
+        if (w < 0) { if (errno == EINTR) continue; return -errno; }
+        done += (size_t)w;
+    }
+    return 0;
+}
+
+static int store_unlocked(const char *dir, const struct sidecar_index *idx)
+{
+    char *path = dir_file(dir, SIDECAR_INDEX_NAME);
+    if (!path) return -ENOMEM;
+    int result = 0;
+    if (idx->count == 0)
+    {
+        if (unlink(path) != 0 && errno != ENOENT) result = -errno;
+        free(path);
+        return result;
+    }
+    char *json = sidecar_index_serialize(idx);
+    char tmpname[128];
+    snprintf(tmpname, sizeof(tmpname), "%s.tmp.%d.%lu", SIDECAR_INDEX_NAME, (int)getpid(), ++temp_counter);
+    char *tmp = dir_file(dir, tmpname);
+    if (!json || !tmp) result = -ENOMEM;
+    else
+    {
+        int fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0644);
+        if (fd < 0) result = -errno;
         else
         {
-            char *json = sidecar_index_serialize(&idx);
-            int fd = json ? open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644) : -1;
-            if (!json) result = -ENOMEM;
-            else if (fd < 0) result = -errno;
-            else
-            {
-                size_t len = strlen(json), done = 0;
-                while (done < len)
-                {
-                    ssize_t w = write(fd, json + done, len - done);
-                    if (w < 0) { if (errno == EINTR) continue; result = -errno; break; }
-                    done += (size_t)w;
-                }
-                if (close(fd) != 0 && result == 0) result = -errno;
-            }
-            free(json);
+            result = write_all(fd, json, strlen(json));
+            if (result == 0 && fsync(fd) != 0) result = -errno;
+            if (close(fd) != 0 && result == 0) result = -errno;
+            if (result == 0 && rename(tmp, path) != 0) result = -errno;
+            if (result != 0) unlink(tmp);
         }
-        free(path);
+    }
+    free(json);
+    free(tmp);
+    free(path);
+    return result;
+}
+
+int sidecar_index_apply(const char *dir, const struct sidecar_change *changes, size_t count)
+{
+    pthread_mutex_lock(&index_lock);
+    struct sidecar_index idx;
+    int result = load_unlocked(dir, &idx);
+    if (result == 0)
+    {
+        int changed = 0;
+        for (size_t i = 0; i < count; i++)
+        {
+            const struct sidecar_change *c = &changes[i];
+            if (!usable_name(c->name)) continue;
+            if (c->clip_op == SIDECAR_SET) changed |= sidecar_index_set(&idx, c->name, c->clip);
+            else if (c->clip_op == SIDECAR_CLEAR) changed |= sidecar_index_set(&idx, c->name, NULL);
+            if (c->created_op == SIDECAR_SET) changed |= sidecar_index_set_created(&idx, c->name, 1);
+            else if (c->created_op == SIDECAR_CLEAR) changed |= sidecar_index_set_created(&idx, c->name, 0);
+        }
+        if (changed) result = store_unlocked(dir, &idx);
     }
     sidecar_index_free(&idx);
     pthread_mutex_unlock(&index_lock);

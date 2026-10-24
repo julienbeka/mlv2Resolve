@@ -25,7 +25,7 @@ Usage: mount_test.py <clip.MLV> [--expect-frames N] [--min-fps F] [--backend nfs
 mlvfs stdout and stderr both go to one log file (tail printed at the end).
 Exit 0 = pass.
 """
-import argparse, array, hashlib, os, re, shutil, struct, subprocess, sys, tempfile, time
+import argparse, array, hashlib, json, os, re, shutil, threading, struct, subprocess, sys, tempfile, time
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 MLVFS = os.path.join(REPO, "build", "engine", "mlvfs")
@@ -218,8 +218,159 @@ def sha256(path):
 
 INDEX_NAME = ".mlv2dng-sidecars.json"
 
+MLV_FAMILY = re.compile(r".*\.(MLV|M\d\d)$", re.I)
 
-def check_sidecars(mnt, cdir, dngs, src, name, mlv_sha):
+
+def mlv_hashes(src):
+    """SHA-256 of every .MLV / .M00-.M99 in the folder."""
+    return {n: sha256(os.path.join(src, n)) for n in sorted(os.listdir(src)) if MLV_FAMILY.match(n)}
+
+
+def setup_hardening(src, name):
+    """Pre-existing hostile entries in the clone: user files outside the allowlist, symlinks to the MLV and out of
+    the shoot, hard links to the MLV. Returns (outside folder, names created in src)."""
+    outside = tempfile.mkdtemp(prefix="mlvoutside_")
+    write_file(os.path.join(outside, "victim.txt"), b"outside")
+    write_file(os.path.join(src, "user.wav"), b"RIFF user audio")
+    write_file(os.path.join(src, "user.bin"), b"user binary log")
+    os.symlink(name + ".MLV", os.path.join(src, name + "_link.gyroflow"))   # sidecar-named symlink to the MLV
+    os.symlink(name + ".MLV", os.path.join(src, "root_link.txt"))
+    os.symlink(outside, os.path.join(src, "Out"))                          # symlinked folder out of the shoot
+    os.symlink(os.path.join(outside, "victim.txt"), os.path.join(src, "outside.txt"))
+    os.link(os.path.join(src, name + ".MLV"), os.path.join(src, "foo.bin"))  # hard links to the MLV
+    os.link(os.path.join(src, name + ".MLV"), os.path.join(src, "foo.json"))
+    names = {"user.wav", "user.bin", name + "_link.gyroflow", "root_link.txt", "Out", "outside.txt", "foo.bin", "foo.json"}
+    return outside, names
+
+
+def check_hardening(mnt, cdir, src, name, hashes, outside, expect, failures):
+    def refuse(label, fn):
+        try_op(label, fn, failures)
+
+    # allowlist: pre-existing files outside the extension list are read-only through the mount
+    for n, data in (("user.wav", b"RIFF user audio"), ("user.bin", b"user binary log")):
+        p = os.path.join(mnt, n)
+        expect(read_file(p) == data, n + " readable through the root")
+        refuse("overwrite pre-existing " + n, lambda: write_file(p, b"x"))
+        refuse("append to pre-existing " + n, lambda: write_file(p, b"x", "ab"))
+        refuse("truncate pre-existing " + n, lambda: os.truncate(p, 0))
+        refuse("rename pre-existing " + n, lambda: os.rename(p, p + ".moved"))
+        refuse("delete pre-existing " + n, lambda: os.unlink(p))
+        refuse("utime pre-existing " + n, lambda: os.utime(p, (0, 0)))
+        expect(read_file(os.path.join(src, n)) == data and not os.path.lexists(os.path.join(src, n + ".moved")),
+               n + " unchanged in source")
+    # ... but a file created through the mount may be modified whatever its extension
+    nb = os.path.join(mnt, "new.bin")
+    try_op("create new.bin at root", lambda: write_file(nb, b"one"), failures, expect_ok=True)
+    try_op("overwrite new.bin (created by the mount)", lambda: write_file(nb, b"two"), failures, expect_ok=True)
+    try_op("rename new.bin -> new2.bin", lambda: os.rename(nb, os.path.join(mnt, "new2.bin")), failures, expect_ok=True)
+    expect(read_file(os.path.join(src, "new2.bin")) == b"two", "created .bin renamed in source")
+    try_op("delete new2.bin", lambda: os.unlink(os.path.join(mnt, "new2.bin")), failures, expect_ok=True)
+    expect(not os.path.lexists(os.path.join(src, "new2.bin")), "created .bin deleted")
+
+    # (b) AppleDouble of the MLV
+    for where in (mnt, cdir):
+        p = os.path.join(where, "._" + name + ".MLV")
+        refuse("create ._<clip>.MLV in " + ("root" if where == mnt else "clip folder"), lambda: write_file(p, b"x" * 4096))
+    expect(not os.path.lexists(os.path.join(src, "._" + name + ".MLV")), "no ._<clip>.MLV in source")
+
+    # (c) a sidecar-named symlink to the MLV, through the clip folder and the root
+    for p in (os.path.join(cdir, name + "_link.gyroflow"), os.path.join(mnt, name + "_link.gyroflow"),
+              os.path.join(mnt, "root_link.txt")):
+        where = os.path.relpath(p, mnt)
+        refuse("write through symlink " + where, lambda: write_file(p, b"x", "r+b"))
+        refuse("truncate symlink " + where, lambda: os.truncate(p, 0))
+        refuse("O_APPEND through symlink " + where, lambda: write_file(p, b"x", "ab"))
+        refuse("overwrite (O_TRUNC) symlink " + where, lambda: write_file(p, b"x"))
+        refuse("utime symlink " + where, lambda: os.utime(p, (0, 0)))
+        refuse("rename symlink " + where, lambda: os.rename(p, p + ".moved"))
+        refuse("delete symlink " + where, lambda: os.unlink(p))
+    expect(os.path.islink(os.path.join(src, name + "_link.gyroflow")) and os.path.islink(os.path.join(src, "root_link.txt")),
+           "symlinks still in source")
+
+    # (d) symlinked folder and symlinked file pointing out of the shoot
+    out = os.path.join(mnt, "Out")
+    refuse("list symlinked folder Out", lambda: os.listdir(out))
+    refuse("read through symlinked folder", lambda: read_file(os.path.join(out, "victim.txt")))
+    refuse("write through symlinked folder", lambda: write_file(os.path.join(out, "victim.txt"), b"x"))
+    refuse("create in symlinked folder", lambda: write_file(os.path.join(out, "new.txt"), b"x"))
+    refuse("rename lens.json into symlinked folder", lambda: os.rename(os.path.join(mnt, "lens.json"), os.path.join(out, "lens.json")))
+    refuse("read symlink to outside file", lambda: read_file(os.path.join(mnt, "outside.txt")))
+    refuse("write symlink to outside file", lambda: write_file(os.path.join(mnt, "outside.txt"), b"x"))
+    expect(sorted(os.listdir(outside)) == ["victim.txt"] and read_file(os.path.join(outside, "victim.txt")) == b"outside",
+           "folder outside the shoot untouched")
+    expect(os.path.isfile(os.path.join(src, "lens.json")), "lens.json still in source")
+
+    # (e) hard links to the MLV (foo.json has an allowlisted extension: the link count is what refuses it)
+    for n in ("foo.bin", "foo.json"):
+        p = os.path.join(mnt, n)
+        refuse("write hard link " + n, lambda: write_file(p, b"x", "r+b"))
+        refuse("overwrite (O_TRUNC) hard link " + n, lambda: write_file(p, b"x"))
+        refuse("append to hard link " + n, lambda: write_file(p, b"x", "ab"))
+        refuse("truncate hard link " + n, lambda: os.truncate(p, 0))
+        refuse("rename hard link " + n, lambda: os.rename(p, p + ".moved"))
+        refuse("delete hard link " + n, lambda: os.unlink(p))
+        refuse("utime hard link " + n, lambda: os.utime(p, (0, 0)))
+    refuse("rename a sidecar onto hard link foo.json",
+           lambda: (write_file(os.path.join(mnt, "h.json"), b"h"), os.rename(os.path.join(mnt, "h.json"), os.path.join(mnt, "foo.json"))))
+    if os.path.exists(os.path.join(src, "h.json")):
+        os.unlink(os.path.join(mnt, "h.json"))
+
+    # (f) chmod / utime on the clip folder and on <clip>.M00 through the root
+    m00 = name + ".M00"
+    subprocess.run(["cp", "-c", os.path.join(src, name + ".MLV"), os.path.join(src, m00)], check=True)
+    hashes[m00] = hashes[name + ".MLV"]
+    refuse("chmod clip folder", lambda: os.chmod(cdir, 0o700))
+    refuse("utime clip folder", lambda: os.utime(cdir, (0, 0)))
+    p = os.path.join(mnt, m00)
+    refuse("chmod <clip>.M00 via root", lambda: os.chmod(p, 0o600))
+    refuse("utime <clip>.M00 via root", lambda: os.utime(p, (0, 0)))
+    refuse("write <clip>.M00 via root", lambda: write_file(p, b"x", "r+b"))
+    refuse("truncate <clip>.M00 via root", lambda: os.truncate(p, 0))
+    refuse("rename <clip>.M00 via root", lambda: os.rename(p, os.path.join(mnt, "x.bin")))
+    refuse("delete <clip>.M00 via root", lambda: os.unlink(p))
+
+    # (h) concurrency: 8 threads create (and half rename) non-prefix names through one clip folder
+    errors = []
+
+    def worker(t):
+        for i in range(10):
+            n = os.path.join(cdir, "conc-%d-%d.bin" % (t, i))
+            try:
+                write_file(n, b"%d" % i)
+                if i % 2:
+                    os.rename(n, os.path.join(cdir, "conc-%d-%d-r.bin" % (t, i)))
+            except OSError as e:
+                errors.append("%s: %s" % (n, e))
+
+    threads = [threading.Thread(target=worker, args=(t,)) for t in range(8)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    expected = {"conc-%d-%d%s.bin" % (t, i, "-r" if i % 2 else "") for t in range(8) for i in range(10)}
+    expect(not errors, "concurrent creates/renames succeeded (%s)" % errors[:2])
+    try:
+        index = json.loads(read_file(os.path.join(src, INDEX_NAME)))
+        files = set(index["files"])
+    except (OSError, ValueError, KeyError) as e:
+        files = set()
+        print("index unreadable:", e)
+    expect(expected <= files and not any(f.startswith("conc-") and f not in expected for f in files),
+           "index parses and names all 80 concurrent files (%d)" % len(expected & files))
+    expect(expected <= set(os.listdir(cdir)), "clip folder lists all 80 concurrent files")
+    for n in sorted(expected):
+        try_op("delete " + n, lambda: os.unlink(os.path.join(cdir, n)), failures, expect_ok=True)
+    expect(not any(n.startswith("conc-") or n.startswith(INDEX_NAME + ".tmp") for n in os.listdir(src)),
+           "no concurrent file or index temp file left in source")
+
+    # (g) every MLV-family file unchanged
+    now = mlv_hashes(src)
+    expect(now == hashes, "SHA-256 of every .MLV/.M0x unchanged (%s)" % sorted(now))
+
+
+
+def check_sidecars(mnt, cdir, dngs, src, name, hashes, outside, extra_names):
     """Sidecar files on a mounted clone `src` (see --expect-sidecars). Returns the list of failures."""
     failures = []
 
@@ -299,6 +450,9 @@ def check_sidecars(mnt, cdir, dngs, src, name, mlv_sha):
     # folder format, which would collide with the clip folder itself
     expect({gyro, odd} <= listing(mnt) and long_name not in listing(mnt), "sidecars mirrored at the mount root")
 
+    # hostile pre-existing entries, allowlist, MLV family, concurrency
+    check_hardening(mnt, cdir, src, name, hashes, outside, expect, failures)
+
     # 5. rename and delete sidecars
     renamed = "odd-renamed.txt"
     try_op("rename %s -> %s" % (odd, renamed), lambda: os.rename(os.path.join(cdir, odd), os.path.join(cdir, renamed)),
@@ -315,7 +469,7 @@ def check_sidecars(mnt, cdir, dngs, src, name, mlv_sha):
            failures)
     try_op("rename sidecar onto root <clip>.MLV", lambda: os.rename(os.path.join(cdir, gyro2), os.path.join(mnt, name + ".MLV")),
            failures)
-    try_op("rename sidecar onto <clip>.M00", lambda: os.rename(os.path.join(cdir, gyro2), os.path.join(mnt, name + ".M00")),
+    try_op("rename sidecar onto <clip>.M01", lambda: os.rename(os.path.join(cdir, gyro2), os.path.join(mnt, name + ".M01")),
            failures)
     try_op("rename sidecar onto a DNG", lambda: os.rename(os.path.join(cdir, gyro2), os.path.join(cdir, dngs[0])),
            failures)
@@ -336,10 +490,10 @@ def check_sidecars(mnt, cdir, dngs, src, name, mlv_sha):
     try_op("rm <clip>.MLV via root", lambda: os.unlink(mlv_at_root), failures)
     try_op("rename <clip>.MLV via root", lambda: os.rename(mlv_at_root, os.path.join(mnt, "x.MLV")), failures)
     try_op("create new.MLV at root", lambda: write_file(os.path.join(mnt, "new.MLV"), b"x"), failures)
-    try_op("create %s.M00 in clip folder" % name, lambda: write_file(os.path.join(cdir, name + ".M00"), b"x"), failures)
+    try_op("create %s.M01 in clip folder" % name, lambda: write_file(os.path.join(cdir, name + ".M01"), b"x"), failures)
     try_op("create x.IDX at root", lambda: write_file(os.path.join(mnt, "x.IDX"), b"x"), failures)
     failures += check_readonly(mnt, cdir, dngs, src)  # protected entries + the real sub-folder "Audio"
-    for n in ("new.MLV", "x.MLV", name + ".M00", "x.IDX"):
+    for n in ("new.MLV", "x.MLV", name + ".M01", "x.IDX"):
         if os.path.lexists(os.path.join(src, n)):
             failures.append("protected name created in source: " + n)
 
@@ -354,12 +508,12 @@ def check_sidecars(mnt, cdir, dngs, src, name, mlv_sha):
     try_op("delete " + note, lambda: os.unlink(os.path.join(mnt, note)), failures, expect_ok=True)
     expect(not os.path.exists(os.path.join(src, note)), note + " deleted from source")
 
-    expect(sha256(os.path.join(src, name + ".MLV")) == mlv_sha, "MLV SHA-256 unchanged")
+    expect(mlv_hashes(src) == hashes, "SHA-256 of every .MLV/.M0x unchanged at the end")
     expect(read_file(os.path.join(mnt, "Audio", "take1.txt")) == b"take", "file in a real sub-folder readable")
     try_op("write a file in real sub-folder", lambda: write_file(os.path.join(mnt, "Audio", "take2.txt"), b"t2"),
            failures, expect_ok=True)
     expect(read_file(os.path.join(src, "Audio", "take2.txt")) == b"t2", "sub-folder file stored in source sub-folder")
-    kept = {name + ".MLV", name + "B.MLV", "lens.json", name + "B.gyroflow", "Audio"}
+    kept = {name + ".MLV", name + "B.MLV", name + ".M00", "lens.json", name + "B.gyroflow", "Audio"} | extra_names
     # "._x" attribute files may remain only for files that remain (renames and deletes carry them)
     left = sorted(n for n in os.listdir(src) if n not in kept and not (n.startswith("._") and n[2:] in kept))
     expect(not left, "source folder holds nothing else (extra: %s)" % left)
@@ -404,7 +558,7 @@ def main():
     ap.add_argument("--expect-readonly", action="store_true")
     ap.add_argument("--expect-sidecars", action="store_true")
     ap.add_argument("--dual-iso-preview", action="store_true")
-    ap.add_argument("--index-dir", help="pass --index-dir to mlvfs; asserts .IDX files land there")
+    ap.add_argument("--index-dir", help="--index-dir for mlvfs (default: a new temp dir); asserts .IDX files land there")
     ap.add_argument("--assert-source-untouched", action=argparse.BooleanOptionalAction, default=True,
                     help="assert the source folder is identical (names, sizes, mtimes) after unmount")
     a = ap.parse_args()
@@ -416,7 +570,7 @@ def main():
     clip = os.path.abspath(a.clip)
     folder, name = os.path.dirname(clip), os.path.splitext(os.path.basename(clip))[0]
     before = snapshot(folder)
-    mount_folder, clone_dir, mlv_sha = folder, None, None
+    mount_folder, clone_dir, hashes, outside, extra_names = folder, None, None, None, set()
     if a.expect_sidecars:
         # never write to the real rushes: mount an APFS clone of the clip (+ a second clip and a user file)
         clone_dir = tempfile.mkdtemp(prefix="mlvsrc_")
@@ -429,10 +583,11 @@ def main():
         os.mkdir(os.path.join(clone_dir, "Audio"))
         write_file(os.path.join(clone_dir, "Audio", "take1.txt"), b"take")
         mount_folder = clone_dir
-        if not a.index_dir:  # as the app does: .IDX files go to an index dir, never into the source folder
-            a.index_dir = tempfile.mkdtemp(prefix="mlvidx_")
-        mlv_sha = sha256(os.path.join(clone_dir, name + ".MLV"))
-        print("sidecar source clone:", clone_dir, "MLV sha256", mlv_sha[:16])
+        outside, extra_names = setup_hardening(clone_dir, name)
+        hashes = mlv_hashes(clone_dir)
+        print("sidecar source clone:", clone_dir, "hashes", {n: h[:12] for n, h in hashes.items()})
+    if not a.index_dir:  # as the app does: .IDX files go to an index dir, never next to the clips
+        a.index_dir = tempfile.mkdtemp(prefix="mlvidx_")
     mnt = tempfile.mkdtemp(prefix="mlvmnt_")
     log = tempfile.NamedTemporaryFile(prefix="mlvfs_log_", delete=False)
     cmd = [MLVFS, mnt, "--mlv-dir=" + mount_folder, "--resolve-naming", "-f"]
@@ -509,7 +664,7 @@ def main():
             print("readonly: all mutating operations on protected entries refused")
         if a.expect_sidecars:
             try:
-                failures = check_sidecars(mnt, cdir, dngs, mount_folder, name, mlv_sha)
+                failures = check_sidecars(mnt, cdir, dngs, mount_folder, name, hashes, outside, extra_names)
             except OSError as e:
                 failures = ["unexpected OSError: %s" % e]
             assert not failures, "sidecar checks failed: %s" % failures
@@ -545,6 +700,8 @@ def main():
             shutil.rmtree(mnt, ignore_errors=True)
         if clone_dir:
             shutil.rmtree(clone_dir, ignore_errors=True)
+        if outside:
+            shutil.rmtree(outside, ignore_errors=True)
         log.close()
         # skip the bare "x y" coordinate lines MLVFS prints for detected bad pixels
         lines = [l for l in open(log.name, errors="replace").read().splitlines()

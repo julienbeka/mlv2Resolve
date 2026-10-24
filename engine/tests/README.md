@@ -34,13 +34,22 @@ name (`odd-name.txt`, remembered by `.mlv2dng-sidecars.json`, which is hidden an
 an extended attribute (AppleDouble `._x` stored next to it, moved/deleted with it), renames and deletes sidecars
 (index removed when empty), and checks that the MLV (SHA-256), DNGs, clip folders, folders, `.DS_Store` and
 MLV-family names refuse every change, that the other clip lists none of them, and that root writes land in the
-source root. Implies a temporary `--index-dir` (as the app). `--expect-readonly` now runs only the protected-entry
-part on the real folder.
+source root. It also plants hostile entries in the clone and checks them: pre-existing `user.wav`/`user.bin`
+(outside the extension allowlist: read-only) vs a `.bin` created through the mount (modifiable); `._<clip>.MLV`;
+symlinks to the MLV (sidecar-named, in the clip folder and at the root); a symlinked folder and a symlinked file
+pointing out of the shoot; hard links `foo.bin`/`foo.json` to the MLV; chmod/utime of the clip folder and of a
+`<clip>.M00` clone; 8 threads creating/renaming 80 non-prefix names through one clip folder (index parses and lists
+all, no temp file left); SHA-256 of every `.MLV`/`.M0x` before/after. `--expect-readonly` runs only the
+protected-entry part on the real folder. Every run uses `--index-dir` (a new temp dir unless given), so no `.IDX`
+is ever written next to a clip.
 
 Unit tests (no FUSE needed):
-- `make -C engine -f Makefile.arm64 sidecar-test`: sidecar name rules (protected MLV family/.IDX/.MLD/index,
-  hidden Finder metadata, virtual names, clip prefix rule) and the `.mlv2dng-sidecars.json` index (JSON round trip
-  with awkward names, malformed input, removal deleting the empty index, nothing created just to remove).
+- `make -C engine -f Makefile.arm64 sidecar-test`: sidecar name rules (protected MLV family/.IDX/.MLD/index in any
+  case, hidden Finder metadata, virtual names, clip prefix rule, extension allowlist, NFC/NFD equality), the path
+  policy used by the engine before any write (`m24-1546.mlv`, `X.gyroflow.MLV`, `._X.MLV`, `._._x`, `a/../X.MLV`,
+  `sub.mld/x`, `.MLV2DNG-SIDECARS.JSON`, `.ds_store`… refused; `X.MLV.gyroflow` allowed) and the
+  `.mlv2dng-sidecars.json` index (JSON round trip, malformed index never overwritten, symlinked/hard-linked index
+  refused, atomic rewrite, 8 concurrent writers, empty index deleted).
 - `make -C engine -f Makefile.arm64 resolve-name-test`: `--resolve-naming` folder name -> MLV base path matching
   (POSIX `<regex.h>`, replaces SLRE): canonical names, lowercase `mlv`/`c`, spaces and accents, non-matching names.
 - `make -C engine -f Makefile.arm64 dual-iso-cache-test`: live dual ISO switching by signals (SIGUSR1 -> mode 1,

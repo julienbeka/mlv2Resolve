@@ -69,7 +69,7 @@ final class MountManagerTests: XCTestCase {
         XCTAssertEqual(args, [
             url.path, "--mlv-dir=/Volumes/SSD/Tournage été 2026 🎬", "--resolve-naming", "--bad-pix",
             "--dual-iso-preview", "--fpm-dir=/opt/engine/fpm", "--index-dir=/tmp/index dir",
-            "-o", "ro", "-o", "volname=Tournage été 2026 🎬", "-f",
+            "-o", "volname=Tournage été 2026 🎬", "-f",
         ])
         XCTAssertFalse(args.contains { $0.hasPrefix("--port") || $0.hasPrefix("--fps") }, "no web GUI any more")
         var isDir: ObjCBool = false

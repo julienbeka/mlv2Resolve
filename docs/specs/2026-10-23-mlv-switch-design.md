@@ -139,6 +139,10 @@ communauté Magic Lantern. Elle doit donc être conçue dès le départ pour êt
   FUSE-T, rapport de pixel 3:1, modes dual ISO), publiée sous GPL avec le reste. On propose les
   corrections utiles au projet d'origine quand c'est possible.
 - **Lecture seule** : les MLV d'origine ne sont jamais modifiés.
+  *Révision 2026-10-24 (décision de l'utilisateur)* : les montages acceptent les fichiers annexes (ex. `.gyroflow`
+  de NiYien Tool, qui ne sait pas choisir son dossier de sortie), enregistrés à côté du `.MLV` et affichés dans le
+  dossier du plan ; les MLV, `.M00`–`.M99`, `.IDX`, `.MLD`, DNG/WAV virtuels et dossiers restent protégés par le moteur
+  (plus d'`-o ro`). Voir README, « Fichiers enregistrés dans un dossier de plan ».
 - Un processus MLVFS par tournage monté (isolation : un plantage n'emporte pas les autres), supervisé
   par l'app (redémarrage, démontage propre à la fermeture et à l'éjection du disque).
 

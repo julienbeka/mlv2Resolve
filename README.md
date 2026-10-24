@@ -26,7 +26,26 @@ To build from source, see [Building](#building).
 4. **Dual ISO**: use **Smooth Editing** while editing and **Grading Quality** before grading. The switch is applied live; in Resolve, select the clips and right-click → Refresh.
 5. 1x3 anamorphic footage: Resolve ignores the pixel aspect ratio stored in the DNGs and its Clip Attributes offer no 3:1 option, so desqueeze on the Color page → Sizing → Input Sizing → **Width = 3** (Height stays 1). The app reminds you when you mount such a shoot.
 
-Your original MLV files are never modified: the mounts are read-only and the engine refuses every write.
+### Files saved into a clip folder (sidecars)
+
+Some tools cannot choose their output folder and save next to the footage they read, e.g. NiYien Tool writes its
+`.gyroflow` into the clip folder. Such files are saved in the shoot's original folder, next to the `.MLV`, and
+appear automatically in that clip's folder of the mount:
+
+- A clip folder shows, besides its DNGs and WAV, every file of the original folder whose name starts with the clip
+  name followed by a non-alphanumeric character or by `MLV` (`M24-1546.gyroflow`, `M24-1546MLV_1_….gyroflow`;
+  case-insensitive; `M24-1546B.json` belongs to clip `M24-1546B`, not `M24-1546`).
+- A file with another name saved through a clip folder (e.g. `2026-10-24_15-47-01_mix.gyroflow`) is also stored
+  next to the `.MLV`; the small hidden file `.mlv2dng-sidecars.json` in the original folder remembers which clip
+  folder shows it (deleted when it becomes empty).
+- The mount root mirrors the original folder: files saved there land in it, and its other files are listed there.
+
+What can be written through a mount: new files, and the shoot folder's other files (`.gyroflow`, `.json`, `.gcsv`,
+logs…), which can be overwritten, renamed and deleted. What can never be written, renamed or deleted: the `.MLV`
+files and their chunks (`.M00`–`.M99`), `.IDX`, `.MLD`, the virtual DNG/WAV files, the clip folders, folders in
+general (no folder can be created or removed), `.mlv2dng-sidecars.json` and `.DS_Store`. Your original MLV files
+are never modified. Since every name maps to one file in the original folder, two clip folders saving the same file
+name share one file.
 
 ## Building
 

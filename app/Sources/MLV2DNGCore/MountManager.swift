@@ -156,7 +156,7 @@ public actor MountManager {
         if fixBadPixels { args.append("--bad-pix") }
         if !fixFocusPixels { args.append("--no-focus-pixels") }
         args += [mode.engineFlag, "--fpm-dir=\(fpmDir.path)", "--index-dir=\(indexDir.path)",
-                 "-o", "ro", "-o", "volname=\(Self.volumeName(url.lastPathComponent))",
+                 "-o", "volname=\(Self.volumeName(url.lastPathComponent))",
                  "-f"] // foreground: otherwise mlvfs daemonizes and we lose the process
 
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

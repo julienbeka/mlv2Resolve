@@ -26,7 +26,26 @@ Pour compiler depuis les sources, voir [Compiler](#compiler).
 4. **Dual ISO** : utilisez « Montage fluide » pendant le montage et « Qualité étalonnage » avant l'étalonnage. La bascule s'applique à chaud ; dans Resolve, sélectionnez les plans puis clic droit → Rafraîchir.
 5. Rushs anamorphosés 1x3 : Resolve ignore le rapport de pixel inscrit dans les DNG et ses attributs du clip ne proposent pas de 3:1 ; désanamorphosez dans la page Color → Sizing → Input Sizing → **Width = 3** (Height reste à 1). L'app vous le rappelle au montage d'un tel tournage.
 
-Vos fichiers MLV d'origine ne sont jamais modifiés : les montages sont en lecture seule et le moteur refuse toute écriture.
+### Fichiers enregistrés dans un dossier de plan (fichiers annexes)
+
+Certains outils ne permettent pas de choisir leur dossier de sortie et enregistrent à côté des images lues : NiYien
+Tool écrit par exemple son `.gyroflow` dans le dossier du plan. Ces fichiers sont enregistrés dans le dossier
+d'origine du tournage, à côté du `.MLV`, et apparaissent automatiquement dans le dossier de ce plan sur le montage :
+
+- Un dossier de plan affiche, en plus de ses DNG et WAV, chaque fichier du dossier d'origine dont le nom commence par
+  le nom du plan suivi d'un caractère non alphanumérique ou de `MLV` (`M24-1546.gyroflow`, `M24-1546MLV_1_….gyroflow` ;
+  sans distinction de casse ; `M24-1546B.json` appartient au plan `M24-1546B`, pas à `M24-1546`).
+- Un fichier d'un autre nom enregistré dans un dossier de plan (par ex. `2026-10-24_15-47-01_mix.gyroflow`) est lui
+  aussi rangé à côté du `.MLV` ; le petit fichier caché `.mlv2dng-sidecars.json` du dossier d'origine retient dans
+  quel dossier de plan l'afficher (il est supprimé quand il devient vide).
+- La racine du montage reflète le dossier d'origine : ce qu'on y enregistre y arrive, et ses autres fichiers y sont listés.
+
+Ce qu'on peut écrire via un montage : de nouveaux fichiers, et les autres fichiers du dossier du tournage
+(`.gyroflow`, `.json`, `.gcsv`, journaux…), qui peuvent être écrasés, renommés et supprimés. Ce qui ne peut jamais
+être écrit, renommé ni supprimé : les `.MLV` et leurs morceaux (`.M00`–`.M99`), `.IDX`, `.MLD`, les DNG/WAV
+virtuels, les dossiers de plan, les dossiers en général (aucun dossier ne peut être créé ni supprimé),
+`.mlv2dng-sidecars.json` et `.DS_Store`. Vos fichiers MLV d'origine ne sont jamais modifiés. Chaque nom correspondant
+à un seul fichier du dossier d'origine, deux dossiers de plan qui enregistrent le même nom partagent un même fichier.
 
 ## Compiler
 

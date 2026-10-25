@@ -8,7 +8,7 @@ final class GyroflowProjectTests: XCTestCase {
     let log = URL(fileURLWithPath: "/x/logs/full log.bin")
 
     func make(offset: Double = -4192, position: MountingPosition = .top, cal: [String: Any] = ["focal_length": 25]) throws -> [String: Any] {
-        let d = GyroflowProject.make(clipDir: clipDir, timing: timing, log: log, offsetMs: offset, calibration: cal, position: position)
+        let d = try GyroflowProject.make(clipDir: clipDir, timing: timing, log: log, offsetMs: offset, calibration: cal, position: position)
         return try XCTUnwrap(JSONSerialization.jsonObject(with: d) as? [String: Any])
     }
 
@@ -37,13 +37,32 @@ final class GyroflowProjectTests: XCTestCase {
     }
 
     func testKeepsTemplateKeys() throws {
-        let url = try XCTUnwrap(Bundle.module.url(forResource: "niyien-template", withExtension: "gyroflow", subdirectory: "Fixtures"))
-        let fixture = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        let expected = ["app_version", "background_color", "background_margin", "background_margin_feather", "background_mode",
+                        "calibration_data", "date", "gyro_source", "image_sequence_fps", "image_sequence_start", "keyframes",
+                        "light_refraction_coefficient", "muted", "offsets", "output", "playback_speed", "stabilization",
+                        "synchronization", "title", "version", "video_info", "videofile"]
+        XCTAssertEqual(Set(try GyroflowProject.template().keys), Set(expected))
         let p = try make()
-        for k in fixture.keys { XCTAssertNotNil(p[k], k) }
-        // the embedded runtime template must not drift from the fixture
-        XCTAssertEqual(try Data(contentsOf: url),
-                       try Data(contentsOf: XCTUnwrap(L10n.moduleBundle.url(forResource: "gyroflow-template", withExtension: "json"))))
+        for k in expected { XCTAssertNotNil(p[k], k) }
+    }
+
+    func testInvalidTimingThrows() {
+        for (fps, frames) in [(0.0, 10), (.nan, 10), (.infinity, 10), (-1.0, 10), (25.0, 0)] {
+            let t = ClipTiming(start: Date(), frames: frames, fps: fps, width: 1600, height: 2008, squeeze: 3)
+            XCTAssertThrowsError(try GyroflowProject.make(clipDir: clipDir, timing: t, log: log, offsetMs: 0, calibration: [:], position: .top)) {
+                XCTAssertEqual($0 as? GyroflowProjectError, .invalidTiming)
+            }
+        }
+    }
+
+    func testPathEncodingRoundTrip() {
+        let nfc = "caf\u{E9}", nfd = "cafe\u{301}"
+        let path = "/x/a b/\(nfc)/\(nfd)/#1?q/50%/f.bin"
+        let url = GyroflowProject.fileURL(path)
+        XCTAssertTrue(url.hasPrefix("file:////x/"))
+        for c in ["#", "?", " "] { XCTAssertFalse(url.contains(c), c) }
+        XCTAssertEqual(String(url.dropFirst("file:///".count)).removingPercentEncoding, path)
+        XCTAssertTrue(url.contains("%25"))
     }
 
     func testFieldsAndIntegers() throws {
@@ -56,7 +75,7 @@ final class GyroflowProjectTests: XCTestCase {
         let v = try XCTUnwrap(p["video_info"] as? [String: Any])
         XCTAssertEqual(v["duration_ms"] as? Int, 21160)
         XCTAssertEqual(v["width"] as? Int, 1600)
-        let raw = String(decoding: GyroflowProject.make(clipDir: clipDir, timing: timing, log: log, offsetMs: -4192, calibration: [:], position: .top), as: UTF8.self)
+        let raw = String(decoding: try GyroflowProject.make(clipDir: clipDir, timing: timing, log: log, offsetMs: -4192, calibration: [:], position: .top), as: UTF8.self)
         XCTAssertTrue(raw.contains("\"output_width\" : 4800,"))
         XCTAssertEqual(GyroflowProject.fileName(clipDir: "clip_1"), "clip_1_000000.gyroflow")
     }

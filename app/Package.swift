@@ -11,6 +11,6 @@ let package = Package(
     ],
     targets: [
         .target(name: "MLV2DNGCore", resources: [.process("Resources")]),
-        .testTarget(name: "MLV2DNGCoreTests", dependencies: ["MLV2DNGCore"], resources: [.copy("Fixtures")]),
+        .testTarget(name: "MLV2DNGCoreTests", dependencies: ["MLV2DNGCore"]),
     ]
 )

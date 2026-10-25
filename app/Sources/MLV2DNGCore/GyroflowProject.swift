@@ -30,27 +30,35 @@ public enum MountingPosition: String, Codable, CaseIterable, Sendable {
     public var rotation: [Double] { [0, 0, 0] }
 }
 
+public enum GyroflowProjectError: Error, Equatable {
+    case serialization
+    case invalidTiming
+    case missingTemplate
+}
+
 /// Writer of the synced `.gyroflow` project read by Gyroflow (NiYien) and its DaVinci Resolve plugin.
 public enum GyroflowProject {
-    static func template() -> [String: Any] {
+    static func template() throws -> [String: Any] {
         guard let url = L10n.moduleBundle.url(forResource: "gyroflow-template", withExtension: "json"),
               let data = try? Data(contentsOf: url),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { fatalError("missing gyroflow-template.json in the core resource bundle") }
+        else { throw GyroflowProjectError.missingTemplate }
         return obj
     }
 
     /// `<clipDir>_000000.gyroflow`
     public static func fileName(clipDir: String) -> String { "\(clipDir)_000000.gyroflow" }
 
+    /// - Throws: `GyroflowProjectError`.
     /// - Parameter offsetMs: the Gyroflow offset, i.e. **minus** `SyncResult.lagMs` (negative when the log
     ///   starts before the clip; M24-1845: lag 4192 -> offset -4192).
     public static func make(clipDir: URL, timing: ClipTiming, log: URL, offsetMs: Double,
-                            calibration: [String: Any], position: MountingPosition) -> Data {
+                            calibration: [String: Any], position: MountingPosition) throws -> Data {
+        guard timing.fps.isFinite, timing.fps > 0, timing.frames > 0 else { throw GyroflowProjectError.invalidTiming }
         let durationMs = Double(timing.frames) / timing.fps * 1000
         let name = clipDir.lastPathComponent
         let w = timing.width, h = timing.height
-        var p = template()
+        var p = try template()
 
         p["videofile"] = fileURL(clipDir.appendingPathComponent("\(name)_%06d.dng").path)
         p["date"] = isoDate()
@@ -87,8 +95,9 @@ public enum GyroflowProject {
         out["output_height"] = h
         p["output"] = out
 
-        return (try? JSONSerialization.data(withJSONObject: p, options: [.prettyPrinted, .withoutEscapingSlashes]))
-            ?? Data()
+        guard let data = try? JSONSerialization.data(withJSONObject: p, options: [.prettyPrinted, .withoutEscapingSlashes])
+        else { throw GyroflowProjectError.serialization }
+        return data
     }
 
     /// Three sync points at 15/50/85 % of the clip. Key = gyro timestamp in µs = (video ms − offset) × 1000.

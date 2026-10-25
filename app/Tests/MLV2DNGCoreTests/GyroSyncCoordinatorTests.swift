@@ -163,7 +163,10 @@ final class GyroSyncCoordinatorTests: XCTestCase {
         try makeLog("t1", atSecond: 0)
         let c = coordinator()
         _ = withLens(c)
-        await c.shootMounted(shoot([a.clip, b.clip, d.clip]), mountPoint: mountPoint, chosenFolder: chosen)
+        let sh = shoot([a.clip, b.clip, d.clip])
+        let analysis = SqueezeFix.analyze(sh)
+        XCTAssertEqual(analysis.squeezeByName, ["A002.MLV": 3])
+        await c.shootMounted(sh, mountPoint: mountPoint, chosenFolder: chosen, squeezeFixes: analysis.squeezeByName)
         for clip in [a, b, d] {
             let p = try json(gyroflow(clip.dir))
             let out = try XCTUnwrap(p["output"] as? [String: Any])
@@ -171,6 +174,14 @@ final class GyroSyncCoordinatorTests: XCTestCase {
             let cal = try XCTUnwrap(p["calibration_data"] as? [String: Any])
             XCTAssertEqual(cal["input_horizontal_stretch"] as? Double, 3, clip.dir)
         }
+        // The coordinator uses the mount's result and never re-reads the headers: without it, the header wins.
+        c.shootUnmounted(sh)
+        let c2 = coordinator()
+        _ = withLens(c2)
+        try FileManager.default.removeItem(at: gyroflow(b.dir))
+        await c2.shootMounted(sh, mountPoint: mountPoint, chosenFolder: chosen)
+        let out = try XCTUnwrap(try json(gyroflow(b.dir))["output"] as? [String: Any])
+        XCTAssertEqual(out["output_width"] as? Int, 1600)
     }
 
     func testSkipsExisting() async throws {

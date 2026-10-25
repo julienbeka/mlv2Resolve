@@ -58,10 +58,29 @@ static struct mlvfs mlvfs;
 struct sampling_fix { char * name; int x, y; };
 static struct sampling_fix * sampling_fixes = NULL;
 static int sampling_fix_count = 0;
+static char *mlvfs_real_root; /* defined below */
+
+/** Strict "<digits>x<digits>" with both values in 1..16; 1 on success. */
+static int parse_sampling_value(const char * s, int * x, int * y)
+{
+    if (!s || *s < '0' || *s > '9') return 0;
+    char * end = NULL;
+    errno = 0;
+    long vx = strtol(s, &end, 10);
+    if (errno || end == s || *end != 'x') return 0;
+    const char * s2 = end + 1;
+    if (*s2 < '0' || *s2 > '9') return 0;
+    long vy = strtol(s2, &end, 10);
+    if (errno || end == s2 || *end != 0) return 0;
+    if (vx < 1 || vx > 16 || vy < 1 || vy > 16) return 0;
+    *x = (int)vx; *y = (int)vy;
+    return 1;
+}
 
 /**
- * Parses --sampling-fix=<MLV file name>:<sx>x<sy>[,<name>:<sx>x<sy>...], e.g. "M25-1745.MLV:3x1".
- * The name is split from the sampling at the last ':'. Malformed entries are reported and skipped.
+ * Parses --sampling-fix=<MLV path>:<sx>x<sy>[,<path>:<sx>x<sy>...], e.g. "M25-1745.MLV:3x1", where the path is
+ * relative to --mlv-dir. The path is split from the sampling at the last ':'. Malformed entries are reported
+ * and skipped.
  */
 static void parse_sampling_fixes(const char * spec)
 {
@@ -73,9 +92,7 @@ static void parse_sampling_fixes(const char * spec)
     {
         char * colon = strrchr(item, ':');
         int x = 0, y = 0;
-        char tail = 0;
-        if (!colon || colon == item || sscanf(colon + 1, "%dx%d%c", &x, &y, &tail) != 2
-            || x < 1 || y < 1 || x > 16 || y > 16)
+        if (!colon || colon == item || !parse_sampling_value(colon + 1, &x, &y))
         {
             err_printf("--sampling-fix: ignoring malformed entry \"%s\"\n", item);
             continue;
@@ -84,6 +101,7 @@ static void parse_sampling_fixes(const char * spec)
         if (!grown) break;
         sampling_fixes = grown;
         *colon = 0;
+        while (*item == '/') item++; /* relative: leading slashes are not part of the path */
         sampling_fixes[sampling_fix_count].name = strdup(item);
         sampling_fixes[sampling_fix_count].x = x;
         sampling_fixes[sampling_fix_count].y = y;
@@ -94,23 +112,49 @@ static void parse_sampling_fixes(const char * spec)
         }
     }
     free(copy);
+    /* FUSE-T forks after this point: an unflushed stdout buffer would be written twice (child and parent) */
+    fflush(stdout);
 }
 
-/** Sets frame_headers->sampling_fix_x/y when --sampling-fix names this MLV file (case-insensitive). */
-static void apply_sampling_fix(const char * mlv_filename, struct frame_headers * frame_headers)
+/** Path of mlv_filename below root ("" when equal), or NULL when it is not inside root. */
+static const char * path_below(const char * mlv_filename, const char * root)
 {
-    if (!sampling_fix_count || !mlv_filename) return;
-    const char * base = strrchr(mlv_filename, '/');
-    base = base ? base + 1 : mlv_filename;
+    if (!root || !*root) return NULL;
+    size_t n = strlen(root);
+    while (n > 1 && root[n - 1] == '/') n--;
+    if (strncmp(mlv_filename, root, n) != 0 || (mlv_filename[n] != '/' && mlv_filename[n] != 0)) return NULL;
+    const char * rel = mlv_filename + n;
+    while (*rel == '/') rel++;
+    return rel;
+}
+
+static int find_sampling_fix(const char * rel, struct frame_headers * frame_headers)
+{
+    if (!rel) return 0;
     for (int i = 0; i < sampling_fix_count; i++)
     {
-        if (!strcasecmp(sampling_fixes[i].name, base))
+        if (!strcasecmp(sampling_fixes[i].name, rel))
         {
             frame_headers->sampling_fix_x = sampling_fixes[i].x;
             frame_headers->sampling_fix_y = sampling_fixes[i].y;
-            return;
+            return 1;
         }
     }
+    return 0;
+}
+
+/**
+ * Sets frame_headers->sampling_fix_x/y when --sampling-fix names this MLV by its path relative to --mlv-dir
+ * (case-insensitive, like APFS). MLV paths are built from --mlv-dir, so a prefix strip suffices; the realpath
+ * against the resolved root is the fallback.
+ */
+static void apply_sampling_fix(const char * mlv_filename, struct frame_headers * frame_headers)
+{
+    if (!sampling_fix_count || !mlv_filename) return;
+    if (find_sampling_fix(path_below(mlv_filename, mlvfs.mlv_path), frame_headers)) return;
+    char real[PATH_MAX];
+    if (mlvfs_real_root && realpath(mlv_filename, real))
+        find_sampling_fix(path_below(real, mlvfs_real_root), frame_headers);
 }
 
 #ifdef _WIN32
@@ -2450,7 +2494,7 @@ static const struct fuse_opt_ex mlvfs_opts_ex[] =
     MLVFS_OPTION("--cs5x5",             chroma_smooth,            5, "5x5 chroma smoothing", 0),
     MLVFS_OPTION("--fpm-dir=%s",        fpm_dir,                  0, "Directory with focus pixel maps (.fpm, MLV App format)", 0),
     MLVFS_OPTION("--index-dir=%s",      index_dir,                0, "Directory for MLVFS index (.IDX) files instead of next to the MLV files", 0),
-    MLVFS_OPTION("--sampling-fix=%s",   sampling_fix,             0, "Per-clip sampling override: <MLV name>:<sx>x<sy>[,...] (e.g. M25-1745.MLV:3x1)", 0),
+    MLVFS_OPTION("--sampling-fix=%s",   sampling_fix,             0, "Per-clip sampling override: <MLV path relative to --mlv-dir>:<sx>x<sy>[,...] (e.g. M25-1745.MLV:3x1)", 0),
     MLVFS_OPTION("--no-focus-pixels",   no_focus_pixels,          1, "Do not fix focus pixels", 0),
     MLVFS_OPTION("--bad-pix",           fix_bad_pixels,           1, "Fix bad pixels (autodetected)", 0),
     MLVFS_OPTION("--really-bad-pix",    fix_bad_pixels,           2, "Aggressive bad pixel fix", 0),

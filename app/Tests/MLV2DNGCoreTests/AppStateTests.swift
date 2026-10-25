@@ -351,6 +351,25 @@ extension AppStateTests {
         XCTAssertTrue(try XCTUnwrap(launcher.processes.last).args.contains("--sampling-fix=A001.MLV:3x1"))
     }
 
+    /// The corrections are recomputed on every mount: a clip added since the last one is taken into account.
+    func testSamplingFixRecomputedOnRemount() async throws {
+        let dir = try makeShootFolder("Grow")
+        for n in ["A001", "A002", "A003"] {
+            try SyntheticMLV.data(sampling: (1, 2, 1, 0), size: (1600, 2008)).write(to: dir.appendingPathComponent("\(n).MLV"))
+        }
+        let state = makeState()
+        await state.choose(folder: volume)
+        await state.toggle(try shoot(state, "Grow"))
+        XCTAssertFalse(try XCTUnwrap(launcher.processes.last).args.contains { $0.hasPrefix("--sampling-fix") })
+        await state.toggle(try shoot(state, "Grow"))  // unmount
+        try SyntheticMLV.data(sampling: (1, 0, 1, 0), size: (1600, 2008)).write(to: dir.appendingPathComponent("A004.MLV"))
+        state.clearInfo()
+        await state.choose(folder: volume)  // rescan
+        await state.toggle(try shoot(state, "Grow"))
+        XCTAssertTrue(try XCTUnwrap(launcher.processes.last).args.contains("--sampling-fix=A004.MLV:3x1"))
+        XCTAssertEqual(state.info, "A004: header says 1x1, corrected to 1x3 like the other clips")
+    }
+
     func testNoSamplingFixWithoutDisagreement() async throws {
         let dir = try makeShootFolder("Plain")
         try SyntheticMLV.data(sampling: (1, 2, 1, 0), size: (1600, 2008)).write(to: dir.appendingPathComponent("A001.MLV"))

@@ -76,7 +76,11 @@ public final class GyroSyncCoordinator: ObservableObject {
     private let defaults: UserDefaults
     private let backupsRoot: URL
 
-    private struct Context { let shoot: Shoot; let mountPoint: URL; let chosenFolder: URL }
+    private struct Context {
+        let shoot: Shoot; let mountPoint: URL; let chosenFolder: URL
+        /// Relative MLV path -> squeeze corrected from the shoot majority (`SqueezeFix`), as the engine serves it.
+        let squeezeFixes: [String: Int]
+    }
     /// Per shoot folder key.
     private var contexts: [String: Context] = [:]
     private var tails: [String: Task<Void, Never>] = [:]
@@ -223,9 +227,12 @@ public final class GyroSyncCoordinator: ObservableObject {
     // MARK: Mount events
 
     /// Syncs every clip of the shoot; returns when that job is done (or cancelled).
-    public func shootMounted(_ shoot: Shoot, mountPoint: URL, chosenFolder: URL) async {
+    /// - Parameter squeezeFixes: the mount's header corrections (`SqueezeFix.Analysis.squeezeByName`).
+    public func shootMounted(_ shoot: Shoot, mountPoint: URL, chosenFolder: URL,
+                             squeezeFixes: [String: Int] = [:]) async {
         let k = AppState.key(shoot.folder)
-        contexts[k] = Context(shoot: shoot, mountPoint: mountPoint, chosenFolder: chosenFolder)
+        contexts[k] = Context(shoot: shoot, mountPoint: mountPoint, chosenFolder: chosenFolder,
+                              squeezeFixes: squeezeFixes)
         let clips = shoot.clips.compactMap { $0.files.first.map(AppState.key) }
         for c in clips where !isActive(states[c]) { states[c] = .pending }
         await enqueue(k, clips: clips, force: [])
@@ -308,21 +315,13 @@ public final class GyroSyncCoordinator: ObservableObject {
     }
 
     private func run(_ shootKey: String, clips: [String], force: Set<String>) async {
-        // MLV file name -> squeeze corrected from the shoot majority (header known wrong), as the engine serves it.
-        var squeezeFixes: [String: Int] = [:]
-        if let ctx = contexts[shootKey] {
-            await refreshLogIndex(ctx.chosenFolder)
-            let shoot = ctx.shoot
-            squeezeFixes = await Self.offMain {
-                Dictionary(SqueezeFix.fixes(for: shoot).map { ($0.name, $0.squeeze) }, uniquingKeysWith: { a, _ in a })
-            }
-        }
+        if let ctx = contexts[shootKey] { await refreshLogIndex(ctx.chosenFolder) }
         for clip in clips {
             guard !Task.isCancelled, let ctx = contexts[shootKey] else { return }
             guard let mlv = ctx.shoot.clips.first(where: { $0.files.first.map(AppState.key) == clip })?.files.first
             else { continue }
             await process(clip: clip, mlv: mlv, ctx: ctx, force: force.contains(clip),
-                          squeezeFix: squeezeFixes[mlv.lastPathComponent])
+                          squeezeFix: ctx.squeezeFixes[SqueezeFix.relativeName(of: mlv, in: ctx.shoot.folder)])
         }
     }
 

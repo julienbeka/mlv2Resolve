@@ -60,10 +60,9 @@ public final class AppState: ObservableObject {
     /// Consecutive crashes per shoot key, with the time of the last one.
     private var crashes: [String: (count: Int, last: ContinuousClock.Instant)] = [:]
     private var restartTasks: [String: Task<Void, Never>] = [:]
-    /// Per folder key: clips whose anamorphic header was corrected, and the shoots already told about it.
-    private var squeezeFixCache: [String: [SqueezeFix.Fix]] = [:]
-    private var fixInfoShown: Set<String> = []
-    /// Per folder key: squeeze factor (nil = not anamorphic) and last mount point.
+    /// Per folder key: the header-correction notice last shown.
+    private var fixNoticeShown: [String: String] = [:]
+    /// Per folder key: squeeze factor of the last mount (nil = not anamorphic) and last mount point.
     private var squeezeFactors: [String: Int?] = [:]
     private var mountPoints: [String: URL] = [:]
     private let resolveRunner: ResolveDesqueeze.Runner?
@@ -316,13 +315,16 @@ public final class AppState: ObservableObject {
     @discardableResult
     private func mount(_ shoot: Shoot) async -> Bool {
         do {
+            // Headers read once per mount, off the main actor; the engine, the info line, the Resolve
+            // factor and the gyro sync all use this one result.
+            let analysis = await SqueezeFix.analyzeDetached(shoot)
             let url = try await manager.mount(shoot, mode: mode, fixBadPixels: fixBadPixels,
-                                              fixFocusPixels: fixFocusPixels)
-            noteMountPoint(shoot, url)
+                                              fixFocusPixels: fixFocusPixels, samplingFixes: analysis.fixes)
+            noteMountPoint(shoot, url, analysis)
             mounted.insert(Self.key(shoot.folder))
-            startGyro(shoot, mountPoint: url)
+            startGyro(shoot, mountPoint: url, analysis)
             noteSqueeze(shoot)
-            noteSqueezeFixes(shoot)
+            noteSqueezeFixes(shoot, analysis)
             noteCollision(shoot, mountedAt: url)
             return true
         } catch {
@@ -343,7 +345,7 @@ public final class AppState: ObservableObject {
 
     private func noteSqueeze(_ shoot: Shoot) {
         let k = Self.key(shoot.folder)
-        guard !infoShown.contains(k), let n = squeezeFactor(shoot) else { return }
+        guard !infoShown.contains(k), let n = squeezeFactors[k] ?? nil else { return }
         infoShown.insert(k)
         var hint = String(localized: "Anamorphic shoot 1x\(n): in Resolve, go to the Color page → Sizing → Input Sizing and set Width to \(n).", bundle: L10n.bundle)
         // The manual advice stays (free version); Studio users who already got through get the shortcut too.
@@ -351,36 +353,18 @@ public final class AppState: ObservableObject {
         info = hint
     }
 
-    /// Once per shoot: the clips whose header disagrees with the shoot majority were corrected (the engine
-    /// serves them with the majority's sampling, see `SqueezeFix`).
-    private func noteSqueezeFixes(_ shoot: Shoot) {
+    /// The clips whose header disagrees with the shoot majority were corrected (the engine serves them with
+    /// the majority's sampling, see `SqueezeFix`). Told once per shoot, again only if the corrections change.
+    private func noteSqueezeFixes(_ shoot: Shoot, _ analysis: SqueezeFix.Analysis) {
         let k = Self.key(shoot.folder)
-        guard !fixInfoShown.contains(k), let notice = SqueezeFix.message(squeezeFixes(shoot)) else { return }
-        fixInfoShown.insert(k)
+        guard let notice = SqueezeFix.message(analysis.fixes), fixNoticeShown[k] != notice else { return }
+        fixNoticeShown[k] = notice
         info = info.map { $0 + "\n\n" + notice } ?? notice
-    }
-
-    /// Header corrections of a shoot, read once from its MLV headers.
-    private func squeezeFixes(_ shoot: Shoot) -> [SqueezeFix.Fix] {
-        let k = Self.key(shoot.folder)
-        if let cached = squeezeFixCache[k] { return cached }
-        let fixes = SqueezeFix.fixes(for: shoot)
-        squeezeFixCache[k] = fixes
-        return fixes
-    }
-
-    /// Squeeze factor of a shoot (the majority of its clips, headers corrected), read once from its MLV headers.
-    private func squeezeFactor(_ shoot: Shoot) -> Int? {
-        let k = Self.key(shoot.folder)
-        if let cached = squeezeFactors[k] { return cached }
-        let n = SqueezeFix.shootSqueeze(shoot, fixes: squeezeFixes(shoot))
-        squeezeFactors[k] = .some(n)
-        return n
     }
 
     /// Starts the gyro sync of a freshly mounted shoot in the background. Logs are searched in the chosen
     /// folder when the shoot lies in it, else in the shoot's own folder.
-    private func startGyro(_ shoot: Shoot, mountPoint: URL) {
+    private func startGyro(_ shoot: Shoot, mountPoint: URL, _ analysis: SqueezeFix.Analysis) {
         guard let gyro else { return }
         let chosen = folder.flatMap { f in
             Self.key(shoot.folder).hasPrefix(Self.prefix(f)) || Self.key(shoot.folder) == Self.key(f) ? f : nil
@@ -388,13 +372,15 @@ public final class AppState: ObservableObject {
         let k = Self.key(shoot.folder)
         Task { [weak self] in
             guard self?.mounted.contains(k) == true else { return }  // unmounted before this task started
-            await gyro.shootMounted(shoot, mountPoint: mountPoint, chosenFolder: chosen)
+            await gyro.shootMounted(shoot, mountPoint: mountPoint, chosenFolder: chosen,
+                                    squeezeFixes: analysis.squeezeByName)
         }
     }
 
-    private func noteMountPoint(_ shoot: Shoot, _ url: URL) {
+    /// Records the mount point and this mount's squeeze factor (majority of the clips, headers corrected).
+    private func noteMountPoint(_ shoot: Shoot, _ url: URL, _ analysis: SqueezeFix.Analysis) {
         let k = Self.key(shoot.folder)
-        _ = squeezeFactor(shoot)
+        squeezeFactors[k] = .some(analysis.squeeze)
         mountPoints[k] = url
     }
 
@@ -455,10 +441,12 @@ public final class AppState: ObservableObject {
         guard saved.contains(k), !mounted.contains(k) else { return }
         guard FileManager.default.fileExists(atPath: k) else { crashes[k] = nil; return }
         do {
-            let url = try await manager.mount(shoot, mode: mode, fixBadPixels: fixBadPixels, fixFocusPixels: fixFocusPixels)
-            noteMountPoint(shoot, url)
+            let analysis = await SqueezeFix.analyzeDetached(shoot)
+            let url = try await manager.mount(shoot, mode: mode, fixBadPixels: fixBadPixels, fixFocusPixels: fixFocusPixels,
+                                              samplingFixes: analysis.fixes)
+            noteMountPoint(shoot, url, analysis)
             mounted.insert(k)
-            startGyro(shoot, mountPoint: url)
+            startGyro(shoot, mountPoint: url, analysis)
         } catch {
             if case let .exitedDuringStartup(status)? = error as? MountError {
                 engineCrashed(shoot, status: status)

@@ -75,23 +75,48 @@ final class SqueezeFixTests: XCTestCase {
         XCTAssertNil(MLVHeader.sampling(of: tmp.appendingPathComponent("missing.MLV")))
     }
 
-    func testFixesFromHeadersEngineArgumentAndShootSqueeze() throws {
+    func testAnalyzeFixesEngineArgumentAndShootSqueeze() async throws {
         // The odd clip comes first: the shoot factor must still be the majority's.
         let clips = [try writeClip("M25-1745.MLV", (1, 0, 1, 0)), try writeClip("M25-1735.MLV", (1, 2, 1, 0)),
                      try writeClip("M25-1744.MLV", (3, 0, 1, 0)), try writeClip("M25-1750.MLV", (1, 2, 1, 0)),
-                     try writeClip("M25-1799.MLV", nil)]  // no RAWC: never corrected
-        let fixes = SqueezeFix.fixes(for: shoot(clips))
-        XCTAssertEqual(fixes, [SqueezeFix.Fix(name: "M25-1745.MLV", fromX: 1, fromY: 1, toX: 3, toY: 1)])
-        XCTAssertEqual(fixes.first?.squeeze, 3)
-        XCTAssertEqual(SqueezeFix.engineArgument(fixes), "--sampling-fix=M25-1745.MLV:3x1")
+                     try writeClip("M25-1799.MLV", nil)]  // no RAWC: never corrected, counts as 1x1
+        let a = await SqueezeFix.analyzeDetached(shoot(clips))
+        XCTAssertEqual(a.fixes, [SqueezeFix.Fix(name: "M25-1745.MLV", fromX: 1, fromY: 1, toX: 3, toY: 1)])
+        XCTAssertEqual(a.fixes.first?.squeeze, 3)
+        XCTAssertEqual(a.squeeze, 3)
+        XCTAssertEqual(a.squeezeByName, ["M25-1745.MLV": 3])
+        XCTAssertEqual(SqueezeFix.engineArgument(a.fixes), "--sampling-fix=M25-1745.MLV:3x1")
         XCTAssertNil(SqueezeFix.engineArgument([]))
-        XCTAssertEqual(SqueezeFix.shootSqueeze(shoot(clips), fixes: fixes), 3)
-        XCTAssertEqual(SqueezeFix.shootSqueeze(shoot(clips), fixes: []), 3, "uncorrected: 3 of 5 already 1x3")
-        // Uncorrected, two clips 1x1 against one 1x3: the majority wins, not the first clip.
-        let few = [try writeClip("X1.MLV", (1, 2, 1, 0)), try writeClip("X2.MLV", (1, 0, 1, 0)),
+        // No majority to correct (2 vs 1 at different sizes would be untouched); two 1x1 against one 1x3 of
+        // another size: the most common squeeze wins, not the first clip.
+        let few = [try writeClip("X1.MLV", (1, 2, 1, 0), size: (1920, 1080)), try writeClip("X2.MLV", (1, 0, 1, 0)),
                    try writeClip("X3.MLV", (1, 0, 1, 0))]
-        XCTAssertNil(SqueezeFix.shootSqueeze(shoot(few), fixes: []))
-        XCTAssertNil(SqueezeFix.shootSqueeze(shoot([try writeClip("N.MLV", (1, 0, 1, 0))]), fixes: []))
+        let b = SqueezeFix.analyze(shoot(few))
+        XCTAssertEqual(b.fixes, [])
+        XCTAssertNil(b.squeeze)
+        XCTAssertEqual(SqueezeFix.analyze(shoot([])), .none)
+    }
+
+    func testUnsafeNamesAreNeverCorrected() throws {
+        let clips = [try writeClip("a,b.MLV", (1, 0, 1, 0)), try writeClip("c:d.MLV", (1, 0, 1, 0)),
+                     try writeClip("A.MLV", (1, 2, 1, 0)), try writeClip("B.MLV", (1, 2, 1, 0)),
+                     try writeClip("C.MLV", (1, 2, 1, 0)), try writeClip("D.MLV", (1, 2, 1, 0))]
+        let a = SqueezeFix.analyze(shoot(clips))
+        XCTAssertEqual(a.fixes, [], "excluded from engine arg, message and gyroflow alike")
+        XCTAssertNil(SqueezeFix.message(a.fixes))
+        XCTAssertEqual(a.squeezeByName, [:])
+        XCTAssertEqual(a.squeeze, 3, "they still vote")
+    }
+
+    func testRelativeName() {
+        let folder = URL(fileURLWithPath: "/Volumes/SSD/Day 1", isDirectory: true)
+        XCTAssertEqual(SqueezeFix.relativeName(of: folder.appendingPathComponent("M25-1745.MLV"), in: folder),
+                       "M25-1745.MLV")
+        XCTAssertEqual(SqueezeFix.relativeName(of: URL(fileURLWithPath: "/Volumes/SSD/Day 1/B/M1.MLV"), in: folder),
+                       "B/M1.MLV")
+        XCTAssertEqual(SqueezeFix.relativeName(of: URL(fileURLWithPath: "/Volumes/SSD/Day 10/M1.MLV"), in: folder),
+                       "M1.MLV", "outside the folder: file name")
+        XCTAssertEqual(SqueezeFix.Fix(name: "B/M1.MLV", fromX: 1, fromY: 1, toX: 3, toY: 1).clipName, "M1")
     }
 
     func testEngineArgumentSeveralAndUnsafeNames() {
@@ -109,11 +134,11 @@ final class SqueezeFixTests: XCTestCase {
         XCTAssertEqual(SqueezeFix.message(two),
                        "M25-1745, M25-1800: header says 1x1, corrected to 1x3 like the other clips")
         L10n.bundle = L10nTests.bundle("fr")
-        XCTAssertEqual(SqueezeFix.message(one), "M25-1745 : l'en-tête indique 1x1, corrigé en 1x3 comme les autres plans")
+        XCTAssertEqual(SqueezeFix.message(one), "M25-1745 : l’en-tête indique 1x1, corrigé en 1x3 comme les autres plans")
     }
 
     /// Real shoot (read-only): `MLV2DNG_SHOOT_20261025` = folder with M25-1735/1744/1745/1750/1752/1753.MLV,
-    /// all RAWI 1600x2008, RAWC 3x1 except M25-1745 (1x1). Keys are MLV file names.
+    /// all RAWI 1600x2008, RAWC 3x1 except M25-1745 (1x1). Keys are MLV paths relative to the shoot folder.
     func testRealShoot20261025() throws {
         guard let path = ProcessInfo.processInfo.environment["MLV2DNG_SHOOT_20261025"], !path.isEmpty else {
             throw XCTSkip("MLV2DNG_SHOOT_20261025 not set")
@@ -128,8 +153,8 @@ final class SqueezeFixTests: XCTestCase {
         XCTAssertEqual(fixes(clips), ["M25-1745.MLV": [3, 1]])
         let shoot = Shoot(name: "20261025", folder: folder, volumeName: "",
                           clips: names.map { Clip(name: $0, files: [folder.appendingPathComponent($0)], bytes: 0) })
-        let f = SqueezeFix.fixes(for: shoot)
-        XCTAssertEqual(SqueezeFix.engineArgument(f), "--sampling-fix=M25-1745.MLV:3x1")
-        XCTAssertEqual(SqueezeFix.shootSqueeze(shoot, fixes: f), 3)
+        let a = SqueezeFix.analyze(shoot)
+        XCTAssertEqual(SqueezeFix.engineArgument(a.fixes), "--sampling-fix=M25-1745.MLV:3x1")
+        XCTAssertEqual(a.squeeze, 3)
     }
 }

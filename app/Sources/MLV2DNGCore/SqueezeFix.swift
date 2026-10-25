@@ -4,8 +4,8 @@ import Foundation
 /// Corrects clips whose Magic Lantern header reports the wrong sensor sampling (e.g. a 1x3 anamorphic clip
 /// whose RAWC says 1x1), by aligning them on the majority of the shoot.
 ///
-/// Clips are keyed by their MLV file name as found in the folder (e.g. `M25-1745.MLV`), the same name the
-/// engine's `--sampling-fix` option matches.
+/// Clips are keyed by their MLV path relative to the shoot folder (e.g. `M25-1745.MLV`), the same form the
+/// engine's `--sampling-fix` option matches against the path below `--mlv-dir`.
 public enum SqueezeFix {
     public typealias Sampling = (x: Int, y: Int, width: Int, height: Int)
 
@@ -13,7 +13,7 @@ public enum SqueezeFix {
     /// majority (> 50 %) shares one sampling, every clip of that group with another sampling is corrected to
     /// it. Smaller groups and groups without a strict majority are left alone. Callers pass only clips that
     /// have a RAWC block (others are never corrected).
-    /// - Returns: MLV file name → corrected sampling (x, y), only for the clips to correct.
+    /// - Returns: clip name → corrected sampling (x, y), only for the clips to correct.
     public static func corrections(for clips: [(name: String, sampling: Sampling)]) -> [String: (x: Int, y: Int)] {
         struct Size: Hashable { let w: Int, h: Int }
         struct XY: Hashable { let x: Int, y: Int }
@@ -32,7 +32,7 @@ public enum SqueezeFix {
 
     /// One corrected clip.
     public struct Fix: Equatable, Sendable {
-        /// MLV file name, e.g. `M25-1745.MLV`.
+        /// MLV path relative to the shoot folder, e.g. `M25-1745.MLV` (see `relativeName`).
         public let name: String
         /// Sampling the header reports.
         public let fromX: Int, fromY: Int
@@ -45,28 +45,70 @@ public enum SqueezeFix {
         /// Corrected horizontal squeeze (1 when not squeezed horizontally).
         public var squeeze: Int { SqueezeFix.horizontalSqueeze(x: toX, y: toY) ?? 1 }
         /// Clip name without the extension, as shown to the user.
-        public var clipName: String { (name as NSString).deletingPathExtension }
+        public var clipName: String { ((name as NSString).lastPathComponent as NSString).deletingPathExtension }
     }
 
-    /// Reads the RAWC/RAWI of every clip's MLV (first file) and returns the corrections, sorted by name.
-    public static func fixes(for shoot: Shoot) -> [Fix] {
+    /// The header corrections of a shoot and its squeeze factor, read once per mount (`analyze`).
+    public struct Analysis: Equatable, Sendable {
+        /// Corrected clips, sorted by name.
+        public let fixes: [Fix]
+        /// Squeeze factor of the shoot (nil: not anamorphic): the most common horizontal squeeze of its clips
+        /// once corrected; on a tie, the earliest clip's.
+        public let squeeze: Int?
+        public static let none = Analysis(fixes: [], squeeze: nil)
+
+        public init(fixes: [Fix], squeeze: Int?) { self.fixes = fixes; self.squeeze = squeeze }
+        /// Corrected squeeze by `Fix.name` (relative MLV path).
+        public var squeezeByName: [String: Int] {
+            Dictionary(fixes.map { ($0.name, $0.squeeze) }, uniquingKeysWith: { a, _ in a })
+        }
+    }
+
+    /// Path of a clip's MLV relative to the shoot folder (the `--mlv-dir`), e.g. `M25-1745.MLV` — the form the
+    /// engine's `--sampling-fix` matches. Falls back to the file name for a file outside the folder.
+    public static func relativeName(of mlv: URL, in folder: URL) -> String {
+        let root = folder.standardizedFileURL.path, path = mlv.standardizedFileURL.path
+        let prefix = root.hasSuffix("/") ? root : root + "/"
+        return path.hasPrefix(prefix) ? String(path.dropFirst(prefix.count)) : mlv.lastPathComponent
+    }
+
+    /// Whether a name can travel in the engine option (`,` separates entries, `:` the sampling). Clips whose
+    /// name contains either are never corrected (Magic Lantern never writes such names).
+    static func isSafe(_ name: String) -> Bool { !name.isEmpty && !name.contains(",") && !name.contains(":") }
+
+    /// Reads the RAWC/RAWI of every clip's MLV (first file) once — blocking file I/O, call it off the main
+    /// actor (`analyzeDetached`).
+    public static func analyze(_ shoot: Shoot) -> Analysis {
         var clips: [(name: String, sampling: Sampling)] = []
         var byName: [String: Sampling] = [:]
+        var order: [(name: String, squeeze: Int)] = []
         for clip in shoot.clips {
-            guard let mlv = clip.files.first, let s = MLVHeader.sampling(of: mlv) else { continue }
-            clips.append((mlv.lastPathComponent, s))
-            byName[mlv.lastPathComponent] = s
+            guard let mlv = clip.files.first else { continue }
+            let name = relativeName(of: mlv, in: shoot.folder)
+            if let s = MLVHeader.sampling(of: mlv) {
+                clips.append((name, s))
+                byName[name] = s
+                order.append((name, horizontalSqueeze(x: s.x, y: s.y) ?? 1))
+            } else {
+                order.append((name, MLVHeader.horizontalSqueeze(of: mlv) ?? 1))  // RAWC without RAWI, or none
+            }
         }
-        return corrections(for: clips).compactMap { name, to in
-            byName[name].map { Fix(name: name, fromX: $0.x, fromY: $0.y, toX: to.x, toY: to.y) }
+        let fixes = corrections(for: clips).compactMap { name, to -> Fix? in
+            guard isSafe(name), let from = byName[name] else { return nil }
+            return Fix(name: name, fromX: from.x, fromY: from.y, toX: to.x, toY: to.y)
         }.sorted { $0.name < $1.name }
+        let fixed = Dictionary(fixes.map { ($0.name, $0.squeeze) }, uniquingKeysWith: { a, _ in a })
+        return Analysis(fixes: fixes, squeeze: majority(order.map { fixed[$0.name] ?? $0.squeeze }))
     }
 
-    /// The engine option `--sampling-fix=<name>:<sx>x<sy>[,…]`, nil when there is nothing to fix. Names that
-    /// contain the separators `,` or `:` are left out (Magic Lantern never writes such names).
+    /// `analyze` on a detached task (never on the caller's actor).
+    public static func analyzeDetached(_ shoot: Shoot) async -> Analysis {
+        await Task.detached(priority: .userInitiated) { analyze(shoot) }.value
+    }
+
+    /// The engine option `--sampling-fix=<relative MLV path>:<sx>x<sy>[,…]`, nil when there is nothing to fix.
     public static func engineArgument(_ fixes: [Fix]) -> String? {
-        let items = fixes.filter { !$0.name.isEmpty && !$0.name.contains(",") && !$0.name.contains(":") }
-            .map { "\($0.name):\($0.toX)x\($0.toY)" }
+        let items = fixes.filter { isSafe($0.name) }.map { "\($0.name):\($0.toX)x\($0.toY)" }
         return items.isEmpty ? nil : "--sampling-fix=" + items.joined(separator: ",")
     }
 
@@ -79,19 +121,11 @@ public enum SqueezeFix {
         return (v == 1 && h > 1) ? h : nil
     }
 
-    /// Squeeze factor of the shoot (nil: not anamorphic): the most common horizontal squeeze of its clips
-    /// once corrected; on a tie, the earliest clip's.
-    public static func shootSqueeze(_ shoot: Shoot, fixes: [Fix]) -> Int? {
-        let fixed = Dictionary(fixes.map { ($0.name, $0.squeeze) }, uniquingKeysWith: { a, _ in a })
-        let values: [Int] = shoot.clips.compactMap { clip in
-            guard let mlv = clip.files.first else { return nil }
-            if let f = fixed[mlv.lastPathComponent] { return f }
-            return MLVHeader.horizontalSqueeze(of: mlv) ?? 1
-        }
+    /// Most common value (earliest on a tie); nil when it is 1 (not anamorphic) or there is none.
+    static func majority(_ values: [Int]) -> Int? {
         var counts: [Int: Int] = [:]
         for v in values { counts[v, default: 0] += 1 }
-        guard let best = counts.values.max(),
-              let n = values.first(where: { counts[$0] == best }) else { return nil }
+        guard let best = counts.values.max(), let n = values.first(where: { counts[$0] == best }) else { return nil }
         return n > 1 ? n : nil
     }
 

@@ -11,7 +11,7 @@ Notes:
 - `--backend` passes `-o backend=smb|nfs` (FUSE-T default is NFS).
 - Mount point is a temp dir; unmount uses `umount` then `diskutil unmount force`; mlvfs is killed if still alive.
 
-Header sampling override (`--sampling-fix=<MLV name>:<sx>x<sy>[,...]`, used by the app when one clip's RAWC
+Header sampling override (`--sampling-fix=<MLV path relative to --mlv-dir>:<sx>x<sy>[,...]`, strict `<digits>x<digits>`, used by the app when one clip's RAWC
 disagrees with the rest of the shoot): `--clone` mounts an APFS clone (`cp -c`, temp dir) of the clip instead of its
 folder, `--sampling-fix SPEC` passes the option, e.g. on a 1x3 clip whose header says 1x1:
 `mount_test.py <dir>/M25-1745.MLV --clone --height 2008 --sampling-fix M25-1745.MLV:3x1 --expect-scale 3,1`

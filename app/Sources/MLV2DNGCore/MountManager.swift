@@ -130,8 +130,11 @@ public actor MountManager {
     /// by the readiness timeout). Mounting an already-mounted
     /// shoot (same folder) returns its existing mount point.
     @discardableResult
+    /// - Parameter samplingFixes: clips whose header disagrees with the shoot majority (`SqueezeFix.analyze`,
+    ///   computed by the caller); served with the corrected sampling.
     public func mount(_ shoot: Shoot, mode: DualISOMode,
-                      fixBadPixels: Bool = true, fixFocusPixels: Bool = true) async throws -> URL {
+                      fixBadPixels: Bool = true, fixFocusPixels: Bool = true,
+                      samplingFixes: [SqueezeFix.Fix] = []) async throws -> URL {
         var url: URL
         while true {
             if let e = entry(for: shoot) {
@@ -156,7 +159,7 @@ public actor MountManager {
         if fixBadPixels { args.append("--bad-pix") }
         if !fixFocusPixels { args.append("--no-focus-pixels") }
         // Clips whose header disagrees with the shoot majority (e.g. 1x3 recorded as 1x1): DefaultScale fixed.
-        if let fix = SqueezeFix.engineArgument(SqueezeFix.fixes(for: shoot)) { args.append(fix) }
+        if let fix = SqueezeFix.engineArgument(samplingFixes) { args.append(fix) }
         args += [mode.engineFlag, "--fpm-dir=\(fpmDir.path)", "--index-dir=\(indexDir.path)",
                  "-o", "volname=\(Self.volumeName(url.lastPathComponent))",
                  "-f"] // foreground: otherwise mlvfs daemonizes and we lose the process

@@ -2,10 +2,13 @@
 
 ### Changes in @VERSION@
 
-- Add **Desqueeze in Resolve** for mounted anamorphic CinemaDNG sequences, through the Resolve Studio scripting API. Existing custom sizing choices are preserved; WAV audio and GIF previews are skipped.
-- Create the `mlv2dng 1x3` and `mlv2dng 1x5` presets as needed in the default local project library, only while Resolve is closed and after saving a backup. Other libraries and unsupported settings formats use manual instructions.
-- Install a **Workspace → Scripts → mlv2dng Desqueeze** shortcut in Resolve, with English and French feedback.
-- Keep one local `mlv2dng.app` and increment its version beyond the last local build and highest known release tag.
+- **Resolve project preparation:** create or open a project per mounted shoot, import CinemaDNG and matching WAV audio, and synchronize audio by timecode. Existing projects keep their settings and timelines; later runs import only missing clips.
+- **Majority-based project format:** choose the most common desqueezed resolution and frame rate, with the larger resolution winning ties. Resolve Free receives a fitted UHD Rushs timeline through Workspace → Scripts → mlv2dng.
+- **Anamorphic sizing:** apply matching Input Sizing presets, including fit variants, while preserving custom sizing choices. Supported preset installation backs up the local library and runs only while Resolve is closed.
+- **Built-in SenseFlow A1 gyro sync:** choose lenses and sensor mounting positions, generate per-clip Gyroflow projects, import calibrated lens profiles, and follow progress in the window and menu bar. Existing files are backed up before explicit regeneration.
+- **Mode-specific rolling shutter:** select EOS M Crop Mood Slim readout times from the actual recording format, including 32.128 ms for 4.8K and 35.3925 ms for 5.2K in 2.39:1. The 4.8K setting has been visually tested; other source-derived modes remain to be validated visually.
+- **Header correction:** follow the majority sampling of same-size clips when an MLV reports the wrong anamorphic format, including during Gyroflow generation.
+- **Startup fix:** skip Resolve’s empty, unsaved Untitled Project without requiring a save, while preserving confirmation and save checks for projects containing work.
 
 **mlv2dng** mounts Magic Lantern MLV footage as virtual CinemaDNG sequences for DaVinci Resolve, from the macOS menu bar. No conversion, no copy. It drives the (patched) MLVFS engine on FUSE-T.
 
@@ -21,10 +24,13 @@ Source (GPL-3.0-or-later): https://github.com/@REPO@/tree/@TAG@
 
 ### Nouveautés de @VERSION@
 
-- Ajout de **Désqueezer dans Resolve** pour les séquences CinemaDNG anamorphiques montées, via l’API de scripting de Resolve Studio. Les presets personnalisés existants sont conservés ; les fichiers WAV et les aperçus GIF sont ignorés.
-- Création au besoin des presets `mlv2dng 1x3` et `mlv2dng 1x5` dans la bibliothèque locale par défaut, uniquement lorsque Resolve est fermé et après sauvegarde. Les autres bibliothèques et les formats de réglages non pris en charge disposent d’instructions manuelles.
-- Installation du raccourci **Workspace → Scripts → mlv2dng Desqueeze** dans Resolve, avec des messages en français et en anglais.
-- Conservation d’une seule application locale `mlv2dng.app`, avec une version supérieure au dernier build local et au plus haut tag de release connu.
+- **Préparation des projets Resolve :** création ou ouverture d’un projet par tournage monté, import des CinemaDNG et WAV associés, synchronisation audio par timecode. Les projets existants conservent leurs réglages et timelines ; seuls les plans manquants sont ajoutés ensuite.
+- **Format majoritaire :** choix de la résolution désanamorphosée et de la cadence les plus fréquentes ; la plus grande résolution départage les égalités. Resolve gratuit reçoit une timeline UHD Rushs ajustée via Workspace → Scripts → mlv2dng.
+- **Désanamorphose :** application des préréglages Input Sizing adaptés, y compris les variantes de cadrage, en conservant les choix personnalisés. L’installation compatible sauvegarde la bibliothèque locale et s’effectue uniquement lorsque Resolve est fermé.
+- **Synchro SenseFlow A1 intégrée :** choix des objectifs et positions du capteur, génération d’un projet Gyroflow par plan, import de profils optiques calibrés, suivi dans la fenêtre et la barre des menus. Les fichiers existants sont sauvegardés avant régénération explicite.
+- **Rolling shutter par mode :** choix des temps de lecture EOS M Crop Mood Slim selon le format réel, dont 32,128 ms pour le 4,8K et 35,3925 ms pour le 5,2K en 2,39:1. Le 4,8K a été testé visuellement ; les autres modes calculés depuis le code restent à valider sur l’image.
+- **Correction d’en-tête :** utilisation de l’échantillonnage majoritaire des plans de même taille lorsqu’un MLV annonce un mauvais format anamorphique, y compris pour la génération Gyroflow.
+- **Correction au démarrage :** le projet Sans titre vide et non enregistré de Resolve est ignoré sans demander d’enregistrement ; les projets contenant du travail restent protégés par la confirmation et l’enregistrement préalable.
 
 **mlv2dng** monte vos rushs Magic Lantern (MLV) en séquences CinemaDNG virtuelles pour DaVinci Resolve, depuis la barre des menus macOS, sans conversion ni copie. Elle pilote le moteur MLVFS (modifié) sur FUSE-T.
 

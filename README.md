@@ -21,10 +21,29 @@ To build from source, see [Building](#building).
 ## Usage
 
 1. Click the menu-bar icon (or double-click the app to open the mlv2dng window if the icon is hidden behind the notch), then **Choose Folder…**. The folder can be a single shoot or a parent folder containing several shoots.
-2. Click a shoot to mount it. The DNGs appear in `~/MLV Mounts/<shoot>` (**Show DNGs in Finder**). Import them into Resolve from there.
+2. Click a shoot to mount it. The DNGs appear in `~/MLV Mounts/<shoot>` (**Show DNGs in Finder**). Use **Open Resolve** to prepare the project and import the clips, or import them manually from that folder.
 3. Mounted shoots are remounted automatically at launch and when their disk is plugged back in, always at the same path, so Resolve finds its clips again.
 4. **Dual ISO**: use **Smooth Editing** while editing and **Grading Quality** before grading. The switch is applied live; in Resolve, select the clips and right-click → Refresh.
-5. 1x3 anamorphic footage: Resolve ignores the pixel aspect ratio stored in the DNGs and its Clip Attributes offer no 3:1 option, so desqueeze on the Color page → Sizing → Input Sizing → **Width = 3** (Height stays 1). The app reminds you when you mount such a shoot.
+5. Anamorphic footage: **Open Resolve** applies the matching Input Sizing presets when available. **Desqueeze in Resolve** can also apply them to clips already imported. If a preset cannot be installed, the app explains how to save it manually (for 1x3: Color → Sizing → Input Sizing → **Width = 3**, **Height = 1**, with fit adjustments when needed).
+
+### Prepare a Resolve project with one click
+
+**Open Resolve** creates or opens a project named after each mounted shoot and imports its CinemaDNG sequences
+with their matching WAV audio, synchronized by timecode. Sidecar files and GIF previews are excluded.
+
+- New projects use your saved **mlv2dng** project preset. The most common desqueezed resolution and frame rate
+  determine the project format; tied resolution counts use the larger image. Five 4800 × 2008 clips and two
+  5208 × 2178 clips therefore select **4800 × 2008**.
+- Opening the project again imports only missing clips and preserves its existing settings and timelines.
+- In **Resolve Studio**, preparation runs directly from the app. In the **free edition**, use
+  **Workspace → Scripts → mlv2dng** inside Resolve; a new project gets a UHD **Rushs** timeline with fitted clips.
+- If gyro synchronization is still running, choose **Wait** or **Open Anyway**. Progress appears in the window
+  and menu bar.
+- An empty, unsaved **Untitled Project** at startup is skipped without requiring a save. Switching away from
+  another project still asks for confirmation and saves it first.
+
+Anamorphic sizing presets are installed with a backup in the supported default local project library while
+Resolve is closed. Existing custom sizing choices are preserved; other libraries receive manual instructions.
 
 ### Gyro sync (SenseFlow A1)
 
@@ -56,6 +75,23 @@ matches its dimensions; other clips keep the computed profile. The clip's state 
 An existing `.gyroflow` that mlv2dng did not write (e.g. made with NiYien Tool) is kept. **Regenerate** on a
 clip replaces it, as does changing that clip's lens or position; the replaced file is first copied to
 `~/Library/Application Support/mlv2dng/gyroflow-backups/<shoot>/`.
+
+### Rolling shutter matched to the EOS M recording mode
+
+For supported **Canon EOS M Crop Mood Slim** modes, mlv2dng derives the sensor readout time from the recorded
+size, frame rate and sensor sampling instead of applying one value to every clip. Both the lens profile and the
+Gyroflow stabilization settings receive the same value: **32.128 ms for 4.8K 4800 × 2008**, for example, and
+**35.3925 ms for 5.2K 5208 × 2178**.
+
+The lookup covers 1×1, 1×3, 3×3 and full-resolution LV modes. It also follows sampling corrections when an MLV
+header disagrees with the majority of clips of the same size. The values come from the firmware source; the
+4.8K setting has been visually tested, while other modes still need visual validation. See the
+[mode table and calculation details](docs/research/eosm-slim-rolling-shutter.md).
+
+For an unknown format, a valid readout time from an imported lens profile is kept; otherwise rolling shutter
+correction is disabled. Existing projects are preserved: choose **Regenerate** on a clip to apply the new values
+(with a backup), then **Load for current file** in Resolve's Gyroflow plugin. Add the plugin to a Color node
+manually; mlv2dng prepares its project file.
 
 ### Files saved into a clip folder (sidecars)
 

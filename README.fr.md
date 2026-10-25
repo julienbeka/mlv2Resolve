@@ -21,10 +21,31 @@ Pour compiler depuis les sources, voir [Compiler](#compiler).
 ## Utilisation
 
 1. Cliquez sur l'icône de la barre des menus (ou double-cliquez sur l'app pour ouvrir la fenêtre mlv2dng si l'icône est cachée derrière l'encoche), puis **Choisir un dossier…**. Le dossier peut être un tournage ou un dossier parent contenant plusieurs tournages.
-2. Cliquez sur un tournage pour le monter. Les DNG apparaissent dans `~/MLV Mounts/<tournage>` (**Afficher les DNG dans le Finder**). Importez-les dans Resolve depuis ce dossier.
+2. Cliquez sur un tournage pour le monter. Les DNG apparaissent dans `~/MLV Mounts/<tournage>` (**Afficher les DNG dans le Finder**). Utilisez **Ouvrir Resolve** pour préparer le projet et importer les plans, ou importez-les manuellement depuis ce dossier.
 3. Les tournages montés sont remontés automatiquement au lancement et à la reconnexion de leur disque, toujours au même chemin : Resolve retrouve ses plans.
 4. **Dual ISO** : utilisez « Montage fluide » pendant le montage et « Qualité étalonnage » avant l'étalonnage. La bascule s'applique à chaud ; dans Resolve, sélectionnez les plans puis clic droit → Rafraîchir.
-5. Rushs anamorphosés 1x3 : Resolve ignore le rapport de pixel inscrit dans les DNG et ses attributs du clip ne proposent pas de 3:1 ; désanamorphosez dans la page Color → Sizing → Input Sizing → **Width = 3** (Height reste à 1). L'app vous le rappelle au montage d'un tel tournage.
+5. Rushs anamorphosés : **Ouvrir Resolve** applique les préréglages Input Sizing correspondants lorsqu’ils sont disponibles. **Désqueezer dans Resolve** permet aussi de les appliquer à des plans déjà importés. Si un préréglage ne peut pas être installé, l’app explique comment l’enregistrer manuellement (en 1x3 : Color → Sizing → Input Sizing → **Width = 3**, **Height = 1**, avec ajustement au cadre si nécessaire).
+
+### Préparer un projet Resolve en un clic
+
+**Ouvrir Resolve** crée ou ouvre un projet nommé comme chaque tournage monté et importe les séquences
+CinemaDNG avec leur audio WAV associé, synchronisé par timecode. Les fichiers annexes et aperçus GIF sont exclus.
+
+- Les nouveaux projets utilisent votre préréglage de projet **mlv2dng**. La résolution désanamorphosée et la
+  cadence les plus fréquentes déterminent le format ; à égalité de nombre de plans, la plus grande résolution
+  l’emporte. Cinq plans 4800 × 2008 et deux plans 5208 × 2178 donnent donc **4800 × 2008**.
+- Une nouvelle ouverture importe uniquement les plans manquants et conserve les réglages et timelines existants.
+- Avec **Resolve Studio**, la préparation se lance directement depuis l’app. Avec la **version gratuite**,
+  utilisez **Workspace → Scripts → mlv2dng** dans Resolve ; un nouveau projet reçoit une timeline UHD **Rushs**
+  avec cadrage ajusté par plan.
+- Si la synchro gyro est en cours, choisissez **Attendre** ou **Ouvrir quand même**. L’avancement apparaît dans
+  la fenêtre et la barre des menus.
+- Le projet **Sans titre** vide et non enregistré du démarrage est ignoré sans demander d’enregistrement.
+  Quitter un autre projet demande toujours confirmation et l’enregistre avant la bascule.
+
+Les préréglages d’anamorphose sont installés avec sauvegarde dans la bibliothèque locale par défaut compatible,
+pendant que Resolve est fermé. Les cadrages personnalisés sont conservés ; les autres bibliothèques disposent
+d’instructions manuelles.
 
 ### Synchro gyro (SenseFlow A1)
 
@@ -60,6 +81,23 @@ indique lequel a été utilisé (« profil calibré » / « profil calculé »).
 Un `.gyroflow` existant que mlv2dng n'a pas écrit (p. ex. fait avec NiYien Tool) est conservé. **Régénérer** sur
 un plan le remplace, tout comme changer l'objectif ou la position de ce plan ; le fichier remplacé est d'abord
 copié dans `~/Library/Application Support/mlv2dng/gyroflow-backups/<tournage>/`.
+
+### Rolling shutter adapté au mode d’enregistrement de l’EOS M
+
+Pour les modes **Canon EOS M Crop Mood Slim** pris en charge, mlv2dng détermine le temps de lecture du capteur
+à partir de la taille enregistrée, de la cadence et de l’échantillonnage, plutôt que d’utiliser une valeur unique.
+Le profil optique et la stabilisation Gyroflow reçoivent la même valeur : par exemple **32,128 ms pour le 4,8K
+4800 × 2008**, et **35,3925 ms pour le 5,2K 5208 × 2178**.
+
+La détection couvre les modes 1×1, 1×3, 3×3 et LV pleine résolution. Elle suit aussi les corrections d’en-tête
+lorsqu’un MLV annonce un échantillonnage différent de la majorité des plans de même taille. Les valeurs sont
+calculées depuis le code du firmware ; le réglage 4,8K a été testé visuellement, les autres restent à valider
+sur l’image. Consultez le [tableau des modes et le détail du calcul](docs/research/eosm-slim-rolling-shutter.md).
+
+Pour un format inconnu, le temps valide d’un profil optique importé est conservé ; sans valeur valide, la
+correction du rolling shutter est désactivée. Les projets existants sont préservés : utilisez **Régénérer** sur
+un plan pour appliquer les nouvelles valeurs (avec sauvegarde), puis **Load for current file** dans le plugin
+Gyroflow de Resolve. Ajoutez le plugin manuellement sur un nœud Color ; mlv2dng prépare son fichier de projet.
 
 ### Fichiers enregistrés dans un dossier de plan (fichiers annexes)
 

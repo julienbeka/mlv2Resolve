@@ -18,3 +18,4 @@ app/.build/
 app/*.xcodeproj
 app/MLV2DNG/Info.plist
 DerivedData/
+engine/mlvmotion-bin

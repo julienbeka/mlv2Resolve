@@ -23,12 +23,18 @@ RESOLVE_TEST_BIN = ../build/engine/resolve_name_test
 CACHE_TEST_BIN = ../build/engine/dual_iso_cache_test
 SIDECAR_TEST_BIN = ../build/engine/sidecar_test
 
-default: mlvfs-bin
+default: mlvfs-bin mlvmotion-bin
 
-.PHONY: default clean lj92-test resolve-name-test sidecar-test dual-iso-cache-test dual-iso-cache-test-asan
+.PHONY: default mlvmotion clean lj92-test resolve-name-test sidecar-test dual-iso-cache-test dual-iso-cache-test-asan
 
 mlvfs-bin: $(SRC)/main.c $(OBJS) $(HDRS)
 	$(CC) $(CFLAGS) $(SRC)/main.c $(OBJS) $(LIBS) -o mlvfs-bin
+
+# mlvmotion: per-frame image motion extractor (Accelerate + GCD, reuses the LJ92 decoder)
+mlvmotion-bin: mlvmotion/main.c mlvmotion/motion.c mlvmotion/motion.h $(SRC)/lj92.c $(SRC)/lj92.h $(SRC)/mlv.h
+	$(CC) $(ARCH) -O2 -Wall -std=gnu99 -I$(SRC) -Imlvmotion mlvmotion/main.c mlvmotion/motion.c $(SRC)/lj92.c -framework Accelerate -o mlvmotion-bin
+
+mlvmotion: mlvmotion-bin
 
 # coarse header dependency: any header change rebuilds every object (no stale binaries)
 $(SRC)/%.o: $(SRC)/%.c $(HDRS)
@@ -81,4 +87,4 @@ $(CACHE_TEST_ASAN_BIN): $(CACHE_TEST_SRCS) $(HDRS)
 	$(CC) $(CFLAGS) -O1 -g -fsanitize=address,undefined $(CACHE_TEST_SRCS) -pthread -o $@
 
 clean:
-	rm -f mlvfs-bin $(OBJS) $(TEST_BIN) $(RESOLVE_TEST_BIN) $(SIDECAR_TEST_BIN) $(CACHE_TEST_BIN) $(CACHE_TEST_ASAN_BIN)
+	rm -f mlvfs-bin mlvmotion-bin $(OBJS) $(TEST_BIN) $(RESOLVE_TEST_BIN) $(SIDECAR_TEST_BIN) $(CACHE_TEST_BIN) $(CACHE_TEST_ASAN_BIN)

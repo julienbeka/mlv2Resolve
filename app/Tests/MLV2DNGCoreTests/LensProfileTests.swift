@@ -14,7 +14,7 @@ final class LensProfileTests: XCTestCase {
     }
 
     func testComputed25mm1x3() throws {
-        let p = LensProfile.computed(focalMM: 25, lensName: "25mm", timing: timing)
+        let p = try LensProfile.computed(focalMM: 25, lensName: "25mm", timing: timing)
         let dim = try XCTUnwrap(p["calib_dimension"] as? [String: Any])
         XCTAssertEqual(dim["w"] as? Int, 4800)
         XCTAssertEqual(dim["h"] as? Int, 2008)
@@ -33,6 +33,41 @@ final class LensProfileTests: XCTestCase {
         XCTAssertEqual(p["name"] as? String, "mlv2dng 25mm 4800x2008 1x3")
         XCTAssertEqual(p["camera_brand"] as? String, "Canon")
         XCTAssertNoThrow(try JSONSerialization.data(withJSONObject: p))
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = TimeZone(identifier: "UTC"); f.dateFormat = "yyyy-MM-dd"
+        XCTAssertEqual(p["date"] as? String, f.string(from: Date()))
+    }
+
+    func testComputedRejectsBadFocal() {
+        for bad in [0.0, -5, .nan, .infinity] {
+            XCTAssertThrowsError(try LensProfile.computed(focalMM: bad, timing: timing)) {
+                XCTAssertEqual($0 as? LensProfileError, .invalidFocal)
+            }
+        }
+    }
+
+    func testComputedSqueeze1() throws {
+        let t = ClipTiming(start: Date(), frames: 10, fps: 24, width: 1920, height: 1080, squeeze: 1)
+        let p = try LensProfile.computed(focalMM: 25, timing: t)
+        XCTAssertEqual((p["calib_dimension"] as? [String: Any])?["w"] as? Int, 1920)
+        XCTAssertEqual(p["input_horizontal_stretch"] as? Int, 1)
+        XCTAssertEqual(p["name"] as? String, "mlv2dng 25 mm 1920x1080 1x1")
+    }
+
+    func testCalibratedMissingStretchDefaultsTo1() throws {
+        let t1 = ClipTiming(start: Date(), frames: 10, fps: 24, width: 1920, height: 1080, squeeze: 1)
+        let ok = try writeJSON(["calib_dimension": ["w": 1920, "h": 1080]])
+        XCTAssertNoThrow(try LensProfile.calibrated(ok, for: t1))
+        XCTAssertThrowsError(try LensProfile.calibrated(ok, for: timing))
+    }
+
+    func testLensDecodesOlderJSON() throws {
+        let id = UUID()
+        let json = "{\"id\":\"\(id.uuidString)\",\"name\":\"Old\",\"focalMM\":18}"
+        let l = try JSONDecoder().decode(Lens.self, from: Data(json.utf8))
+        XCTAssertEqual(l.id, id)
+        XCTAssertEqual(l.calibratedProfiles, [])
+        XCTAssertEqual(l.focalMM, 18)
     }
 
     func testCalibratedAccepted() throws {
@@ -59,7 +94,9 @@ final class LensProfileTests: XCTestCase {
         XCTAssertThrowsError(try LensProfile.calibrated(url, for: timing)) {
             XCTAssertEqual($0 as? LensProfileError, .invalid)
         }
-        XCTAssertThrowsError(try LensProfile.calibrated(url.deletingLastPathComponent().appendingPathComponent("nope.json"), for: timing))
+        XCTAssertThrowsError(try LensProfile.calibrated(url.deletingLastPathComponent().appendingPathComponent("nope.json"), for: timing)) {
+            XCTAssertEqual($0 as? LensProfileError, .unreadable)
+        }
     }
 
     func testLensCodable() throws {
@@ -81,7 +118,7 @@ final class LensProfileTests: XCTestCase {
         // mlvmotion units: 2x2 Bayer bin then 2x decimation = 4 raw px per unit in both axes; dx is
         // already multiplied by the squeeze, so dx units are desqueezed full-res px / 4 as well.
         let measured = abs(res.map[yaw][0]) * 4
-        let f = LensProfile.computed(focalMM: 25, timing: timing)
+        let f = try LensProfile.computed(focalMM: 25, timing: timing)
         let fish = try XCTUnwrap(f["fisheye_params"] as? [String: Any])
         let expected = try XCTUnwrap((fish["camera_matrix"] as? [[Double]])?[0][0])
         print("FOCAL axis=\(yaw) measured=\(measured) expected=\(expected) ratio=\(measured / expected)")

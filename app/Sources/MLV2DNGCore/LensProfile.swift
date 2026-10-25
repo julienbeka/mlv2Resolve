@@ -3,6 +3,8 @@ import Foundation
 
 public enum LensProfileError: Error, Equatable {
     case invalid
+    case unreadable
+    case invalidFocal
     case dimensionMismatch(expected: String, found: String)
 }
 
@@ -13,7 +15,8 @@ public enum LensProfile {
 
     /// Pinhole profile (no distortion) computed from the declared focal length. Dimensions are those of the
     /// desqueezed image (width × squeeze); the focal in pixels is focal / sensor pitch, independent of the crop.
-    public static func computed(focalMM: Double, lensName: String = "", timing: ClipTiming) -> [String: Any] {
+    public static func computed(focalMM: Double, lensName: String = "", timing: ClipTiming) throws -> [String: Any] {
+        guard focalMM.isFinite, focalMM > 0 else { throw LensProfileError.invalidFocal }
         let w = timing.width * timing.squeeze, h = timing.height
         let f = focalMM / eosMPitchMM
         let dim: [String: Any] = ["w": w, "h": h]
@@ -29,7 +32,7 @@ public enum LensProfile {
             "compatible_settings": [Any](),
             "crop": NSNull(),
             "crop_factor": NSNull(),
-            "date": "2026-10-25",
+            "date": today(),
             "digital_lens": NSNull(),
             "digital_lens_params": NSNull(),
             "distortion_model": NSNull(),
@@ -61,8 +64,8 @@ public enum LensProfile {
 
     /// Reads a user-supplied Gyroflow lens profile; accepted only if it was calibrated for the clip's geometry.
     public static func calibrated(_ url: URL, for timing: ClipTiming) throws -> [String: Any] {
-        guard let data = try? Data(contentsOf: url),
-              var obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+        guard let data = try? Data(contentsOf: url) else { throw LensProfileError.unreadable }
+        guard var obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let dim = obj["calib_dimension"] as? [String: Any],
               let w = (dim["w"] as? NSNumber)?.doubleValue, let h = (dim["h"] as? NSNumber)?.doubleValue,
               w > 0, h > 0 else { throw LensProfileError.invalid }
@@ -77,5 +80,13 @@ public enum LensProfile {
         }
         obj["sync_settings"] = ["do_autosync": false]
         return obj
+    }
+
+    private static func today() -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: Date())
     }
 }

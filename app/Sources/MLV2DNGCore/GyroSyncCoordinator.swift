@@ -23,6 +23,7 @@ public enum ClipGyroState: Equatable, Sendable {
 /// - `gyroLenses`: JSON `[Lens]`.
 /// - `gyroShootLens` / `gyroClipLens`: `[path: lens UUID string]` (shoot folder / MLV path).
 /// - `gyroShootPosition` / `gyroClipPosition`: `[path: MountingPosition.rawValue]`.
+/// - `gyroDefaultPosition`: `MountingPosition.rawValue`, for shoots without their own position (default `.top`).
 /// - `gyroWritten`: `[String]`, MLV paths whose `.gyroflow` mlv2dng wrote.
 /// - `gyroWrittenMeta`: `[MLV path: ["r2": Double, "log": String, "offsetMs": Double]]`, to restore `.synced`.
 ///
@@ -42,6 +43,7 @@ public final class GyroSyncCoordinator: ObservableObject {
         static let clipLens = "gyroClipLens"
         static let shootPosition = "gyroShootPosition"
         static let clipPosition = "gyroClipPosition"
+        static let defaultPosition = "gyroDefaultPosition"
         static let written = "gyroWritten"
         static let meta = "gyroWrittenMeta"
     }
@@ -102,6 +104,21 @@ public final class GyroSyncCoordinator: ObservableObject {
 
     // MARK: Settings
 
+    /// Key of a shoot in the settings and `states` APIs (standardized folder path).
+    public static func key(of shoot: Shoot) -> String { AppState.key(shoot.folder) }
+    /// Key of a clip in the settings and `states` APIs (standardized path of its first MLV file).
+    public static func key(of clip: Clip) -> String? { clip.files.first.map(AppState.key) }
+
+    /// Position of the shoots that have none of their own. Changing it only affects clips synced afterwards
+    /// (files already written are kept).
+    public var defaultPosition: MountingPosition {
+        get { defaults.string(forKey: Key.defaultPosition).flatMap(MountingPosition.init(rawValue:)) ?? .top }
+        set {
+            objectWillChange.send()
+            defaults.set(newValue.rawValue, forKey: Key.defaultPosition)
+        }
+    }
+
     public func defaultLens(forShoot shoot: String) -> Lens? { lens(id: dict(Key.shootLens)[shoot]) }
 
     /// Regenerates the shoot's clips that use the default lens and whose file mlv2dng wrote; `.existing` stay.
@@ -109,6 +126,9 @@ public final class GyroSyncCoordinator: ObservableObject {
         setEntry(Key.shootLens, shoot, lens?.id.uuidString)
         shootDefaultsChanged(shoot, overridden: { self.dict(Key.clipLens)[$0] != nil })
     }
+
+    /// The clip's own lens (nil: it uses the shoot's default).
+    public func ownLens(forClip clip: String) -> Lens? { lens(id: dict(Key.clipLens)[clip]) }
 
     public func lens(forClip clip: String) -> Lens? {
         if let own = lens(id: dict(Key.clipLens)[clip]) { return own }
@@ -122,7 +142,7 @@ public final class GyroSyncCoordinator: ObservableObject {
     }
 
     public func position(forShoot shoot: String) -> MountingPosition {
-        dict(Key.shootPosition)[shoot].flatMap(MountingPosition.init(rawValue:)) ?? .top
+        dict(Key.shootPosition)[shoot].flatMap(MountingPosition.init(rawValue:)) ?? defaultPosition
     }
 
     public func setPosition(_ p: MountingPosition, forShoot shoot: String) {
@@ -130,9 +150,14 @@ public final class GyroSyncCoordinator: ObservableObject {
         shootDefaultsChanged(shoot, overridden: { self.dict(Key.clipPosition)[$0] != nil })
     }
 
+    /// The clip's own position (nil: it uses the shoot's).
+    public func ownPosition(forClip clip: String) -> MountingPosition? {
+        dict(Key.clipPosition)[clip].flatMap(MountingPosition.init(rawValue:))
+    }
+
     public func position(forClip clip: String) -> MountingPosition {
-        if let p = dict(Key.clipPosition)[clip].flatMap(MountingPosition.init(rawValue:)) { return p }
-        return shootKey(ofClip: clip).map(position(forShoot:)) ?? .top
+        if let p = ownPosition(forClip: clip) { return p }
+        return shootKey(ofClip: clip).map(position(forShoot:)) ?? defaultPosition
     }
 
     /// nil: back to the shoot's position. Regenerates that clip.

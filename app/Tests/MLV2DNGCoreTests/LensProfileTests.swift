@@ -87,6 +87,20 @@ final class LensProfileTests: XCTestCase {
         XCTAssertThrowsError(try LensProfile.calibrated(wrongStretch, for: timing))
     }
 
+    func testDimensionsOfImportedProfile() throws {
+        let url = try writeJSON(["calib_dimension": ["w": 5760, "h": 2409], "input_horizontal_stretch": 3])
+        let d = try LensProfile.dimensions(of: url)
+        XCTAssertEqual(d.width, 5760); XCTAssertEqual(d.height, 2409); XCTAssertEqual(d.stretch, 3)
+        let noStretch = try writeJSON(["calib_dimension": ["w": 1920, "h": 1080]])
+        XCTAssertEqual(try LensProfile.dimensions(of: noStretch).stretch, 1)
+        let noDim = try writeJSON(["name": "x"])
+        XCTAssertThrowsError(try LensProfile.dimensions(of: noDim)) { XCTAssertEqual($0 as? LensProfileError, .invalid) }
+        let zero = try writeJSON(["calib_dimension": ["w": 0, "h": 1080]])
+        XCTAssertThrowsError(try LensProfile.dimensions(of: zero)) { XCTAssertEqual($0 as? LensProfileError, .invalid) }
+        let missing = url.deletingLastPathComponent().appendingPathComponent("nope-\(UUID()).json")
+        XCTAssertThrowsError(try LensProfile.dimensions(of: missing)) { XCTAssertEqual($0 as? LensProfileError, .unreadable) }
+    }
+
     func testCalibratedInvalid() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("bad-\(UUID()).json")
         try Data("not json".utf8).write(to: url)

@@ -82,6 +82,17 @@ public enum LensProfile {
         return obj
     }
 
+    /// Calibration dimensions and horizontal stretch of a Gyroflow lens profile, to check a file on import.
+    public static func dimensions(of url: URL) throws -> (width: Int, height: Int, stretch: Double) {
+        guard let data = try? Data(contentsOf: url) else { throw LensProfileError.unreadable }
+        guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let dim = obj["calib_dimension"] as? [String: Any],
+              let w = (dim["w"] as? NSNumber)?.doubleValue, let h = (dim["h"] as? NSNumber)?.doubleValue,
+              w > 0, h > 0, w.isFinite, h.isFinite else { throw LensProfileError.invalid }
+        let stretch = (obj["input_horizontal_stretch"] as? NSNumber)?.doubleValue ?? 1
+        return (Int(w.rounded()), Int(h.rounded()), stretch)
+    }
+
     private static func today() -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")

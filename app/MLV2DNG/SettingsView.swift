@@ -86,6 +86,9 @@ struct SettingsView: View {
                 Text(verbatim: "English").tag(AppLanguage.en)
                 Text(verbatim: "Français").tag(AppLanguage.fr)
             }
+            if let gyro = state.gyro {
+                GyroSettingsSections(gyro: gyro)
+            }
             DisclosureGroup("Advanced") {
                 Toggle("Fix Dead Pixels", isOn: $state.fixBadPixels)
                 Toggle("Fix Focus Pixels", isOn: $state.fixFocusPixels)
@@ -104,7 +107,7 @@ struct SettingsView: View {
         }
         .onAppear { launchAtLogin = LaunchAtLogin.isEnabled; language = LanguageSwitch.current() }
         .formStyle(.grouped)
-        .frame(width: 440)
+        .frame(width: 480)
         .fixedSize(horizontal: false, vertical: true)
     }
 }

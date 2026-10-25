@@ -43,6 +43,9 @@ struct MainWindowView: View {
                     list
                 }
             }
+            if let gyro = state.gyro {
+                GyroShootsSection(state: state, gyro: gyro)
+            }
             Picker("Dual ISO", selection: Binding(get: { state.mode }, set: { m in Task { await state.setMode(m) } })) {
                 Text("Smooth Editing").tag(DualISOMode.montageFluide)
                 Text("Grading Quality").tag(DualISOMode.qualiteEtalonnage)
@@ -70,7 +73,7 @@ struct MainWindowView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(20)
-        .frame(width: 460)
+        .frame(width: 580)
     }
 
     private func banner(_ text: String, button: LocalizedStringKey, tint: Color, icon: String, clear: @escaping () -> Void) -> some View {

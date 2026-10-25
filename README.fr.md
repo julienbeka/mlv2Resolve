@@ -26,6 +26,36 @@ Pour compiler depuis les sources, voir [Compiler](#compiler).
 4. **Dual ISO** : utilisez « Montage fluide » pendant le montage et « Qualité étalonnage » avant l'étalonnage. La bascule s'applique à chaud ; dans Resolve, sélectionnez les plans puis clic droit → Rafraîchir.
 5. Rushs anamorphosés 1x3 : Resolve ignore le rapport de pixel inscrit dans les DNG et ses attributs du clip ne proposent pas de 3:1 ; désanamorphosez dans la page Color → Sizing → Input Sizing → **Width = 3** (Height reste à 1). L'app vous le rappelle au montage d'un tel tournage.
 
+### Synchro gyro (SenseFlow A1)
+
+mlv2dng synchronise tout seul le gyro d'un SenseFlow A1 avec vos plans et écrit un projet Gyroflow par plan, pour
+que le plugin Gyroflow de Resolve stabilise les DNG. Plus besoin de NiYien Tool ni de clips de référence.
+
+1. Copiez les logs de l'A1 (`*_mix.bin`) n'importe où dans le dossier choisi avec **Choisir un dossier…** (le
+   dossier du tournage, un sous-dossier, ou un dossier parent commun à plusieurs tournages). Les logs et les MLV
+   ne sont jamais modifiés.
+2. Déclarez vos objectifs une fois dans **Réglages… → Objectifs** : un nom et la vraie focale en mm (celle que
+   Magic Lantern écrit dans le MLV n'est pas fiable). mlv2dng calcule un profil sans distorsion à partir de la
+   focale.
+3. Dans la fenêtre mlv2dng, chaque tournage monté a un **Objectif** par défaut et une **Position du capteur**
+   (l'emplacement de l'A1 sur la caméra ; **Dessus** par défaut, modifiable dans **Réglages… → Synchro gyro**). Le
+   menu de chaque plan permet de choisir un autre objectif ou une autre position pour ce plan seulement.
+4. Les plans sont synchronisés en arrière-plan, un à la fois par tournage. Chaque plan affiche son état :
+   **Synchronisé (R² 0,78)** (le R² indique à quel point le mouvement du plan correspond au gyro, 1 = parfait),
+   **Aucun log ne couvre ce plan**, **Mouvement de caméra insuffisant**, **Correspondance incertaine** (rien
+   n'est écrit plutôt qu'une synchro douteuse), **Synchronisation…**, **.gyroflow existant**.
+5. Le `.gyroflow` est enregistré à côté du `.MLV` (nommé comme celui de NiYien,
+   `<dossier du plan>_000000.gyroflow`) et apparaît dans le dossier du plan du montage. Dans Resolve : plugin
+   Gyroflow → **Load for current file**.
+
+Les objectifs courts (p. ex. 12 mm) ont trop de distorsion pour un profil calculé : calibrez l'objectif dans
+Gyroflow, puis importez son `.json` dans **Réglages… → Objectifs → Modifier… → Importer un profil calibré…**. Un
+profil calibré sert aux plans dont le format correspond à ses dimensions ; les autres gardent le profil calculé.
+
+Un `.gyroflow` existant que mlv2dng n'a pas écrit (p. ex. fait avec NiYien Tool) est conservé. **Régénérer** sur
+un plan le remplace, tout comme changer l'objectif ou la position de ce plan ; le fichier remplacé est d'abord
+copié dans `~/Library/Application Support/mlv2dng/gyroflow-backups/<tournage>/`.
+
 ### Fichiers enregistrés dans un dossier de plan (fichiers annexes)
 
 Certains outils ne permettent pas de choisir leur dossier de sortie et enregistrent à côté des images lues : NiYien

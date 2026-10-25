@@ -223,6 +223,39 @@ final class GyroSyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(src["imu_orientation"] as? String, pos.imuOrientation)
     }
 
+    func testDefaultPositionAndOwnSettings() async throws {
+        let (clip, key, _) = try makeClip("A001", atSecond: 10)
+        let c = coordinator()
+        let shootKey = AppState.key(shootDir)
+        XCTAssertEqual(GyroSyncCoordinator.key(of: shoot([clip])), shootKey)
+        XCTAssertEqual(GyroSyncCoordinator.key(of: clip), key)
+        XCTAssertEqual(c.defaultPosition, .top)
+        c.defaultPosition = .left
+        XCTAssertEqual(c.position(forShoot: shootKey), .left)
+        XCTAssertEqual(c.position(forClip: key), .left)
+        XCTAssertNil(c.ownPosition(forClip: key))
+        c.setPosition(.back, forShoot: shootKey)
+        XCTAssertEqual(c.position(forShoot: shootKey), .back)
+
+        let lens = withLens(c)
+        XCTAssertNil(c.ownLens(forClip: key))
+        XCTAssertEqual(c.defaultLens(forShoot: shootKey), lens)  // lens(forClip:) needs the shoot mounted
+        let other = Lens(name: "Jupiter", focalMM: 85)
+        c.lenses.append(other)
+        c.setLens(other, forClip: key)
+        c.setPosition(.front, forClip: key)
+        XCTAssertEqual(c.ownLens(forClip: key), other)
+        XCTAssertEqual(c.ownPosition(forClip: key), .front)
+        c.setLens(nil, forClip: key)
+        c.setPosition(nil, forClip: key)
+        XCTAssertNil(c.ownLens(forClip: key))
+        XCTAssertNil(c.ownPosition(forClip: key))
+
+        // Persisted.
+        let again = coordinator()
+        XCTAssertEqual(again.defaultPosition, .left)
+    }
+
     func testNoLensChosenNoFile() async throws {
         let (clip, key, dir) = try makeClip("A001", atSecond: 10)
         try makeLog("t1", atSecond: 0)

@@ -26,6 +26,33 @@ To build from source, see [Building](#building).
 4. **Dual ISO**: use **Smooth Editing** while editing and **Grading Quality** before grading. The switch is applied live; in Resolve, select the clips and right-click → Refresh.
 5. 1x3 anamorphic footage: Resolve ignores the pixel aspect ratio stored in the DNGs and its Clip Attributes offer no 3:1 option, so desqueeze on the Color page → Sizing → Input Sizing → **Width = 3** (Height stays 1). The app reminds you when you mount such a shoot.
 
+### Gyro sync (SenseFlow A1)
+
+mlv2dng syncs the gyro of a SenseFlow A1 with your clips by itself and writes a Gyroflow project for each clip, so
+Resolve's Gyroflow plugin can stabilize the DNGs. No NiYien Tool and no reference clips are needed.
+
+1. Copy the A1 logs (`*_mix.bin`) anywhere in the folder chosen with **Choose Folder…** (the shoot folder, a
+   subfolder, or a parent folder shared by several shoots). Logs and MLV files are never modified.
+2. Declare your lenses once in **Settings… → Lenses**: a name and the real focal length in mm (the one Magic
+   Lantern writes in the MLV is not reliable). mlv2dng computes a distortion-free profile from the focal length.
+3. In the mlv2dng window, each mounted shoot gets a default **Lens** and a **Sensor position** (where the A1 sits
+   on the camera; **Top** by default, changeable in **Settings… → Gyro Sync**). Each clip's menu can pick another
+   lens or position for that clip only.
+4. Clips are synced in the background, one at a time per shoot. Each clip shows its state: **Synced (R² 0.78)**
+   (R² = how well the clip's motion matches the gyro, 1 = perfect), **No log covers this clip**, **Not enough
+   camera motion**, **Uncertain match** (nothing is written rather than a doubtful sync), **Syncing…**,
+   **Existing .gyroflow**.
+5. The `.gyroflow` is saved next to the `.MLV` (named like NiYien's, `<clip folder>_000000.gyroflow`) and appears
+   in the clip's folder of the mount. In Resolve: Gyroflow plugin → **Load for current file**.
+
+Short lenses (e.g. 12 mm) have too much distortion for a computed profile: calibrate the lens in Gyroflow, then
+import its `.json` in **Settings… → Lenses → Edit… → Import Calibrated Profile…**. A calibrated profile is used
+for the clips whose format matches its dimensions; other clips keep the computed profile.
+
+An existing `.gyroflow` that mlv2dng did not write (e.g. made with NiYien Tool) is kept. **Regenerate** on a
+clip replaces it, as does changing that clip's lens or position; the replaced file is first copied to
+`~/Library/Application Support/mlv2dng/gyroflow-backups/<shoot>/`.
+
 ### Files saved into a clip folder (sidecars)
 
 Some tools cannot choose their output folder and save next to the footage they read, e.g. NiYien Tool writes its

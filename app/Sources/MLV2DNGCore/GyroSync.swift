@@ -22,6 +22,10 @@ public struct SyncResult: Sendable, Equatable {
     public let secondPeak: Double
     /// Gyro (rad) to image (px) map, 3 rows (gx gy gz) × 2 columns (dx dy).
     public let map: [[Double]]
+
+    public init(lagMs: Int, r2: Double, secondPeak: Double, map: [[Double]]) {
+        self.lagMs = lagMs; self.r2 = r2; self.secondPeak = secondPeak; self.map = map
+    }
 }
 
 public enum SyncRefusal: Error, Equatable {
@@ -40,6 +44,10 @@ public enum GyroSync {
     public static let minCoveredSeconds = 8.0
     /// ...or at least this fraction of the clip duration.
     public static let minCoveredFraction = 0.8
+    /// Absolute floor: whatever the clip length, less covered time than this is never scored.
+    public static let minCoveredSecondsFloor = 3.0
+    /// The second peak is always measured at least this far (ms) either side of the winner.
+    static let secondPeakWindowMs = 3000
     static let minFrames = 8
     static let coarseStepMs = 10
     static let fineRadiusMs = 15
@@ -48,7 +56,11 @@ public enum GyroSync {
 
     public static func solve(motion: [MotionSample], fps: Double, gyro: [SIMD3<Float>],
                              rateHz: Double, searchMs: ClosedRange<Int>) throws -> SyncResult {
-        guard motion.count >= minFrames, fps > 0, rateHz > 0 else { throw SyncRefusal.notEnoughMotion }
+        guard fps.isFinite, fps > 0, rateHz.isFinite, rateHz > 0, rateHz <= 1e6 else {
+            throw SyncRefusal.noOverlap
+        }
+        let motion = motion.filter { $0.dx.isFinite && $0.dy.isFinite && $0.peak.isFinite }
+        guard motion.count >= minFrames else { throw SyncRefusal.notEnoughMotion }
 
         // Drop the least reliable matches (lowest 10 % by peak).
         let sortedPeaks = motion.map(\.peak).sorted()
@@ -66,7 +78,8 @@ public enum GyroSync {
         var angle = [SIMD3<Double>](repeating: .zero, count: gyro.count + 1)
         var acc = SIMD3<Double>.zero
         for i in 0..<gyro.count {
-            acc += SIMD3<Double>(gyro[i]) / rateHz
+            let g = SIMD3<Double>(gyro[i])
+            if g.x.isFinite && g.y.isFinite && g.z.isFinite { acc += g / rateHz }  // bad sample = no rotation
             angle[i + 1] = acc
         }
         let samplesPerMs = rateHz / 1000
@@ -83,6 +96,9 @@ public enum GyroSync {
         let logCount = gyro.count
         let clipSeconds = Double(motion.count) / fps
 
+        var sawDegenerate = false
+        /// R² and map at `lagMs`, or nil if the lag is not scorable (not enough of the clip inside the log,
+        /// or a degenerate fit).
         func score(_ lagMs: Int) -> (r2: Double, map: [[Double]])? {
             let off = Int((Double(lagMs) * samplesPerMs).rounded())
             // Sums over covered frames of x = [gx gy gz], y = [dx dy].
@@ -110,8 +126,10 @@ public enum GyroSync {
                 }
             }
             let fraction = Double(m) / Double(count)
+            // Approximation: the covered fraction of the kept frames stands in for the covered fraction of time.
             let covered = fraction * clipSeconds
-            guard m >= minFrames, covered >= minCoveredSeconds || fraction >= minCoveredFraction else { return nil }
+            guard m >= minFrames, covered >= minCoveredSecondsFloor,
+                  covered >= minCoveredSeconds || fraction >= minCoveredFraction else { return nil }
             let mf = Double(m)
             // Centered normal equations (intercept eliminated): C b = c.
             let mean = sx / mf
@@ -125,7 +143,7 @@ public enum GyroSync {
             var c = [[Double]](repeating: [0, 0], count: 3)
             for r in 0..<3 { for j in 0..<2 { c[r][j] = cross[r][j] - mf * mv[r] * ymv[j] } }
             let sst = (syy.x - mf * ym.x * ym.x) + (syy.y - mf * ym.y * ym.y)
-            guard sst > 1e-12, let b = solve3(C, c) else { return nil }
+            guard sst > 1e-12, let b = solve3(C, c) else { sawDegenerate = true; return nil }
             var explained = 0.0
             for r in 0..<3 { for j in 0..<2 { explained += b[r][j] * c[r][j] }}
             return (min(1, max(0, explained / sst)), b)
@@ -138,16 +156,27 @@ public enum GyroSync {
             if let s = score(lag) { coarse.append((s.r2, lag)) }
             lag += coarseStepMs
         }
-        guard let top = coarse.max(by: { $0.r2 < $1.r2 }) else { throw SyncRefusal.noOverlap }
+        guard let top = coarse.max(by: { $0.r2 < $1.r2 }) else {
+            throw sawDegenerate ? SyncRefusal.notEnoughMotion : SyncRefusal.noOverlap
+        }
 
         // Fine pass around the coarse winner.
         var best = (r2: -1.0, lag: top.lag, map: [[Double]]())
         for l in max(searchMs.lowerBound, top.lag - fineRadiusMs)...min(searchMs.upperBound, top.lag + fineRadiusMs) {
             if let s = score(l), s.r2 > best.r2 { best = (s.r2, l, s.map) }
         }
-        guard best.r2 >= 0 else { throw SyncRefusal.noOverlap }
 
-        let second = coarse.filter { abs($0.lag - best.lag) > secondPeakDistanceMs }.map(\.r2).max() ?? 0
+        // Second peak: best R² more than 500 ms from the winner, over the search range plus at least
+        // best ± 3 s (even outside searchMs). No scorable competitor means no contrast: refuse.
+        var second = coarse.filter { abs($0.lag - best.lag) > secondPeakDistanceMs }.map(\.r2).max()
+        var extra = best.lag - secondPeakWindowMs
+        while extra <= best.lag + secondPeakWindowMs {
+            if abs(extra - best.lag) > secondPeakDistanceMs, let s = score(extra) {
+                second = max(second ?? 0, s.r2)
+            }
+            extra += coarseStepMs
+        }
+        guard let second else { throw SyncRefusal.ambiguous(r2: best.r2, second: best.r2) }
         guard best.r2 >= minR2, best.r2 - second >= minMargin else {
             throw SyncRefusal.ambiguous(r2: best.r2, second: second)
         }
@@ -156,8 +185,9 @@ public enum GyroSync {
 
     /// Solves C X = B for a symmetric 3×3 C and 3×2 B (Gaussian elimination, partial pivoting).
     private static func solve3(_ C: [[Double]], _ B: [[Double]]) -> [[Double]]? {
-        var a = (0..<3).map { C[$0] + B[$0] }
-        let scale = max(1e-300, (0..<3).map { abs(C[$0][$0]) }.max()!)
+        var a: [[Double]] = []
+        for r in 0..<3 { a.append(C[r] + B[r]) }
+        let scale: Double = max(1e-300, abs(C[0][0]), abs(C[1][1]), abs(C[2][2]))
         for col in 0..<3 {
             var p = col
             for r in col + 1..<3 where abs(a[r][col]) > abs(a[p][col]) { p = r }
@@ -168,6 +198,12 @@ public enum GyroSync {
                 if f != 0 { for k in col..<5 { a[r][k] -= f * a[col][k] } }
             }
         }
-        return (0..<3).map { [a[$0][3] / a[$0][$0], a[$0][4] / a[$0][$0]] }
+        var x: [[Double]] = []
+        for r in 0..<3 {
+            let d: Double = a[r][r]
+            let row: [Double] = [a[r][3] / d, a[r][4] / d]
+            x.append(row)
+        }
+        return x
     }
 }

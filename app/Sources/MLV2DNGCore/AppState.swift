@@ -60,6 +60,9 @@ public final class AppState: ObservableObject {
     /// Consecutive crashes per shoot key, with the time of the last one.
     private var crashes: [String: (count: Int, last: ContinuousClock.Instant)] = [:]
     private var restartTasks: [String: Task<Void, Never>] = [:]
+    /// Per folder key: clips whose anamorphic header was corrected, and the shoots already told about it.
+    private var squeezeFixCache: [String: [SqueezeFix.Fix]] = [:]
+    private var fixInfoShown: Set<String> = []
     /// Per folder key: squeeze factor (nil = not anamorphic) and last mount point.
     private var squeezeFactors: [String: Int?] = [:]
     private var mountPoints: [String: URL] = [:]
@@ -319,6 +322,7 @@ public final class AppState: ObservableObject {
             mounted.insert(Self.key(shoot.folder))
             startGyro(shoot, mountPoint: url)
             noteSqueeze(shoot)
+            noteSqueezeFixes(shoot)
             noteCollision(shoot, mountedAt: url)
             return true
         } catch {
@@ -347,11 +351,29 @@ public final class AppState: ObservableObject {
         info = hint
     }
 
-    /// Squeeze factor of a shoot, read once from its first MLV header.
+    /// Once per shoot: the clips whose header disagrees with the shoot majority were corrected (the engine
+    /// serves them with the majority's sampling, see `SqueezeFix`).
+    private func noteSqueezeFixes(_ shoot: Shoot) {
+        let k = Self.key(shoot.folder)
+        guard !fixInfoShown.contains(k), let notice = SqueezeFix.message(squeezeFixes(shoot)) else { return }
+        fixInfoShown.insert(k)
+        info = info.map { $0 + "\n\n" + notice } ?? notice
+    }
+
+    /// Header corrections of a shoot, read once from its MLV headers.
+    private func squeezeFixes(_ shoot: Shoot) -> [SqueezeFix.Fix] {
+        let k = Self.key(shoot.folder)
+        if let cached = squeezeFixCache[k] { return cached }
+        let fixes = SqueezeFix.fixes(for: shoot)
+        squeezeFixCache[k] = fixes
+        return fixes
+    }
+
+    /// Squeeze factor of a shoot (the majority of its clips, headers corrected), read once from its MLV headers.
     private func squeezeFactor(_ shoot: Shoot) -> Int? {
         let k = Self.key(shoot.folder)
         if let cached = squeezeFactors[k] { return cached }
-        let n = shoot.clips.first?.files.first.flatMap(MLVHeader.horizontalSqueeze(of:))
+        let n = SqueezeFix.shootSqueeze(shoot, fixes: squeezeFixes(shoot))
         squeezeFactors[k] = .some(n)
         return n
     }

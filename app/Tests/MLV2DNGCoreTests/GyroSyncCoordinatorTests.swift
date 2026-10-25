@@ -56,7 +56,8 @@ final class GyroSyncCoordinatorTests: XCTestCase {
 
     /// A header-only MLV at 25 fps, 1600x900, starting at `day` + `atSecond`, with its mount clip folder.
     @discardableResult
-    private func makeClip(_ name: String, atSecond s: Int, frames: Int = 250) throws -> (clip: Clip, key: String, dir: String) {
+    private func makeClip(_ name: String, atSecond s: Int, frames: Int = 250,
+                          sampling: (UInt8, UInt8, UInt8, UInt8)? = nil) throws -> (clip: Clip, key: String, dir: String) {
         var mlvi = hdr("MLVI", size: 52, ts: 0)
         mlvi += Data(count: 36); mlvi.replaceSubrange(44..<48, with: le(25, 4)); mlvi.replaceSubrange(48..<52, with: le(1, 4))
         let rawi = hdr("RAWI", size: 64, ts: 0) + Data(le(1600, 2) + le(900, 2)) + Data(count: 44)
@@ -66,6 +67,9 @@ final class GyroSyncCoordinatorTests: XCTestCase {
                    + le(UInt64(day.day!), 2) + le(UInt64(day.month! - 1), 2) + le(UInt64(day.year! - 1900), 2))
             + Data(count: 16)
         var d = mlvi + rawi + rtci
+        if let p = sampling {  // RAWC: binning_x, skipping_x, binning_y, skipping_y after res_x/res_y/crop/reserved
+            d += hdr("RAWC", size: 32, ts: 0) + Data(count: 8) + Data([p.0, p.1, p.2, p.3]) + Data(count: 4)
+        }
         for _ in 0..<frames { d += hdr("VIDF", size: 32, ts: 1_000_000) + Data(count: 16) }
         let url = shootDir.appendingPathComponent("\(name).MLV")
         try d.write(to: url)
@@ -149,6 +153,24 @@ final class GyroSyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(c2.states[key], .synced(r2: 0.9, log: "t1_mix.bin", offsetMs: -10_000))
         let calls = await gate.calls
         XCTAssertEqual(calls, 0)
+    }
+
+    /// A clip whose header says 1x1 among 1x3 clips of the same size gets the 1x3 Gyroflow project.
+    func testCorrectedSqueezeReachesGyroflow() async throws {
+        let a = try makeClip("A001", atSecond: 10, frames: 50, sampling: (1, 2, 1, 0))
+        let b = try makeClip("A002", atSecond: 15, frames: 50, sampling: (1, 0, 1, 0))  // wrong header
+        let d = try makeClip("A003", atSecond: 20, frames: 50, sampling: (1, 2, 1, 0))
+        try makeLog("t1", atSecond: 0)
+        let c = coordinator()
+        _ = withLens(c)
+        await c.shootMounted(shoot([a.clip, b.clip, d.clip]), mountPoint: mountPoint, chosenFolder: chosen)
+        for clip in [a, b, d] {
+            let p = try json(gyroflow(clip.dir))
+            let out = try XCTUnwrap(p["output"] as? [String: Any])
+            XCTAssertEqual(out["output_width"] as? Int, 4800, clip.dir)
+            let cal = try XCTUnwrap(p["calibration_data"] as? [String: Any])
+            XCTAssertEqual(cal["input_horizontal_stretch"] as? Double, 3, clip.dir)
+        }
     }
 
     func testSkipsExisting() async throws {

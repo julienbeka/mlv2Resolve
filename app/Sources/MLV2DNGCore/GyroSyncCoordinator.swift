@@ -308,16 +308,25 @@ public final class GyroSyncCoordinator: ObservableObject {
     }
 
     private func run(_ shootKey: String, clips: [String], force: Set<String>) async {
-        if let ctx = contexts[shootKey] { await refreshLogIndex(ctx.chosenFolder) }
+        // MLV file name -> squeeze corrected from the shoot majority (header known wrong), as the engine serves it.
+        var squeezeFixes: [String: Int] = [:]
+        if let ctx = contexts[shootKey] {
+            await refreshLogIndex(ctx.chosenFolder)
+            let shoot = ctx.shoot
+            squeezeFixes = await Self.offMain {
+                Dictionary(SqueezeFix.fixes(for: shoot).map { ($0.name, $0.squeeze) }, uniquingKeysWith: { a, _ in a })
+            }
+        }
         for clip in clips {
             guard !Task.isCancelled, let ctx = contexts[shootKey] else { return }
             guard let mlv = ctx.shoot.clips.first(where: { $0.files.first.map(AppState.key) == clip })?.files.first
             else { continue }
-            await process(clip: clip, mlv: mlv, ctx: ctx, force: force.contains(clip))
+            await process(clip: clip, mlv: mlv, ctx: ctx, force: force.contains(clip),
+                          squeezeFix: squeezeFixes[mlv.lastPathComponent])
         }
     }
 
-    private func process(clip: String, mlv: URL, ctx: Context, force: Bool) async {
+    private func process(clip: String, mlv: URL, ctx: Context, force: Bool, squeezeFix: Int?) async {
         let resolver = clipDirResolver, mountPoint = ctx.mountPoint
         guard let clipDir = await Self.offMain({ resolver(mountPoint, mlv) }) else {
             states[clip] = .failed(String(localized: "Clip folder not found in the mount", bundle: L10n.bundle))
@@ -340,7 +349,7 @@ public final class GyroSyncCoordinator: ObservableObject {
         let folderKey = AppState.key(ctx.chosenFolder)
         let position = position(forClip: clip)
         let logs = (logIndex[folderKey] ?? [:]).values.map(\.log).sorted { $0.url.path < $1.url.path }
-        let job = Job(mlv: mlv, clipDir: clipDir, dest: dest, force: force, lens: lens, position: position,
+        let job = Job(mlv: mlv, squeezeFix: squeezeFix, clipDir: clipDir, dest: dest, force: force, lens: lens, position: position,
                       logs: logs, decodedLogs: decodedLogs, skew: skews[folderKey],
                       backupDir: backupsRoot.appendingPathComponent(MountPaths.sanitize(ctx.shoot.name), isDirectory: true),
                       motionRunner: motionRunner, solver: solver)
@@ -531,7 +540,10 @@ public final class GyroSyncCoordinator: ObservableObject {
 
 /// The off-main work for one clip.
 private struct Job: Sendable {
-    let mlv: URL, clipDir: URL, dest: URL
+    let mlv: URL
+    /// Corrected horizontal squeeze when the clip's header is known wrong (`SqueezeFix`), else nil.
+    let squeezeFix: Int?
+    let clipDir: URL, dest: URL
     /// Explicit regeneration: an existing file is replaced (after a backup).
     let force: Bool
     let lens: Lens
@@ -552,9 +564,10 @@ private struct Job: Sendable {
 
     nonisolated func run(onSolve: (@Sendable (URL, ClosedRange<Int>) async -> Void)?) async -> Outcome {
         func fail(_ s: String) -> Outcome { Outcome(state: .failed(s)) }
-        guard let timing = MLVHeader.timing(of: mlv) else {
+        guard let header = MLVHeader.timing(of: mlv) else {
             return fail(String(localized: "Couldn't read the clip's timing", bundle: L10n.bundle))
         }
+        let timing = squeezeFix.map(header.withSqueeze) ?? header
         let full = LogMatcher.candidates(for: timing, logs: logs, skew: nil)
         guard !full.isEmpty else { return Outcome(state: .noLog) }
         // With a learned skew, search near the expected position first; the full search is the fallback.

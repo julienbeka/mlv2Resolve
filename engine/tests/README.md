@@ -11,6 +11,12 @@ Notes:
 - `--backend` passes `-o backend=smb|nfs` (FUSE-T default is NFS).
 - Mount point is a temp dir; unmount uses `umount` then `diskutil unmount force`; mlvfs is killed if still alive.
 
+Header sampling override (`--sampling-fix=<MLV name>:<sx>x<sy>[,...]`, used by the app when one clip's RAWC
+disagrees with the rest of the shoot): `--clone` mounts an APFS clone (`cp -c`, temp dir) of the clip instead of its
+folder, `--sampling-fix SPEC` passes the option, e.g. on a 1x3 clip whose header says 1x1:
+`mount_test.py <dir>/M25-1745.MLV --clone --height 2008 --sampling-fix M25-1745.MLV:3x1 --expect-scale 3,1`
+(and `--sampling-fix <clip>.MLV:1x1 --expect-scale 1,1` on a normal 1x3 clip).
+
 Pixel checks:
 - `--expect-sane` (stdlib only): on frame 0, asserts black < median < white and that the median absolute difference
   between same-colour horizontal neighbours is <= 1% of (white - black). Correct test clips give ~0.001; the old

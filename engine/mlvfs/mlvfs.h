@@ -46,6 +46,7 @@ struct mlvfs
     char * fpm_dir;
     char * index_dir;
     int no_focus_pixels;
+    char * sampling_fix; /* --sampling-fix=<MLV name>:<sx>x<sy>[,...]: per-clip override of RAWC's sampling */
 };
 
 //all the mlv block headers corresponding to a particular frame, needed to generate a DNG for that frame
@@ -62,6 +63,9 @@ struct frame_headers
     mlv_lens_hdr_t lens_hdr;
     mlv_wbal_hdr_t wbal_hdr;
     mlv_rawc_hdr_t rawc_hdr; /* blockType[0] == 0 when the clip has no RAWC block */
+    /* --sampling-fix for this clip: replaces RAWC's (binning+skipping) x/y in dng.c; 0 = no override */
+    int sampling_fix_x;
+    int sampling_fix_y;
 };
 
 #define MLVFS_SOFTWARE_NAME "MLVFS"

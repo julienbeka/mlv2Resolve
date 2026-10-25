@@ -22,16 +22,47 @@ public enum MLVHeader {
                 // After blockType, blockSize, timestamp(8): res_x, res_y, crop, reserved (2 each), then 4 bytes.
                 guard size >= 28, (try? fh.seek(toOffset: offset + 24)) != nil,
                       let s = try? fh.read(upToCount: 4), s.count == 4 else { return nil }
-                let sx = Int(s[0]) + Int(s[1]), sy = Int(s[2]) + Int(s[3])
-                guard sx > 0, sy > 0 else { return nil }
-                var a = sx, b = sy
-                while b != 0 { (a, b) = (b, a % b) }
-                let h = sx / a, v = sy / a
-                return (v == 1 && h > 1) ? h : nil
+                return SqueezeFix.horizontalSqueeze(x: Int(s[0]) + Int(s[1]), y: Int(s[2]) + Int(s[3]))
             }
             offset += size
             guard (try? fh.seek(toOffset: offset)) != nil else { return nil }
         }
+        return nil
+    }
+
+    /// Sensor sampling from the RAWC block — x = binning_x + skipping_x, y = binning_y + skipping_y (e.g.
+    /// 3, 1 for 1x3 anamorphic) — and the recorded size from RAWI (xRes, yRes). Reads the blocks before the
+    /// first video frame only. nil when RAWC or RAWI is missing there, the sampling is 0, or the file is unreadable.
+    public static func sampling(of url: URL) -> (x: Int, y: Int, width: Int, height: Int)? {
+        guard let fh = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? fh.close() }
+        var offset: UInt64 = 0
+        var sampling: (x: Int, y: Int)?
+        var size: (w: Int, h: Int)?
+        for _ in 0..<64 {
+            if let s = sampling, let z = size { return (s.x, s.y, z.w, z.h) }
+            guard (try? fh.seek(toOffset: offset)) != nil,
+                  let head = try? fh.read(upToCount: 8), head.count == 8 else { return nil }
+            let type = String(decoding: head.prefix(4), as: UTF8.self)
+            let blockSize = head.withUnsafeBytes { UInt64($0.loadUnaligned(fromByteOffset: 4, as: UInt32.self).littleEndian) }
+            if type == "VIDF" { return nil }
+            guard blockSize >= 16 else { return nil }
+            if type == "RAWC", blockSize >= 28 {
+                guard (try? fh.seek(toOffset: offset + 24)) != nil,
+                      let s = try? fh.read(upToCount: 4), s.count == 4 else { return nil }
+                let x = Int(s[0]) + Int(s[1]), y = Int(s[2]) + Int(s[3])
+                guard x > 0, y > 0 else { return nil }
+                sampling = (x, y)
+            } else if type == "RAWI", blockSize >= 20 {
+                guard (try? fh.seek(toOffset: offset + 16)) != nil,
+                      let b = try? fh.read(upToCount: 4), b.count == 4 else { return nil }
+                let w = Int(b[0]) | Int(b[1]) << 8, h = Int(b[2]) | Int(b[3]) << 8
+                guard w > 0, h > 0 else { return nil }
+                size = (w, h)
+            }
+            offset += blockSize
+        }
+        if let s = sampling, let z = size { return (s.x, s.y, z.w, z.h) }
         return nil
     }
 
@@ -128,4 +159,8 @@ public struct ClipTiming: Sendable {
         self.width = width; self.height = height; self.squeeze = squeeze
     }
     public var duration: TimeInterval { Double(frames) / fps }
+    /// The same clip with another horizontal squeeze (header corrected by `SqueezeFix`).
+    public func withSqueeze(_ squeeze: Int) -> ClipTiming {
+        ClipTiming(start: start, frames: frames, fps: fps, width: width, height: height, squeeze: squeeze)
+    }
 }

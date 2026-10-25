@@ -155,6 +155,8 @@ public actor MountManager {
         var args = [url.path, "--mlv-dir=\(shoot.folder.path)", "--resolve-naming"]
         if fixBadPixels { args.append("--bad-pix") }
         if !fixFocusPixels { args.append("--no-focus-pixels") }
+        // Clips whose header disagrees with the shoot majority (e.g. 1x3 recorded as 1x1): DefaultScale fixed.
+        if let fix = SqueezeFix.engineArgument(SqueezeFix.fixes(for: shoot)) { args.append(fix) }
         args += [mode.engineFlag, "--fpm-dir=\(fpmDir.path)", "--index-dir=\(indexDir.path)",
                  "-o", "volname=\(Self.volumeName(url.lastPathComponent))",
                  "-f"] // foreground: otherwise mlvfs daemonizes and we lose the process

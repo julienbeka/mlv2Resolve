@@ -660,7 +660,15 @@ size_t dng_get_header_data(struct frame_headers * frame_headers, uint8_t * outpu
         const mlv_rawc_hdr_t * rawc = &frame_headers->rawc_hdr;
         int sampling_x = rawc->binning_x + rawc->skipping_x;
         int sampling_y = rawc->binning_y + rawc->skipping_y;
-        if(!memcmp(rawc->blockType, "RAWC", 4) && sampling_x > 0 && sampling_y > 0)
+        int has_rawc = !memcmp(rawc->blockType, "RAWC", 4);
+        if(frame_headers->sampling_fix_x > 0 && frame_headers->sampling_fix_y > 0)
+        {
+            //--sampling-fix: the header is known wrong for this clip (e.g. 1x3 recorded as 1x1)
+            sampling_x = frame_headers->sampling_fix_x;
+            sampling_y = frame_headers->sampling_fix_y;
+            has_rawc = 1;
+        }
+        if(has_rawc && sampling_x > 0 && sampling_y > 0)
         {
             //RAWC tells how the sensor was sampled: (binning_x+skipping_x) x (binning_y+skipping_y)
             //e.g. 1x3 anamorphic = 3x1 -> stretch horizontally by 3; 5D3 720p = 3x5 -> stretch vertically by 5/3

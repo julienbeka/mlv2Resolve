@@ -46,3 +46,4 @@
 "Couldn't write the Gyroflow project: %@" = "Couldn't write the Gyroflow project: %@";
 "Couldn't back up the existing Gyroflow project: %@" = "Couldn't back up the existing Gyroflow project: %@";
 "The motion analyzer (mlvmotion) is missing from the app. Reinstall mlv2dng." = "The motion analyzer (mlvmotion) is missing from the app. Reinstall mlv2dng.";
+"%@: header says %@, corrected to %@ like the other clips" = "%@: header says %@, corrected to %@ like the other clips";

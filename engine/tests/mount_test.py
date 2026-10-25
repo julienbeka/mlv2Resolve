@@ -5,7 +5,10 @@ Usage: mount_test.py <clip.MLV> [--expect-frames N] [--min-fps F] [--backend nfs
                      [--expect-scale H,V] [--expect-fpm] [--fpm-dir DIR] [--no-focus-pixels]
                      [--no-bad-pix] [--expect-raw REF_DIR] [--expect-sane]
                      [--expect-readonly] [--expect-sidecars] [--index-dir DIR]
+                     [--clone] [--sampling-fix SPEC]
 --expect-scale 3,1  asserts the first DNG's DefaultScale (tag 50718) is 3/1, 1/1.
+--clone             mounts an APFS clone (cp -c, in a temp dir) of the clip and its chunks instead of its folder.
+--sampling-fix SPEC passes --sampling-fix=SPEC to mlvfs (e.g. M25-1745.MLV:3x1); combine with --expect-scale.
 --expect-fpm        asserts the mlvfs log contains "focus pixels: N corrected" with N > 0.
 --expect-raw DIR    asserts DNG frames 0 and 160 equal DIR/<clip>_<frame>.u16 (from make_reference.py) exactly;
                     implies --no-bad-pix and --no-focus-pixels so MLVFS outputs the decoded sensor values untouched.
@@ -558,6 +561,8 @@ def main():
     ap.add_argument("--expect-readonly", action="store_true")
     ap.add_argument("--expect-sidecars", action="store_true")
     ap.add_argument("--dual-iso-preview", action="store_true")
+    ap.add_argument("--clone", action="store_true", help="mount an APFS clone of the clip (+ chunks) in a temp dir")
+    ap.add_argument("--sampling-fix", help="--sampling-fix for mlvfs, e.g. M25-1745.MLV:3x1")
     ap.add_argument("--index-dir", help="--index-dir for mlvfs (default: a new temp dir); asserts .IDX files land there")
     ap.add_argument("--assert-source-untouched", action=argparse.BooleanOptionalAction, default=True,
                     help="assert the source folder is identical (names, sizes, mtimes) after unmount")
@@ -571,6 +576,14 @@ def main():
     folder, name = os.path.dirname(clip), os.path.splitext(os.path.basename(clip))[0]
     before = snapshot(folder)
     mount_folder, clone_dir, hashes, outside, extra_names = folder, None, None, None, set()
+    if a.clone and not a.expect_sidecars:
+        clone_dir = tempfile.mkdtemp(prefix="mlvsrc_")
+        for n in sorted(os.listdir(folder)):
+            stem, ext = os.path.splitext(n)
+            if stem == name and re.fullmatch(r"\.(MLV|M\d\d)", ext, re.I):
+                subprocess.run(["cp", "-c", os.path.join(folder, n), os.path.join(clone_dir, n)], check=True)
+        mount_folder = clone_dir
+        print("source clone:", clone_dir)
     if a.expect_sidecars:
         # never write to the real rushes: mount an APFS clone of the clip (+ a second clip and a user file)
         clone_dir = tempfile.mkdtemp(prefix="mlvsrc_")
@@ -601,6 +614,8 @@ def main():
         cmd += ["--index-dir=" + a.index_dir]
     if a.dual_iso_preview:
         cmd += ["--dual-iso-preview"]
+    if a.sampling_fix:
+        cmd += ["--sampling-fix=" + a.sampling_fix]
     if a.backend:
         cmd += ["-o", "backend=" + a.backend]
     proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT)

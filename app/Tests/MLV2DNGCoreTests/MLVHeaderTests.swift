@@ -12,8 +12,13 @@ enum SyntheticMLV {
         d.append(contentsOf: payload)
         return d
     }
-    static func data(sampling: (UInt8, UInt8, UInt8, UInt8)?, withRAWC: Bool = true) -> Data {
+    /// `size`: adds a RAWI block (xRes, yRes) before RAWC.
+    static func data(sampling: (UInt8, UInt8, UInt8, UInt8)?, withRAWC: Bool = true, size: (Int, Int)? = nil) -> Data {
         var d = block("MLVI", payload: [UInt8](repeating: 0, count: 36))
+        if let (w, h) = size {
+            d.append(block("RAWI", payload: [UInt8(w & 0xFF), UInt8(w >> 8), UInt8(h & 0xFF), UInt8(h >> 8)]
+                           + [UInt8](repeating: 0, count: 44)))
+        }
         if withRAWC, let s = sampling {
             d.append(block("RAWC", payload: [UInt8](repeating: 0, count: 8) + [s.0, s.1, s.2, s.3] + [0, 0, 0, 0]))
         }

@@ -327,6 +327,39 @@ extension AppStateTests {
         XCTAssertNil(state.info)
     }
 
+    /// The first clip's header says 1x1 among 1x3 clips: the engine gets the fix, the shoot is 1x3 and the
+    /// user is told once.
+    func testWrongAnamorphicHeaderIsCorrectedFromMajority() async throws {
+        let dir = try makeShootFolder("Ana")
+        let size = (1600, 2008)
+        try SyntheticMLV.data(sampling: (1, 0, 1, 0), size: size).write(to: dir.appendingPathComponent("A001.MLV"))
+        try SyntheticMLV.data(sampling: (1, 2, 1, 0), size: size).write(to: dir.appendingPathComponent("A002.MLV"))
+        try SyntheticMLV.data(sampling: (1, 2, 1, 0), size: size).write(to: dir.appendingPathComponent("A003.MLV"))
+        let state = makeState()
+        await state.choose(folder: volume)
+        let s = try shoot(state, "Ana")
+        await state.toggle(s)
+        let args = try XCTUnwrap(launcher.processes.last).args
+        XCTAssertTrue(args.contains("--sampling-fix=A001.MLV:3x1"), "\(args)")
+        XCTAssertEqual(state.info, "Anamorphic shoot 1x3: in Resolve, go to the Color page → Sizing → Input Sizing and set Width to 3."
+                       + "\n\nA001: header says 1x1, corrected to 1x3 like the other clips")
+        XCTAssertEqual(state.desqueezeTargets.map(\.factor), [3])
+        state.clearInfo()
+        await state.toggle(s)
+        await state.toggle(s)
+        XCTAssertNil(state.info, "told once per shoot")
+        XCTAssertTrue(try XCTUnwrap(launcher.processes.last).args.contains("--sampling-fix=A001.MLV:3x1"))
+    }
+
+    func testNoSamplingFixWithoutDisagreement() async throws {
+        let dir = try makeShootFolder("Plain")
+        try SyntheticMLV.data(sampling: (1, 2, 1, 0), size: (1600, 2008)).write(to: dir.appendingPathComponent("A001.MLV"))
+        let state = makeState()
+        await state.choose(folder: volume)
+        await state.toggle(try shoot(state, "Plain"))
+        XCTAssertFalse(try XCTUnwrap(launcher.processes.last).args.contains { $0.hasPrefix("--sampling-fix") })
+    }
+
     func testDesqueezeTargetsMenuScriptAndHint() async throws {
         let ana = try makeShootFolder("Ana")
         try SyntheticMLV.data(sampling: (1, 2, 1, 0)).write(to: ana.appendingPathComponent("A001.MLV"))

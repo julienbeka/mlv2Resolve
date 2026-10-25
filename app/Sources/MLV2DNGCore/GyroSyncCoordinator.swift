@@ -72,7 +72,11 @@ public final class GyroSyncCoordinator: ObservableObject {
     private var tasks: [String: [UUID: Task<Void, Never>]] = [:]
     /// Per chosen folder key: clips synced this session (log gyro dropped), for the clock skew.
     private var syncedByFolder: [String: [(clip: ClipTiming, log: A1Log, lagMs: Int)]] = [:]
-    private var skews: [String: TimeInterval] = [:]
+    /// Per chosen folder key (internal for tests).
+    var skews: [String: TimeInterval] = [:]
+    /// Per chosen folder key: header-only logs by path, with the file size and date they were read at.
+    private var logIndex: [String: [String: LogIndexEntry]] = [:]
+    private let decodedLogs: DecodedLogCache
 
     /// Test hook: every (log, searchMs) handed to the solver.
     var onSolve: (@MainActor (URL, ClosedRange<Int>) -> Void)?
@@ -83,8 +87,12 @@ public final class GyroSyncCoordinator: ObservableObject {
                   clipDirResolver: GyroSyncCoordinator.clipDir(mountPoint:mlv:))
     }
 
+    /// - Parameter logReader: decodes a full log (production: `A1Log.read`); only candidate logs are decoded,
+    ///   the last two are kept.
     init(motionRunner: @escaping MotionRunner, defaults: UserDefaults, backupsRoot: URL,
-         solver: @escaping Solver, clipDirResolver: @escaping ClipDirResolver) {
+         solver: @escaping Solver, clipDirResolver: @escaping ClipDirResolver,
+         logReader: @escaping @Sendable (URL) throws -> A1Log = A1Log.read) {
+        decodedLogs = DecodedLogCache(capacity: 2, reader: logReader)
         self.motionRunner = motionRunner
         self.defaults = defaults
         self.backupsRoot = backupsRoot
@@ -144,13 +152,22 @@ public final class GyroSyncCoordinator: ObservableObject {
         await enqueue(k, clips: clips, force: [])
     }
 
-    /// Cancels the shoot's jobs; an in-flight clip writes nothing. Its clips leave `states`.
+    /// Cancels the shoot's jobs: a clip in flight writes nothing unless its atomic write had already started
+    /// (that complete file is then recorded as mlv2dng's). Its clips leave `states`.
     public func shootUnmounted(_ shoot: Shoot) {
-        let k = AppState.key(shoot.folder)
+        shootUnmounted(folder: AppState.key(shoot.folder), clips: shoot.clips)
+    }
+
+    /// Same, by standardized shoot folder path (for shoots whose `Shoot` value is no longer at hand).
+    public func shootUnmounted(folder k: String) {
+        shootUnmounted(folder: k, clips: contexts[k]?.shoot.clips ?? [])
+    }
+
+    private func shootUnmounted(folder k: String, clips: [Clip]) {
         contexts[k] = nil
         tails[k] = nil
         for t in (tasks.removeValue(forKey: k) ?? [:]).values { t.cancel() }
-        for c in shoot.clips.compactMap({ $0.files.first.map(AppState.key) }) { states[c] = nil }
+        for c in clips.compactMap({ $0.files.first.map(AppState.key) }) { states[c] = nil }
     }
 
     /// Rewrites the clip's `.gyroflow` (old one backed up). No-op if its shoot is not mounted.
@@ -160,9 +177,9 @@ public final class GyroSyncCoordinator: ObservableObject {
         await enqueue(k, clips: [clip], force: [clip])
     }
 
-    /// Waits for every queued job.
+    /// Waits until no job is queued, including jobs scheduled while waiting.
     public func idle() async {
-        for t in tasks.values.flatMap(\.values) { await t.value }
+        while let t = tasks.values.lazy.flatMap(\.values).first { await t.value }
     }
 
     // MARK: Jobs
@@ -198,9 +215,13 @@ public final class GyroSyncCoordinator: ObservableObject {
         let id = UUID()
         let task = Task { [weak self] in
             await prev?.value
-            guard !Task.isCancelled, let self else { return }
+            guard let self else { return }
+            defer {
+                self.tasks[shoot]?[id] = nil
+                if self.tasks[shoot]?.isEmpty == true { self.tasks[shoot] = nil }
+            }
+            guard !Task.isCancelled else { return }
             await self.run(shoot, clips: clips, force: force)
-            self.tasks[shoot]?[id] = nil
         }
         tails[shoot] = task
         tasks[shoot, default: [:]][id] = task
@@ -208,6 +229,7 @@ public final class GyroSyncCoordinator: ObservableObject {
     }
 
     private func run(_ shootKey: String, clips: [String], force: Set<String>) async {
+        if let ctx = contexts[shootKey] { await refreshLogIndex(ctx.chosenFolder) }
         for clip in clips {
             guard !Task.isCancelled, let ctx = contexts[shootKey] else { return }
             guard let mlv = ctx.shoot.clips.first(where: { $0.files.first.map(AppState.key) == clip })?.files.first
@@ -226,6 +248,7 @@ public final class GyroSyncCoordinator: ObservableObject {
         let dest = mlv.deletingLastPathComponent()
             .appendingPathComponent(GyroflowProject.fileName(clipDir: clipDir.lastPathComponent))
         let exists = FileManager.default.fileExists(atPath: dest.path)
+        if !exists && written.contains(clip) { unrecordWritten(clip) }  // our file is gone: forget it
         if exists && !force {
             if written.contains(clip), let m = meta(clip) { states[clip] = m } else { states[clip] = .existing }
             return
@@ -236,8 +259,10 @@ public final class GyroSyncCoordinator: ObservableObject {
         }
         states[clip] = .running
         let folderKey = AppState.key(ctx.chosenFolder)
-        let job = Job(mlv: mlv, clipDir: clipDir, dest: dest, lens: lens, position: position(forClip: clip),
-                      chosenFolder: ctx.chosenFolder, skew: skews[folderKey],
+        let position = position(forClip: clip)
+        let logs = (logIndex[folderKey] ?? [:]).values.map(\.log).sorted { $0.url.path < $1.url.path }
+        let job = Job(mlv: mlv, clipDir: clipDir, dest: dest, force: force, lens: lens, position: position,
+                      logs: logs, decodedLogs: decodedLogs, skew: skews[folderKey],
                       backupDir: backupsRoot.appendingPathComponent(MountPaths.sanitize(ctx.shoot.name), isDirectory: true),
                       motionRunner: motionRunner, solver: solver)
         let hook = onSolve
@@ -255,6 +280,31 @@ public final class GyroSyncCoordinator: ObservableObject {
             syncedByFolder[folderKey, default: []].append(entry)
             skews[folderKey] = LogMatcher.estimateSkew(syncedByFolder[folderKey] ?? [])
         }
+        // Settings changed while this clip was computed: redo it with the new ones.
+        if case .synced = outcome.state, self.lens(forClip: clip) != lens || self.position(forClip: clip) != position,
+           let k = shootKey(ofClip: clip) {
+            states[clip] = .pending
+            schedule(k, clips: [clip], force: [clip])
+        }
+    }
+
+    /// Rescans the chosen folder's logs; only new or changed files get their header read.
+    private func refreshLogIndex(_ folder: URL) async {
+        let k = AppState.key(folder)
+        let old = logIndex[k] ?? [:]
+        logIndex[k] = await Self.offMain { Self.scanLogs(folder, old: old) }
+    }
+
+    nonisolated static func scanLogs(_ folder: URL, old: [String: LogIndexEntry]) -> [String: LogIndexEntry] {
+        var out: [String: LogIndexEntry] = [:]
+        for url in A1Log.find(in: folder) {
+            let v = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+            let size = v?.fileSize ?? -1, date = v?.contentModificationDate
+            if let e = old[url.path], e.size == size, e.modified == date { out[url.path] = e; continue }
+            guard let log = try? A1Log.headerOnly(url) else { continue }
+            out[url.path] = LogIndexEntry(log: log, size: size, modified: date)
+        }
+        return out
     }
 
     // MARK: Persistence
@@ -267,6 +317,14 @@ public final class GyroSyncCoordinator: ObservableObject {
         defaults.set(w.sorted(), forKey: Key.written)
         var m = defaults.dictionary(forKey: Key.meta) ?? [:]
         m[clip] = ["r2": r2, "log": log, "offsetMs": offsetMs]
+        defaults.set(m, forKey: Key.meta)
+    }
+
+    private func unrecordWritten(_ clip: String) {
+        var w = written; w.remove(clip)
+        defaults.set(w.sorted(), forKey: Key.written)
+        var m = defaults.dictionary(forKey: Key.meta) ?? [:]
+        m[clip] = nil
         defaults.set(m, forKey: Key.meta)
     }
 
@@ -304,9 +362,10 @@ public final class GyroSyncCoordinator: ObservableObject {
     // MARK: Clip folder
 
     /// The clip folder MLVFS shows for `mlv`: the directory of the mount whose name starts with
-    /// `<MLV basename><MLV extension>_` (Resolve naming: `M29-0615MLV_1_2026-08-29_0001_C0000`).
+    /// `<MLV basename><MLV extension>_1_`, as the engine names it with `--resolve-naming`
+    /// (`%s%s_1_<date>_0001_C0000`, e.g. `M29-0615MLV_1_2026-08-29_0001_C0000`).
     nonisolated static func clipDir(mountPoint: URL, mlv: URL) -> URL? {
-        let prefix = mlv.deletingPathExtension().lastPathComponent + mlv.pathExtension + "_"
+        let prefix = mlv.deletingPathExtension().lastPathComponent + mlv.pathExtension + "_1_"
         let names = (try? FileManager.default.contentsOfDirectory(atPath: mountPoint.path)) ?? []
         return names.sorted().first { $0.hasPrefix(prefix) }
             .map { mountPoint.appendingPathComponent($0, isDirectory: true) }
@@ -325,8 +384,21 @@ public final class GyroSyncCoordinator: ObservableObject {
         var errorDescription: String? { message }
     }
 
+    /// The process plus a cancelled flag, so a cancel that lands before `run()` still stops it.
     private final class ProcessBox: @unchecked Sendable {
         let process = Process()
+        private let lock = NSLock()
+        private var cancelled = false
+        func cancel() {
+            lock.lock(); defer { lock.unlock() }
+            cancelled = true
+            if process.isRunning { process.terminate() }
+        }
+        /// Called right after `run()`: terminates the process if a cancel came first.
+        func checkAfterLaunch() {
+            lock.lock(); defer { lock.unlock() }
+            if cancelled, process.isRunning { process.terminate() }
+        }
     }
 
     nonisolated static func runMotion(binary: URL, mlv: URL) async throws -> [MotionSample] {
@@ -350,10 +422,10 @@ public final class GyroSyncCoordinator: ObservableObject {
         let status: Int32 = try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (c: CheckedContinuation<Int32, Error>) in
                 p.terminationHandler = { c.resume(returning: $0.terminationStatus) }
-                do { try p.run() } catch { p.terminationHandler = nil; c.resume(throwing: error) }
+                do { try p.run(); box.checkAfterLaunch() } catch { p.terminationHandler = nil; c.resume(throwing: error) }
             }
         } onCancel: {
-            if box.process.isRunning { box.process.terminate() }
+            box.cancel()
         }
         try Task.checkCancellation()
         guard status == 0 else {
@@ -377,9 +449,13 @@ public final class GyroSyncCoordinator: ObservableObject {
 /// The off-main work for one clip.
 private struct Job: Sendable {
     let mlv: URL, clipDir: URL, dest: URL
+    /// Explicit regeneration: an existing file is replaced (after a backup).
+    let force: Bool
     let lens: Lens
     let position: MountingPosition
-    let chosenFolder: URL
+    /// Header-only logs of the chosen folder; candidates are decoded through `decodedLogs`.
+    let logs: [A1Log]
+    let decodedLogs: DecodedLogCache
     let skew: TimeInterval?
     let backupDir: URL
     let motionRunner: GyroSyncCoordinator.MotionRunner
@@ -395,9 +471,10 @@ private struct Job: Sendable {
         guard let timing = MLVHeader.timing(of: mlv) else {
             return fail(String(localized: "Couldn't read the clip's timing", bundle: L10n.bundle))
         }
-        let logs = A1Log.find(in: chosenFolder).compactMap { try? A1Log.read($0) }
-        let candidates = LogMatcher.candidates(for: timing, logs: logs, skew: skew)
-        guard !candidates.isEmpty else { return Outcome(state: .noLog) }
+        let full = LogMatcher.candidates(for: timing, logs: logs, skew: nil)
+        guard !full.isEmpty else { return Outcome(state: .noLog) }
+        // With a learned skew, search near the expected position first; the full search is the fallback.
+        let narrowed = skew.map { LogMatcher.candidates(for: timing, logs: logs, skew: $0) }
         if Task.isCancelled { return Outcome(state: .pending) }
 
         let motion: [MotionSample]
@@ -408,17 +485,20 @@ private struct Job: Sendable {
 
         var best: (log: A1Log, result: SyncResult)?
         var sawAmbiguous = false, sawMotion = false
-        for c in candidates {
-            if Task.isCancelled { return Outcome(state: .pending) }
-            await onSolve?(c.log.url, c.searchMs)
-            do {
-                let r = try solver(motion, timing.fps, c.log, c.searchMs)
-                if best.map({ r.r2 > $0.result.r2 }) ?? true { best = (c.log, r) }
-            } catch SyncRefusal.ambiguous {
-                sawAmbiguous = true
-            } catch SyncRefusal.noOverlap {
-            } catch {
-                sawMotion = true
+        for pass in [narrowed, full].compactMap({ $0 }) where best == nil {
+            for c in pass {
+                if Task.isCancelled { return Outcome(state: .pending) }
+                guard let log = try? await decodedLogs.log(c.log.url) else { continue }
+                await onSolve?(c.log.url, c.searchMs)
+                do {
+                    let r = try solver(motion, timing.fps, log, c.searchMs)
+                    if best.map({ r.r2 > $0.result.r2 }) ?? true { best = (log, r) }
+                } catch SyncRefusal.ambiguous {
+                    sawAmbiguous = true
+                } catch SyncRefusal.noOverlap {
+                } catch {
+                    sawMotion = true
+                }
             }
         }
         guard let best else {
@@ -441,6 +521,8 @@ private struct Job: Sendable {
             return fail(String(localized: "Couldn't write the Gyroflow project: \(String(describing: error))", bundle: L10n.bundle))
         }
         if Task.isCancelled { return Outcome(state: .pending) }
+        // A file saved meanwhile (e.g. by Gyroflow) is only replaced on an explicit regeneration.
+        if !force, FileManager.default.fileExists(atPath: dest.path) { return Outcome(state: .existing) }
         do { try backupIfNeeded() } catch {
             return fail(String(localized: "Couldn't back up the existing Gyroflow project: \(error.localizedDescription)", bundle: L10n.bundle))
         }
@@ -468,5 +550,35 @@ private struct Job: Sendable {
             target = backupDir.appendingPathComponent("\(base)-\(n).gyroflow"); n += 1
         }
         try fm.copyItem(at: dest, to: target)
+    }
+}
+
+/// A log found in a chosen folder: header-only `A1Log`, plus the file size and date it was read at.
+struct LogIndexEntry: Sendable {
+    let log: A1Log
+    let size: Int
+    let modified: Date?
+}
+
+/// Decoded logs, least recently used dropped beyond `capacity`.
+actor DecodedLogCache {
+    private let capacity: Int
+    private let reader: @Sendable (URL) throws -> A1Log
+    private var entries: [(path: String, log: A1Log)] = []
+
+    init(capacity: Int, reader: @escaping @Sendable (URL) throws -> A1Log) {
+        self.capacity = capacity; self.reader = reader
+    }
+
+    func log(_ url: URL) throws -> A1Log {
+        if let i = entries.firstIndex(where: { $0.path == url.path }) {
+            let e = entries.remove(at: i)
+            entries.append(e)
+            return e.log
+        }
+        let log = try reader(url)
+        entries.append((url.path, log))
+        if entries.count > capacity { entries.removeFirst(entries.count - capacity) }
+        return log
     }
 }

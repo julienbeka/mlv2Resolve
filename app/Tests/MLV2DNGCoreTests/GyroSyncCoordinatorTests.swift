@@ -103,14 +103,15 @@ final class GyroSyncCoordinatorTests: XCTestCase {
     private func coordinator(gate: MotionGate = MotionGate(),
                              solver: @escaping GyroSyncCoordinator.Solver = { _, _, _, _ in
                                  SyncResult(lagMs: 10_000, r2: 0.9, secondPeak: 0.1, map: [[1, 0, 0], [0, 1, 0], [0, 0, 1]])
-                             }) -> GyroSyncCoordinator {
+                             },
+                             logReader: @escaping @Sendable (URL) throws -> A1Log = A1Log.read) -> GyroSyncCoordinator {
         GyroSyncCoordinator(
             motionRunner: { _ in
                 await gate.pass()
                 return [MotionSample(frame: 1, dx: 1, dy: 0, peak: 1)]
             },
             defaults: defaults, backupsRoot: backups, solver: solver,
-            clipDirResolver: GyroSyncCoordinator.clipDir(mountPoint:mlv:))
+            clipDirResolver: GyroSyncCoordinator.clipDir(mountPoint:mlv:), logReader: logReader)
     }
 
     private func withLens(_ c: GyroSyncCoordinator, _ name: String = "Helios", focal: Double = 25) -> Lens {
@@ -359,5 +360,188 @@ final class GyroSyncCoordinatorTests: XCTestCase {
         t.cancel()
         do { _ = try await t.value; XCTFail("expected cancellation") } catch {}
         XCTAssertLessThan(ContinuousClock.now - start, .seconds(5))
+    }
+
+    // MARK: Fix round 1
+
+    private func calName(_ dir: String) throws -> String {
+        try XCTUnwrap((json(gyroflow(dir))["calibration_data"] as? [String: Any])?["name"] as? String)
+    }
+
+    private func waitRunning(_ gate: MotionGate) async throws {
+        for _ in 0..<500 where !(await gate.entered) { try await Task.sleep(for: .milliseconds(10)) }
+        let entered = await gate.entered
+        XCTAssertTrue(entered)
+    }
+
+    func testSkewFallbackToFullSearch() async throws {
+        let (clip, key, _) = try makeClip("A001", atSecond: 10)
+        try makeLog("t1", atSecond: 0, seconds: 120)
+        // Narrowed searches are refused; only the full one finds the clip.
+        let c = coordinator(solver: { _, _, _, range in
+            guard range.count > 60_001 else { throw SyncRefusal.noOverlap }
+            return SyncResult(lagMs: 10_000, r2: 0.9, secondPeak: 0.1, map: [])
+        })
+        var widths: [Int] = []
+        c.onSolve = { _, r in widths.append(r.upperBound - r.lowerBound) }
+        c.skews[AppState.key(chosen)] = 50  // wrong: expects the clip at 60 s in the log
+        _ = withLens(c)
+        await c.shootMounted(shoot([clip]), mountPoint: mountPoint, chosenFolder: chosen)
+        XCTAssertEqual(c.states[key], .synced(r2: 0.9, log: "t1_mix.bin", offsetMs: -10_000))
+        XCTAssertEqual(widths.count, 2)
+        XCTAssertLessThanOrEqual(widths[0], 60_000)
+        XCTAssertGreaterThan(widths[1], 60_000)
+
+        // A skew pointing outside every log falls back too.
+        let (b, keyB, _) = try makeClip("A002", atSecond: 20)
+        c.skews[AppState.key(chosen)] = 5_000
+        await c.shootMounted(shoot([clip, b]), mountPoint: mountPoint, chosenFolder: chosen)
+        XCTAssertEqual(c.states[keyB], .synced(r2: 0.9, log: "t1_mix.bin", offsetMs: -10_000))
+    }
+
+    func testOnlyCandidateLogsAreDecoded() async throws {
+        final class Recorder: @unchecked Sendable {
+            private let lock = NSLock()
+            private var names: [String] = []
+            func add(_ u: URL) { lock.lock(); names.append(u.lastPathComponent); lock.unlock() }
+            var all: [String] { lock.lock(); defer { lock.unlock() }; return names }
+        }
+        let rec = Recorder()
+        let (clip, key, _) = try makeClip("A001", atSecond: 40)
+        try makeLog("t1", atSecond: 0, seconds: 120)
+        try makeLog("far", atSecond: 7_200, seconds: 30)
+        let header = try A1Log.header(tmp.appendingPathComponent("rushes/A1/t1_mix.bin"))
+        XCTAssertEqual(header.duration, 120, accuracy: 0.2)
+        let c = coordinator(solver: { _, _, _, range in
+            SyncResult(lagMs: (range.lowerBound + range.upperBound) / 2, r2: 0.9, secondPeak: 0.1, map: [])
+        }, logReader: { rec.add($0); return try A1Log.read($0) })
+        c.skews[AppState.key(chosen)] = 0.5
+        _ = withLens(c)
+        await c.shootMounted(shoot([clip]), mountPoint: mountPoint, chosenFolder: chosen)
+        XCTAssertEqual(c.states[key], .synced(r2: 0.9, log: "t1_mix.bin", offsetMs: -40_500))
+        XCTAssertEqual(rec.all, ["t1_mix.bin"])
+        // Decoded logs are cached: regenerating does not decode again.
+        await c.regenerate(clip: key)
+        XCTAssertEqual(rec.all, ["t1_mix.bin"])
+    }
+
+    func testShootDefaultLensChangeRegeneratesDefaultUsersOnly() async throws {
+        let (a, keyA, dirA) = try makeClip("A001", atSecond: 10)
+        let (b, keyB, dirB) = try makeClip("A002", atSecond: 30)
+        try makeLog("t1", atSecond: 0, seconds: 120)
+        let c = coordinator()
+        _ = withLens(c, "Helios")
+        let own = Lens(name: "Zenitar", focalMM: 16)
+        c.lenses.append(own)
+        await c.shootMounted(shoot([a, b]), mountPoint: mountPoint, chosenFolder: chosen)
+        c.setLens(own, forClip: keyB)
+        await c.idle()
+        XCTAssertTrue(try calName(dirA).contains("Helios"))
+        XCTAssertTrue(try calName(dirB).contains("Zenitar"))
+
+        let jupiter = Lens(name: "Jupiter", focalMM: 85)
+        c.lenses.append(jupiter)
+        c.setDefaultLens(jupiter, forShoot: AppState.key(shootDir))
+        await c.idle()
+        XCTAssertTrue(try calName(dirA).contains("Jupiter"))
+        XCTAssertTrue(try calName(dirB).contains("Zenitar"))
+        XCTAssertEqual(c.states[keyA], .synced(r2: 0.9, log: "t1_mix.bin", offsetMs: -10_000))
+        let saved = try FileManager.default.contentsOfDirectory(atPath: backups.appendingPathComponent("Day1").path)
+        XCTAssertEqual(saved.filter { $0.hasPrefix(dirA) }.count, 1)
+        XCTAssertEqual(saved.filter { $0.hasPrefix(dirB) }.count, 1)  // from its own lens change only
+    }
+
+    func testCalibratedProfileSelection() async throws {
+        let (clip, _, dir) = try makeClip("A001", atSecond: 10)
+        try makeLog("t1", atSecond: 0)
+        func profile(_ name: String, w: Int, h: Int) throws -> URL {
+            let u = tmp.appendingPathComponent("\(name).json")
+            let obj: [String: Any] = ["name": name, "calib_dimension": ["w": w, "h": h], "input_horizontal_stretch": 1]
+            try JSONSerialization.data(withJSONObject: obj).write(to: u)
+            return u
+        }
+        let wrong = try profile("Wrong geometry", w: 1000, h: 1000)
+        let right = try profile("Calibrated Helios", w: 3200, h: 1800)
+        let c = coordinator()
+        let lens = Lens(name: "Helios", focalMM: 25, calibratedProfiles: [wrong, right])
+        c.lenses.append(lens)
+        c.setDefaultLens(lens, forShoot: AppState.key(shootDir))
+        await c.shootMounted(shoot([clip]), mountPoint: mountPoint, chosenFolder: chosen)
+        XCTAssertEqual(try calName(dir), "Calibrated Helios")
+
+        // No matching calibrated profile: computed one.
+        let other = Lens(name: "Helios only wrong", focalMM: 25, calibratedProfiles: [wrong])
+        c.lenses.append(other)
+        c.setDefaultLens(other, forShoot: AppState.key(shootDir))
+        await c.idle()
+        XCTAssertTrue(try calName(dir).hasPrefix("mlv2dng Helios only wrong"))
+    }
+
+    func testFileSavedDuringSyncIsNotOverwritten() async throws {
+        let (clip, key, dir) = try makeClip("A001", atSecond: 10)
+        try makeLog("t1", atSecond: 0)
+        let gate = MotionGate(holding: true)
+        let c = coordinator(gate: gate)
+        _ = withLens(c)
+        let job = Task { await c.shootMounted(shoot([clip]), mountPoint: mountPoint, chosenFolder: chosen) }
+        try await waitRunning(gate)
+        try Data("niyien".utf8).write(to: gyroflow(dir))
+        await gate.release()
+        await job.value
+        XCTAssertEqual(c.states[key], .existing)
+        XCTAssertEqual(try String(contentsOf: gyroflow(dir), encoding: .utf8), "niyien")
+        XCTAssertNil(defaults.stringArray(forKey: "gyroWritten"))
+    }
+
+    func testLensChangeDuringSyncRedoesClip() async throws {
+        let (clip, key, dir) = try makeClip("A001", atSecond: 10)
+        try makeLog("t1", atSecond: 0)
+        let gate = MotionGate(holding: true)
+        let c = coordinator(gate: gate)
+        _ = withLens(c, "Helios")
+        let job = Task { await c.shootMounted(shoot([clip]), mountPoint: mountPoint, chosenFolder: chosen) }
+        try await waitRunning(gate)
+        let jupiter = Lens(name: "Jupiter", focalMM: 85)
+        c.lenses.append(jupiter)
+        c.setDefaultLens(jupiter, forShoot: AppState.key(shootDir))
+        await gate.release()
+        await job.value
+        await c.idle()
+        XCTAssertTrue(try calName(dir).contains("Jupiter"))
+        XCTAssertEqual(c.states[key], .synced(r2: 0.9, log: "t1_mix.bin", offsetMs: -10_000))
+    }
+
+    func testStaleWrittenEntryIsPruned() async throws {
+        let (clip, key, dir) = try makeClip("A001", atSecond: 10)
+        try makeLog("t1", atSecond: 0)
+        let c = coordinator()
+        _ = withLens(c)
+        await c.shootMounted(shoot([clip]), mountPoint: mountPoint, chosenFolder: chosen)
+        XCTAssertEqual(defaults.stringArray(forKey: "gyroWritten"), [key])
+        c.shootUnmounted(shoot([clip]))
+        try FileManager.default.removeItem(at: gyroflow(dir))
+        await c.shootMounted(shoot([clip]), mountPoint: mountPoint, chosenFolder: chosen)  // rewritten, ours again
+        XCTAssertEqual(defaults.stringArray(forKey: "gyroWritten"), [key])
+
+        // Ours removed, then a foreign file put there: it is not ours anymore.
+        c.shootUnmounted(shoot([clip]))
+        try FileManager.default.removeItem(at: gyroflow(dir))
+        c.lenses = []  // no lens: nothing rewritten, but the entry is pruned
+        await c.shootMounted(shoot([clip]), mountPoint: mountPoint, chosenFolder: chosen)
+        XCTAssertEqual(defaults.stringArray(forKey: "gyroWritten"), [])
+        try Data("niyien".utf8).write(to: gyroflow(dir))
+        c.shootUnmounted(shoot([clip]))
+        await c.shootMounted(shoot([clip]), mountPoint: mountPoint, chosenFolder: chosen)
+        XCTAssertEqual(c.states[key], .existing)
+    }
+
+    func testClipDirNeedsEngineNamingPrefix() throws {
+        let mlv = shootDir.appendingPathComponent("A001.MLV")
+        try FileManager.default.createDirectory(at: mountPoint.appendingPathComponent("A001MLV_x"), withIntermediateDirectories: true)
+        XCTAssertNil(GyroSyncCoordinator.clipDir(mountPoint: mountPoint, mlv: mlv))
+        try FileManager.default.createDirectory(at: mountPoint.appendingPathComponent("A001MLV_1_2026-10-24_0001_C0000"),
+                                                withIntermediateDirectories: true)
+        XCTAssertEqual(GyroSyncCoordinator.clipDir(mountPoint: mountPoint, mlv: mlv)?.lastPathComponent,
+                       "A001MLV_1_2026-10-24_0001_C0000")
     }
 }

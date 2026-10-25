@@ -149,7 +149,10 @@ public final class AppState: ObservableObject {
         }
         // Anything not known to the manager anymore is no longer mounted.
         let live = Set(await manager.mounted.keys.map { Self.key($0.folder) })
-        for k in mounted where !live.contains(k) { mounted.remove(k); saved.removeAll { $0 == k } }
+        for k in mounted where !live.contains(k) {
+            mounted.remove(k); saved.removeAll { $0 == k }
+            gyro?.shootUnmounted(folder: k)
+        }
         if !failed.isEmpty { alert = Self.busyAlert(failed) }
     }
 
@@ -233,12 +236,12 @@ public final class AppState: ObservableObject {
         alert = Self.unplugAlert(volume)
         let live = await manager.mounted.keys
         for shoot in live where affected.contains(Self.key(shoot.folder)) {
-            gyro?.shootUnmounted(shoot)
             try? await manager.unmount(shoot, force: true) // the disk is going away
         }
-        // Anything that refused to unmount is still mounted.
-        let still = await manager.mounted.keys.map { Self.key($0.folder) }
+        // Anything that refused to unmount is still mounted (its gyro sync keeps going).
+        let still = Set(await manager.mounted.keys.map { Self.key($0.folder) })
         mounted.formUnion(affected.intersection(still))
+        for k in affected where !still.contains(k) { gyro?.shootUnmounted(folder: k) }
     }
 
     // MARK: Private

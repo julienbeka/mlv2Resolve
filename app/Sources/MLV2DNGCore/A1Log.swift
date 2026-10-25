@@ -20,15 +20,43 @@ public struct A1Log: Sendable {
     public let rateHz: Double
     /// Gyro samples in rad/s, axes as in the log.
     public let gyro: [SIMD3<Float>]
+    /// Number of samples: `gyro.count`, or an estimate from the file size for a header-only log.
+    public let sampleCount: Int
 
-    public var duration: TimeInterval { Double(gyro.count) / rateHz }
+    public var duration: TimeInterval { Double(sampleCount) / rateHz }
 
-    public static func read(_ url: URL) throws -> A1Log {
-        let data = try Data(contentsOf: url, options: .alwaysMapped)
+    init(url: URL, start: Date, rateHz: Double, gyro: [SIMD3<Float>]) {
+        self.url = url; self.start = start; self.rateHz = rateHz; self.gyro = gyro; sampleCount = gyro.count
+    }
+
+    /// Header-only log (no samples): `start` from the header, `duration` estimated from the file size.
+    init(url: URL, start: Date, rateHz: Double, sampleCount: Int) {
+        self.url = url; self.start = start; self.rateHz = rateHz; gyro = []; self.sampleCount = sampleCount
+    }
+
+    /// Reads only the 0x200-byte header and the file size: start date and approximate duration (every slot of
+    /// 16 bytes after the header counted as a sample, minus one one-second marker per 1000 samples).
+    /// - Throws: `ReadError` like `read`, or the file error.
+    public static func header(_ url: URL) throws -> (start: Date, duration: TimeInterval) {
+        let log = try headerOnly(url)
+        return (log.start, log.duration)
+    }
+
+    static func headerOnly(_ url: URL) throws -> A1Log {
+        let fh = try FileHandle(forReadingFrom: url)
+        defer { try? fh.close() }
+        let head = try fh.read(upToCount: headerSize) ?? Data()
+        let size = try fh.seekToEnd()
+        let start = try parseHeader(head)
+        let slots = (Int(size) - headerSize) / recordSize
+        return A1Log(url: url, start: start, rateHz: 1000, sampleCount: slots * 1000 / 1001)
+    }
+
+    /// Validates the magic and decodes the start date of a log header.
+    static func parseHeader(_ data: Data) throws -> Date {
         guard data.count >= headerSize else { throw ReadError.tooShort }
         let magic = Array("SenseFlow".utf8)
         guard data.prefix(magic.count).elementsEqual(magic) else { throw ReadError.notSenseFlow }
-
         let base = data.startIndex
         let d = (0..<6).map { Int(data[base + 0x40 + $0]) }
         var comps = DateComponents()
@@ -41,6 +69,13 @@ public struct A1Log: Sendable {
             [.year, .month, .day, .hour, .minute, .second], from: start) == {
                 var c = comps; c.timeZone = nil; return c }()
         else { throw ReadError.invalidDate }
+        return start
+    }
+
+    public static func read(_ url: URL) throws -> A1Log {
+        let data = try Data(contentsOf: url, options: .alwaysMapped)
+        let start = try parseHeader(data)
+        let base = data.startIndex
 
         let scale = Float.pi / 180 / gyroLSBPerDPS
         var gyro: [SIMD3<Float>] = []

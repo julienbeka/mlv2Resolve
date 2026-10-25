@@ -12,6 +12,125 @@ final class GyroflowProjectTests: XCTestCase {
         return try XCTUnwrap(JSONSerialization.jsonObject(with: d) as? [String: Any])
     }
 
+
+    // Regression: a correct lens profile must also reach the plugin's stabilization settings.
+    func testSlimReadoutReachesBothProjectFields() throws {
+        let modes: [(Int, Int, Int, Double, Double)] = [
+            (2520, 1080, 1, 25, 24.165),
+            (2880, 1226, 1, 25, 30.879875),
+            (3072, 1308, 1, 23.976, 35.1525),
+            (2560, 1440, 1, 25, 32.94),
+            (1920, 1280, 1, 25, 22.64),
+            (2160, 1620, 1, 23.943, 32.09625),
+            (1504, 2538, 3, 22.25, 40.608),
+            (1376, 2322, 3, 23.976, 37.152),
+            (1280, 2160, 3, 25, 34.56),
+            (1600, 2400, 3, 23.3, 38.4),
+            (1472, 2208, 3, 25, 35.328),
+            (1360, 2040, 3, 25, 32.64),
+            (1664, 2268, 3, 23.976, 36.288),
+            (1552, 2216, 3, 25, 35.456),
+            (1424, 1942, 3, 25, 31.072),
+            (1736, 2214, 3, 23.976, 35.9775),
+            (1600, 2040, 3, 25, 32.64),
+            (1472, 1878, 3, 25, 30.048),
+            (1736, 2178, 3, 23.976, 35.3925),
+            (1600, 2008, 3, 25, 32.128),
+            (1472, 1846, 3, 25, 29.536),
+            (1736, 976, 1, 46.8, 16.104),
+            (1736, 868, 1, 50, 14.105),
+            (1736, 790, 1, 54, 12.8375),
+            (1736, 738, 1, 57, 11.9925),
+            (1736, 1160, 1, 23.976, 19.14),
+            (1736, 1160, 1, 25, 23.2),
+            (1736, 1160, 1, 29.97, 19.14),
+            (5208, 3478, 1, 3, 150.85825),
+            (1552, 2118, 3, 25, 33.888), // Actual height wins over the inconsistent firmware label.
+            (1736, 1152, 1, 25, 23.04),
+            (1736, 1152, 1, 29.97, 19.008),
+        ]
+        for (w, h, squeeze, fps, expected) in modes {
+            let t = ClipTiming(start: Date(), frames: 100, fps: fps, width: w, height: h, squeeze: squeeze)
+            let c = try LensProfile.computed(focalMM: 25, timing: t)
+            let data = try GyroflowProject.make(clipDir: clipDir, timing: t, log: log, offsetMs: -4192,
+                                               calibration: c, position: .top)
+            let p = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            for section in ["calibration_data", "stabilization"] {
+                let value = try XCTUnwrap((p[section] as? [String: Any])?["frame_readout_time"] as? Double)
+                XCTAssertEqual(value, expected, accuracy: 0.000001, "\(w)x\(h) @\(fps): \(section)")
+            }
+        }
+    }
+
+    func testKnownSensorTimingReplacesGenericImportedLensTiming() throws {
+        let p = try make(cal: ["frame_readout_time": 15.8, "focal_length": 25])
+        for section in ["calibration_data", "stabilization"] {
+            XCTAssertEqual((p[section] as? [String: Any])?["frame_readout_time"] as? Double, 32.128)
+        }
+        XCTAssertEqual((p["calibration_data"] as? [String: Any])?["focal_length"] as? Int, 25)
+    }
+
+    func testUnknownFormatPreservesImportedReadoutOrDisablesCorrection() throws {
+        let t = ClipTiming(start: Date(), frames: 100, fps: 25, width: 1234, height: 567, squeeze: 1)
+        let cases: [(Any, Double)] = [(22.7, 22.7), (-22.7, -22.7), (0.0, 0.0),
+                                     (true, 0.0), (Double.nan, 0.0), ("bad", 0.0), (NSNull(), 0.0)]
+        for (value, expected) in cases {
+            let data = try GyroflowProject.make(clipDir: clipDir, timing: t, log: log, offsetMs: 0,
+                                               calibration: ["frame_readout_time": value], position: .top)
+            let p = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            XCTAssertEqual((p["stabilization"] as? [String: Any])?["frame_readout_time"] as? Double, expected)
+        }
+        let c = try LensProfile.computed(focalMM: 25, timing: t)
+        XCTAssertEqual(c["frame_readout_time"] as? Double, 0)
+    }
+
+    func testUnrecognizedSamplingCadenceAndDesqueezedSizeDoNotGuessReadout() throws {
+        let unsupported = [
+            // Native 3x3 footage must not inherit the 1x1 1080p crop's timing.
+            ClipTiming(start: Date(), frames: 10, fps: 25, width: 1920, height: 1080, squeeze: 1,
+                       samplingX: 3, samplingY: 3),
+            ClipTiming(start: Date(), frames: 10, fps: 25, width: 1600, height: 2008, squeeze: 3,
+                       samplingX: 2, samplingY: 1),
+            ClipTiming(start: Date(), frames: 10, fps: 60, width: 1600, height: 2008, squeeze: 3),
+            ClipTiming(start: Date(), frames: 10, fps: 25, width: 4800, height: 2008, squeeze: 3),
+            ClipTiming(start: Date(), frames: 10, fps: 60, width: 1736, height: 1160, squeeze: 1),
+        ]
+        for timing in unsupported {
+            let c = try LensProfile.computed(focalMM: 25, timing: timing)
+            XCTAssertEqual(c["frame_readout_time"] as? Double, 0)
+        }
+    }
+
+    func testRealSlimShootReadouts() throws {
+        guard let path = ProcessInfo.processInfo.environment["MLV2DNG_SLIM_SHOOT"] else {
+            throw XCTSkip("MLV2DNG_SLIM_SHOOT not set")
+        }
+        let source = URL(fileURLWithPath: path)
+        let clips = try FileManager.default.contentsOfDirectory(at: source, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension.uppercased() == "MLV" }
+        XCTAssertEqual(clips.count, 8)
+        let fixes = SqueezeFix.corrections(for: clips.compactMap { clip in
+            MLVHeader.sampling(of: clip).map { (name: clip.lastPathComponent, sampling: $0) }
+        })
+        for clip in clips {
+            let header = try XCTUnwrap(MLVHeader.timing(of: clip))
+            let t = fixes[clip.lastPathComponent].map {
+                header.withSqueeze(SqueezeFix.horizontalSqueeze(x: $0.x, y: $0.y) ?? 1)
+            } ?? header
+            XCTAssertEqual(t.samplingX, 3)
+            XCTAssertEqual(t.samplingY, 1)
+            let expected = t.width == 1600 ? 32.128 : 35.3925
+            let c = try LensProfile.computed(focalMM: 25, timing: t)
+            let data = try GyroflowProject.make(clipDir: clipDir, timing: t, log: log, offsetMs: -4192,
+                                               calibration: c, position: .top)
+            let p = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            for section in ["calibration_data", "stabilization"] {
+                let value = try XCTUnwrap((p[section] as? [String: Any])?["frame_readout_time"] as? Double)
+                XCTAssertEqual(value, expected, accuracy: 0.000001, clip.lastPathComponent)
+            }
+        }
+    }
+
     func testOffsetsFormula() {
         let o = GyroflowProject.offsets(durationMs: 21159, offsetMs: -4192)
         XCTAssertEqual(Set(o.keys), ["7365850", "14771500", "22177150"])

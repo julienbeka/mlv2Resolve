@@ -113,6 +113,21 @@ final class MLVHeaderTests: XCTestCase {
         XCTAssertEqual(Double(c.nanosecond ?? 0) / 1e9, 0.216, accuracy: 0.001)
     }
 
+    func testSensorSamplingSurvivesTimingAndSqueezeCorrection() throws {
+        let url = try timingClip(chunkFrames: 0)
+        var bytes = try Data(contentsOf: url)
+        let rawc = hdr("RAWC", size: 32, ts: 0) + Data(count: 8) + Data([1, 0, 1, 0]) + Data(count: 4)
+        bytes.insert(contentsOf: rawc, at: 52) // Before RAWI/RTCI and the first video frame.
+        try bytes.write(to: url)
+        let original = try XCTUnwrap(MLVHeader.timing(of: url))
+        XCTAssertEqual(original.samplingX, 1)
+        let timing = original.withSqueeze(3)
+        XCTAssertEqual(timing.samplingX, 3)
+        XCTAssertEqual(timing.samplingY, 1)
+        let profile = try LensProfile.computed(focalMM: 25, timing: timing)
+        XCTAssertEqual(profile["frame_readout_time"] as? Double, 32.128)
+    }
+
     func testTimingTruncatedAndInvalid() throws {
         let full = try Data(contentsOf: try timingClip(chunkFrames: 0))
         let u = tmp.appendingPathComponent("cut.MLV")

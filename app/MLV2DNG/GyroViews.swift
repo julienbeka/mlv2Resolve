@@ -502,3 +502,41 @@ struct LensEditor: View {
         draft.dimensions[copy] = LensDraft.describe(copy)
     }
 }
+
+/// Observe the coordinator directly: AppState does not republish each per-clip update.
+struct GyroProgressLabel: View {
+    @ObservedObject var gyro: GyroSyncCoordinator
+    var body: some View {
+        let progress = gyro.progress
+        if progress.isActive {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Gyro sync: \(progress.completed)/\(progress.total) clips")
+            }
+            .font(.caption)
+        }
+    }
+}
+
+struct GyroMenuActivity: View {
+    @ObservedObject var gyro: GyroSyncCoordinator
+    @State private var quarterTurn = 0
+
+    var body: some View {
+        if gyro.progress.isActive {
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .rotationEffect(.degrees(Double(quarterTurn) * 90))
+                .accessibilityLabel(Text("Gyro sync in progress"))
+                .task {
+                    // MenuBarExtra snapshots its label. TimelineView invalidates that snapshot while
+                    // it is being rendered, causing an unbounded redraw loop on macOS 26.
+                    // Update a discrete frame only after sleeping; never animate during a snapshot.
+                    while !Task.isCancelled {
+                        do { try await Task.sleep(for: .milliseconds(500)) }
+                        catch { return }
+                        quarterTurn = (quarterTurn + 1) % 4
+                    }
+                }
+        }
+    }
+}

@@ -44,6 +44,7 @@ struct MainWindowView: View {
                 }
             }
             if let gyro = state.gyro {
+                GyroProgressLabel(gyro: gyro)
                 GyroShootsSection(state: state, gyro: gyro)
             }
             Picker("Dual ISO", selection: Binding(get: { state.mode }, set: { m in Task { await state.setMode(m) } })) {
@@ -53,9 +54,10 @@ struct MainWindowView: View {
             .pickerStyle(.segmented)
             Divider()
             HStack {
-                Button("Open Resolve") { MenuActions.openResolve() }.disabled(MenuActions.resolveURL == nil)
+                Button("Open Resolve") { MenuActions.openResolve(state: state) }.disabled(MenuActions.resolveURL == nil || state.openingResolve || state.waitingForResolveGyro || state.desqueezing)
                 Button("Desqueeze in Resolve") { MenuActions.desqueeze(state: state) }
-                    .disabled(state.desqueezing || state.desqueezeTargets.isEmpty || MenuActions.resolveURL == nil)
+                    .disabled(state.desqueezing || state.openingResolve || state.waitingForResolveGyro || state.desqueezeTargets.isEmpty || MenuActions.resolveURL == nil)
+                if state.openingResolve || state.waitingForResolveGyro { ProgressView().controlSize(.small) }
                 Button("Show DNGs in Finder") { MenuActions.showDNGsInFinder() }
                 Spacer()
             }

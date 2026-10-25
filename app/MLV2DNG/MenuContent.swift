@@ -30,9 +30,36 @@ func shootTitle(_ s: Shoot) -> String {
 enum MenuActions {
     static var resolveURL: URL? { resolveAppURL(fileExists: { FileManager.default.fileExists(atPath: $0) }) }
 
-    static func openResolve() {
-        guard let url = resolveURL else { return }
-        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+    static func openResolve(state: AppState) {
+        guard let url = resolveURL, !state.openingResolve, !state.waitingForResolveGyro else { return }
+        var waitForGyro = false
+        if state.gyro?.progress.isActive == true {
+            let alert = NSAlert()
+            alert.messageText = String(localized: "Gyro files are still being prepared")
+            alert.informativeText = String(localized: "Some .gyroflow files are not ready yet. Wait for gyro sync to finish before editing these clips.")
+            alert.addButton(withTitle: String(localized: "Wait"))
+            alert.addButton(withTitle: String(localized: "Open Anyway"))
+            alert.addButton(withTitle: String(localized: "Cancel"))
+            NSApp.activate(ignoringOtherApps: true)
+            let response = alert.runModal()
+            guard response != .alertThirdButtonReturn else { return }
+            waitForGyro = response == .alertFirstButtonReturn
+        }
+        Task {
+            if waitForGyro, !(await state.waitForResolveGyro()) { return }
+            let result = await state.openResolveProjects(launch: {
+                _ = try await NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+            }, confirmSwitch: { current, target in
+                let alert = NSAlert()
+                alert.messageText = String(localized: "Switch Resolve project?")
+                alert.informativeText = String(localized: "Save “\(current)” and open “\(target)”? Resolve will save the current project before switching.")
+                alert.addButton(withTitle: String(localized: "Cancel"))
+                alert.addButton(withTitle: String(localized: "Save and Open"))
+                NSApp.activate(ignoringOtherApps: true)
+                return alert.runModal() == .alertSecondButtonReturn
+            })
+            if let result { showDetail(result.text, style: result.isError ? .warning : .informational) {} }
+        }
     }
 
     static func desqueeze(state: AppState) {
@@ -75,13 +102,14 @@ enum MenuActions {
 struct MenuLabel: View {
     @ObservedObject var state: AppState
     var body: some View {
-        if state.alert != nil || state.needsFuseT {
-            Image(systemName: "exclamationmark.triangle")
-        } else {
-            HStack(spacing: 2) {
+        HStack(spacing: 2) {
+            if state.alert != nil || state.needsFuseT {
+                Image(systemName: "exclamationmark.triangle")
+            } else {
                 Image(systemName: "infinity")
                 if !state.mounted.isEmpty { Text("\(state.mounted.count)") }
             }
+            if let gyro = state.gyro { GyroMenuActivity(gyro: gyro) }
         }
     }
 }
@@ -113,12 +141,13 @@ struct MenuContent: View {
             }
             .disabled(state.busy.contains(shoot.folder.standardizedFileURL.path))
         }
+        if let gyro = state.gyro { GyroProgressLabel(gyro: gyro) }
         Divider()
         Button("Choose Folder…") { MenuActions.chooseFolder(state: state) }
-        Button("Open Resolve") { MenuActions.openResolve() }
-            .disabled(MenuActions.resolveURL == nil)
+        Button("Open Resolve") { MenuActions.openResolve(state: state) }
+            .disabled(MenuActions.resolveURL == nil || state.openingResolve || state.waitingForResolveGyro || state.desqueezing)
         Button("Desqueeze in Resolve") { MenuActions.desqueeze(state: state) }
-            .disabled(state.desqueezing || state.desqueezeTargets.isEmpty || MenuActions.resolveURL == nil)
+            .disabled(state.desqueezing || state.openingResolve || state.waitingForResolveGyro || state.desqueezeTargets.isEmpty || MenuActions.resolveURL == nil)
         Button("Show DNGs in Finder") { MenuActions.showDNGsInFinder() }
         Picker("Dual ISO", selection: Binding(get: { state.mode }, set: { m in Task { await state.setMode(m) } })) {
             Text("Smooth Editing").tag(DualISOMode.montageFluide)

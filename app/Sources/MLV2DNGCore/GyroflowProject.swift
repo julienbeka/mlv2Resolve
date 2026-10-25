@@ -74,7 +74,13 @@ public enum GyroflowProject {
 
         var cal = calibration
         cal["sync_settings"] = ["do_autosync": false]
+        let readoutMS = RollingShutter.resolvedMS(for: timing, calibration: calibration)
+        cal["frame_readout_time"] = readoutMS
         p["calibration_data"] = cal
+
+        var stabilization = p["stabilization"] as? [String: Any] ?? [:]
+        stabilization["frame_readout_time"] = readoutMS
+        p["stabilization"] = stabilization
 
         var sync = p["synchronization"] as? [String: Any] ?? [:]
         sync["do_autosync"] = false

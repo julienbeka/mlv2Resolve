@@ -1199,7 +1199,6 @@
       }
     },
     "Cancel": {
-      "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -2034,6 +2033,150 @@
           "stringUnit": {
             "state": "translated",
             "value": "Impossible d’importer « %1$@ » : %2$@"
+          }
+        }
+      }
+    },
+    "Gyro files are still being prepared": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gyro files are still being prepared"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Des fichiers .gyroflow sont encore en préparation"
+          }
+        }
+      }
+    },
+    "Some .gyroflow files are not ready yet. Wait for gyro sync to finish before editing these clips.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some .gyroflow files are not ready yet. Wait for gyro sync to finish before editing these clips."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Certains fichiers .gyroflow ne sont pas encore prêts. Attendez la fin de la synchro gyro avant de monter ces plans."
+          }
+        }
+      }
+    },
+    "Wait": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wait"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Attendre"
+          }
+        }
+      }
+    },
+    "Open Anyway": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Anyway"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvrir quand même"
+          }
+        }
+      }
+    },
+    "Switch Resolve project?": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Switch Resolve project?"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Changer de projet Resolve ?"
+          }
+        }
+      }
+    },
+    "Save “%@” and open “%@”? Resolve will save the current project before switching.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save “%@” and open “%@”? Resolve will save the current project before switching."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enregistrer « %1$@ » et ouvrir « %2$@ » ? Resolve enregistrera le projet actuel avant de basculer."
+          }
+        }
+      }
+    },
+    "Save and Open": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save and Open"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enregistrer et ouvrir"
+          }
+        }
+      }
+    },
+    "Gyro sync: %lld/%lld clips": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gyro sync: %lld/%lld clips"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Synchro gyro : %1$lld/%2$lld plans"
+          }
+        }
+      }
+    },
+    "Gyro sync in progress": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gyro sync in progress"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Synchro gyro en cours"
           }
         }
       }

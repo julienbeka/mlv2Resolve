@@ -44,7 +44,7 @@ public enum LensProfile {
             ] as [String: Any],
             "focal_length": focalMM,
             "fps": timing.fps,
-            "frame_readout_time": 15.8,
+            "frame_readout_time": RollingShutter.readoutMS(for: timing) ?? 0,
             "global_shutter": false,
             "gyro_lpf": NSNull(),
             "identifier": "",

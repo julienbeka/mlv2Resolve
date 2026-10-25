@@ -28,6 +28,8 @@ public final class AppState: ObservableObject {
     @Published public private(set) var desqueezeTargets: [ResolveDesqueeze.Target] = []
     /// A « Desqueeze in Resolve » run is in flight.
     @Published public private(set) var desqueezing = false
+    @Published public private(set) var openingResolve = false
+    @Published public private(set) var waitingForResolveGyro = false
     /// Whether the last « Desqueeze in Resolve » of this session reached Resolve Studio (nil: not tried yet).
     public private(set) var resolveReachable: Bool?
     @Published public private(set) var mode: DualISOMode
@@ -66,9 +68,14 @@ public final class AppState: ObservableObject {
     private var squeezeFactors: [String: Int?] = [:]
     private var mountPoints: [String: URL] = [:]
     private let resolveRunner: ResolveDesqueeze.Runner?
+    private let projectRunner: ResolveDesqueeze.Runner?
+    private let projectProbeRunner: ResolveDesqueeze.Runner?
+    private var resolveShoots: [String: (shoot: Shoot, corrections: [String: Int])] = [:]
+    private var projectMenuTask: Task<Void, Never>?
     /// Where the Resolve menu script is written (nil: never written, e.g. in tests).
     private let resolveScriptsDir: URL?
     private let prepareResolvePresets: (([Int]) -> ResolvePresets.Preparation)?
+    private let prepareProjectPresets: (([ResolvePresets.Sizing]) -> ResolvePresets.Preparation)?
     /// Background gyro sync, told about every mount and unmount (nil: no gyro sync, e.g. in tests).
     public let gyro: GyroSyncCoordinator?
 
@@ -77,12 +84,18 @@ public final class AppState: ObservableObject {
                 restartWindow: Duration = .seconds(60),
                 resolveRunner: ResolveDesqueeze.Runner? = nil, resolveScriptsDir: URL? = nil,
                 prepareResolvePresets: (([Int]) -> ResolvePresets.Preparation)? = nil,
-                gyro: GyroSyncCoordinator? = nil) {
+                gyro: GyroSyncCoordinator? = nil,
+                projectRunner: ResolveDesqueeze.Runner? = nil,
+                projectProbeRunner: ResolveDesqueeze.Runner? = nil,
+                prepareProjectPresets: (([ResolvePresets.Sizing]) -> ResolvePresets.Preparation)? = nil) {
         self.manager = manager
         self.gyro = gyro
         self.resolveRunner = resolveRunner
+        self.projectRunner = projectRunner ?? resolveRunner
+        self.projectProbeRunner = projectProbeRunner
         self.resolveScriptsDir = resolveScriptsDir
         self.prepareResolvePresets = prepareResolvePresets
+        self.prepareProjectPresets = prepareProjectPresets
         self.defaults = defaults
         self.scan = scan
         self.restartDelays = restartDelays
@@ -100,7 +113,7 @@ public final class AppState: ObservableObject {
         }
     }
 
-    deinit { eventTask?.cancel() }
+    deinit { eventTask?.cancel(); projectMenuTask?.cancel() }
 
     // MARK: Public API
 
@@ -172,10 +185,84 @@ public final class AppState: ObservableObject {
         }
     }
 
+    /// The Wait choice keeps the UI live and opens Resolve as soon as pending/running jobs finish.
+    public func waitForResolveGyro() async -> Bool {
+        guard !waitingForResolveGyro else { return false }
+        waitingForResolveGyro = true
+        defer { waitingForResolveGyro = false }
+        while gyro?.progress.isActive == true {
+            do { try await Task.sleep(for: .milliseconds(200)) } catch { return false }
+        }
+        return !Task.isCancelled
+    }
+
+    /// Rebuild a fresh mounted-media snapshot off the UI thread, including clips added since mounting.
+    public func resolveProjectMedia() async -> [ResolveProject.ShootMedia] {
+        let snapshot = mounted.sorted().compactMap { k -> (String, Shoot, URL, [String: Int])? in
+            guard let record = resolveShoots[k], let mount = mountPoints[k] else { return nil }
+            return (k, record.shoot, mount, record.corrections)
+        }
+        let result = await Task.detached {
+            snapshot.map { key, shoot, mount, corrections in
+                let refreshed = (try? ShootScanner.scan(shoot.folder))?.first { $0.folder.standardizedFileURL == shoot.folder.standardizedFileURL } ?? shoot
+                return (key, ResolveProject.discover(refreshed, mount: mount, corrections: corrections))
+            }
+        }.value
+        return result.filter { mounted.contains($0.0) }.map { $0.1 }
+    }
+
+    /// Launch is supplied by the AppKit shell; all filesystem and Resolve work remains asynchronous.
+    public func openResolveProjects(launch: () async throws -> Void,
+                                    confirmSwitch: (String, String) async -> Bool) async -> (text: String, isError: Bool)? {
+        guard !openingResolve && !desqueezing else { return nil }
+        openingResolve = true
+        defer { openingResolve = false }
+        let media = await resolveProjectMedia()
+        let factors = Set(media.flatMap(\.media).map(\.factor).filter { $0 > 1 }).sorted()
+        let presets = ResolveProject.sizingPresets(shoots: media)
+        let preparation = prepareProjectPresets?(presets) ?? prepareResolvePresets?(factors)
+        projectMenuTask?.cancel()
+        do {
+            if let dir = resolveScriptsDir { try ResolveProject.installMenuScript(shoots: media, in: dir) }
+            try await launch()
+        } catch { return (error.localizedDescription, true) }
+        guard !media.isEmpty, media.contains(where: { !$0.media.isEmpty }) else {
+            let names = media.flatMap(\.warnings).joined(separator: ", ")
+            return (ResolveProject.text("No mounted DNG sequences were found. Mount a shoot, then try again.", "Aucune séquence DNG montée trouvée. Montez un tournage, puis réessayez.") + (names.isEmpty ? "" : "\n" + names), !media.isEmpty)
+        }
+        guard let projectRunner else { return (ResolveProject.guide, false) }
+        if let probe = projectProbeRunner, !(await ResolveProject.waitForConnection(runner: probe)) {
+            return ResolveProject.message(.unavailable)
+        }
+        let outcome = await ResolveProject.execute(shoots: media, runner: projectRunner, confirmSwitch: confirmSwitch,
+                                                   connectionAttempts: projectProbeRunner == nil ? 30 : 1)
+        var result = ResolveProject.message(outcome)
+        if case .report = outcome {
+            if !defaults.bool(forKey: "resolveProjectGuideShown") {
+                if !result.text.contains(ResolveProject.guide) { result.text += "\n\n" + ResolveProject.guide }
+                defaults.set(true, forKey: "resolveProjectGuideShown")
+            }
+            if preparation == .manual { result.text += "\n\n" + ResolvePresets.manualMessage() + "\n" + presets.map(\.manualStep).joined(separator: "\n") }
+        }
+        return result
+    }
+
+    private func refreshProjectMenuScript() {
+        guard let dir = resolveScriptsDir else { return }
+        projectMenuTask?.cancel()
+        projectMenuTask = Task { [weak self] in
+            guard let self else { return }
+            let media = await self.resolveProjectMedia()
+            guard !Task.isCancelled else { return }
+            do { try ResolveProject.installMenuScript(shoots: media, in: dir) }
+            catch { self.alert = error.localizedDescription }
+        }
+    }
+
     /// « Desqueeze in Resolve »: applies the « mlv2dng 1x<N> » Input Sizing preset to the clips of the mounted
     /// anamorphic shoots in Resolve's open project. Returns the alert text; nil if a run is already in flight.
     public func desqueezeInResolve() async -> (text: String, isError: Bool)? {
-        guard !desqueezing else { return nil }
+        guard !desqueezing && !openingResolve && !waitingForResolveGyro else { return nil }
         desqueezing = true
         defer { desqueezing = false }
         let targets = desqueezeTargets
@@ -382,9 +469,11 @@ public final class AppState: ObservableObject {
         let k = Self.key(shoot.folder)
         squeezeFactors[k] = .some(analysis.squeeze)
         mountPoints[k] = url
+        resolveShoots[k] = (shoot, analysis.squeezeByName)
     }
 
     private func updateDesqueezeTargets() {
+        refreshProjectMenuScript()
         let targets = mounted.compactMap { k -> ResolveDesqueeze.Target? in
             guard let url = mountPoints[k], let f = squeezeFactors[k] ?? nil else { return nil }
             return ResolveDesqueeze.Target(prefix: url.standardizedFileURL.path, factor: f)

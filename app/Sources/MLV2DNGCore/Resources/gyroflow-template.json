@@ -57,7 +57,7 @@
         },
         "focal_length": 25,
         "fps": 25,
-        "frame_readout_time": 15.800000190734863,
+        "frame_readout_time": 0.0,
         "global_shutter": false,
         "gyro_lpf": null,
         "identifier": "",
@@ -149,7 +149,7 @@
             0
         ],
         "fov": 1,
-        "frame_readout_time": 15.800000190734863,
+        "frame_readout_time": 0.0,
         "horizon_lock_amount": 0,
         "horizon_lock_integration_method": 1,
         "horizon_lock_roll": 0,

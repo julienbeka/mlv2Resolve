@@ -62,6 +62,25 @@ final class ResolvePresetTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: file), Data(conflict.utf8))
     }
 
+    func testFitVariantInstallationIsIdempotentAndPreservesOtherPresets() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: file) }
+        try Data(original.utf8).write(to: file)
+        let sizing = ResolvePresets.Sizing(name: "mlv2dng 1x3 Fit", factor: 3, zoom: 0.5)
+        XCTAssertEqual(ResolvePresets.prepare(sizing: [sizing], file: file, isRunning: { false }), .created)
+        XCTAssertEqual(ResolvePresets.prepare(sizing: [sizing], file: file, isRunning: { false }), .ready)
+        let xml = try XMLDocument(contentsOf: file)
+        let names = try xml.nodes(forXPath: "//Name").compactMap(\.stringValue)
+        XCTAssertEqual(names, ["None", "mlv2dng 1x3 Fit"])
+        let hex = try XCTUnwrap(xml.nodes(forXPath: "//Presets").last?.stringValue)
+        let bytes = stride(from: 0, to: hex.count, by: 2).map { offset -> UInt8 in
+            let start = hex.index(hex.startIndex, offsetBy: offset)
+            return UInt8(hex[start..<hex.index(start, offsetBy: 2)], radix: 16)!
+        }
+        let decoded = String(decoding: bytes, as: UTF8.self)
+        XCTAssertTrue(decoded.contains("K~10300001}I PB{Para|1.5}"))
+        XCTAssertTrue(decoded.contains("K~10300002}I PB{Para|0.5}"))
+    }
     func testPayloadUsesObservedWidthAndHeightFields() {
         for factor in [3, 5] {
             let hex = ResolvePresets.payload(factor)

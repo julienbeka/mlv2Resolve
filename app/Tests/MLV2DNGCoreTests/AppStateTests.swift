@@ -47,6 +47,17 @@ final class AppStateTests: XCTestCase {
         XCTAssertNil(state.resolveReachable)
     }
 
+    func testOpenResolveLaunchesOnceAndExplainsEmptyMountedMedia() async {
+        let state = makeState()
+        var launches = 0
+        let result = await state.openResolveProjects(launch: { launches += 1 }, confirmSwitch: { _, _ in
+            XCTFail("No mounted projects to switch"); return false
+        })
+        XCTAssertEqual(launches, 1)
+        XCTAssertFalse(state.openingResolve)
+        XCTAssertFalse(result?.isError ?? true)
+    }
+
     func makeManager(readinessTimeout: Duration = .seconds(2)) -> MountManager {
         MountManager(mlvfs: URL(fileURLWithPath: "/opt/engine/mlvfs"),
                             fpmDir: URL(fileURLWithPath: "/opt/engine/fpm", isDirectory: true),
@@ -396,7 +407,7 @@ extension AppStateTests {
         await state.choose(folder: volume)
         await state.toggle(try shoot(state, "Plain"))
         XCTAssertEqual(state.desqueezeTargets, [])
-        XCTAssertFalse(FileManager.default.fileExists(atPath: scripts.path), "nothing squeezed: no script yet")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: scripts.appendingPathComponent(ResolveDesqueeze.menuScriptName).path), "nothing squeezed: no desqueeze script yet")
 
         await state.toggle(try shoot(state, "Ana"))
         let prefix = mountRoot.appendingPathComponent("Ana").standardizedFileURL.path

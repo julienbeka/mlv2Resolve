@@ -12,6 +12,17 @@ public enum ClipGyroState: Equatable, Sendable {
     case failed(String)
 }
 
+/// Terminal states include clips needing attention: the counter measures finished work, not sync success.
+public struct GyroProgress: Equatable, Sendable {
+    public let total: Int
+    public let completed: Int
+    public var isActive: Bool { completed < total }
+    public init(states: [ClipGyroState]) {
+        total = states.count
+        completed = states.filter { $0 != .pending && $0 != .running }.count
+    }
+}
+
 /// Which lens profile went into a clip's `.gyroflow`.
 public enum LensProfileKind: String, Sendable {
     /// Distortion-free profile computed from the focal length.
@@ -58,6 +69,8 @@ public final class GyroSyncCoordinator: ObservableObject {
     }
 
     @Published public private(set) var states: [String: ClipGyroState] = [:]
+
+    public var progress: GyroProgress { GyroProgress(states: Array(states.values)) }
 
     public var lenses: [Lens] {
         get {

@@ -66,6 +66,36 @@ public enum MLVHeader {
         return nil
     }
 
+    /// Reads only blocks before the first VIDF; no RTCI or complete frame scan required.
+    public static func videoFormat(of url: URL) -> (width: Int, height: Int, fps: Double)? {
+        guard let fh = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? fh.close() }
+        var offset: UInt64 = 0
+        var width = 0, height = 0
+        var fps = 0.0
+        for _ in 0..<64 {
+            guard (try? fh.seek(toOffset: offset)) != nil,
+                  let head = try? fh.read(upToCount: 8), head.count == 8 else { break }
+            let type = String(decoding: head.prefix(4), as: UTF8.self)
+            let size = head.withUnsafeBytes { UInt64($0.loadUnaligned(fromByteOffset: 4, as: UInt32.self).littleEndian) }
+            if type == "VIDF" || size < 16 { break }
+            if type == "MLVI", size >= 52 {
+                guard (try? fh.seek(toOffset: offset + 44)) != nil,
+                      let b = try? fh.read(upToCount: 8), b.count == 8 else { return nil }
+                let n = b.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self).littleEndian }
+                let d = b.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 4, as: UInt32.self).littleEndian }
+                if d > 0 { fps = Double(n) / Double(d) }
+            } else if type == "RAWI", size >= 20 {
+                guard (try? fh.seek(toOffset: offset + 16)) != nil,
+                      let b = try? fh.read(upToCount: 4), b.count == 4 else { return nil }
+                width = Int(b[0]) | Int(b[1]) << 8; height = Int(b[2]) | Int(b[3]) << 8
+            }
+            if width > 0 && height > 0 && fps > 0 { return (width, height, fps) }
+            offset += size
+        }
+        return nil
+    }
+
     /// Start time and format of a clip, from MLVI/RAWI/RTCI/VIDF. Walks every
     /// block (seeking over frame data) including `.M00`… chunk files to count
     /// video frames. `start` = RTCI local time + (first VIDF ts − RTCI ts).
@@ -138,8 +168,9 @@ public enum MLVHeader {
         guard let comps = rtc, let first = firstTs, frames > 0, fps > 0, width > 0, height > 0,
               let base0 = Calendar(identifier: .gregorian).date(from: comps) else { return nil }
         let start = base0.addingTimeInterval((Double(first) - Double(rtcTs)) / 1_000_000)
+        let sensor = sampling(of: url)
         return ClipTiming(start: start, frames: frames, fps: fps, width: width, height: height,
-                          squeeze: horizontalSqueeze(of: url) ?? 1)
+                          squeeze: horizontalSqueeze(of: url) ?? 1, samplingX: sensor?.x, samplingY: sensor?.y)
     }
 }
 
@@ -153,14 +184,24 @@ public struct ClipTiming: Sendable {
     public let height: Int
     /// Horizontal anamorphic squeeze (1 when none).
     public let squeeze: Int
+    /// Sensor sampling from RAWC; unlike squeeze, distinguishes 1x1 crop from 3x3 binning.
+    public let samplingX: Int?
+    public let samplingY: Int?
 
-    public init(start: Date, frames: Int, fps: Double, width: Int, height: Int, squeeze: Int) {
+    public init(start: Date, frames: Int, fps: Double, width: Int, height: Int, squeeze: Int,
+                samplingX: Int? = nil, samplingY: Int? = nil) {
         self.start = start; self.frames = frames; self.fps = fps
         self.width = width; self.height = height; self.squeeze = squeeze
+        self.samplingX = samplingX; self.samplingY = samplingY
     }
     public var duration: TimeInterval { Double(frames) / fps }
     /// The same clip with another horizontal squeeze (header corrected by `SqueezeFix`).
     public func withSqueeze(_ squeeze: Int) -> ClipTiming {
-        ClipTiming(start: start, frames: frames, fps: fps, width: width, height: height, squeeze: squeeze)
+        // A correction supersedes the bad RAWC ratio as well. Equal sampling with squeeze 1 cannot
+        // distinguish 1x1 from 3x3, so leave it unknown when correcting to a non-anamorphic image.
+        let changed = squeeze != self.squeeze
+        return ClipTiming(start: start, frames: frames, fps: fps, width: width, height: height, squeeze: squeeze,
+                          samplingX: changed ? (squeeze > 1 ? squeeze : nil) : samplingX,
+                          samplingY: changed ? (squeeze > 1 ? 1 : nil) : samplingY)
     }
 }

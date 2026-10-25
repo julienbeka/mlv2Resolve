@@ -28,7 +28,7 @@ avec leur son et désanamorphosés. L'utilisateur voit si des `.gyroflow` sont e
      plans (`timelineFrameRate`), `timelineInputResMismatchBehavior` = `scaleToFit`.
    - Taille de timeline (Studio) : taille native désanamorphosée = largeur RAWI × anamorphose (après la
      correction automatique de la tâche 10) × hauteur. 4.8K 1x3 → 4800×2008 ; 5.2K 1x3 (1736×2178) →
-     5208×2178. Tournage mélangé : la plus grande des tailles au rapport majoritaire ; les autres plans sont mis
+     5208×2178. Tournage mélangé : la résolution désanamorphosée la plus représentée l’emporte ; en cas d’égalité, la plus grande taille est choisie. Les autres plans sont mis
      à l'échelle pour tenir (scaleToFit) — vérifié : un 5.2K remplit une timeline 4800×2008.
    - Version gratuite : timeline UHD 3840×2160 ; chaque plan est vu en entier avec bandes noires en haut et en
      bas (zoom = largeur timeline / largeur que donnerait le remplissage en hauteur, ex. 0,744 pour du 4.8K
@@ -40,7 +40,7 @@ avec leur son et désanamorphosés. L'utilisateur voit si des `.gyroflow` sont e
    `.gyroflow` n'est pas importé (le plugin Gyroflow le trouve à côté des DNG).
 4. **Désanamorphose** dès le chutier : `SetClipProperty("Input Sizing Preset", "mlv2dng 1x<N>")` (préréglages
    déjà créés par mlv2dng, vérifié sur 4.8K et 5.2K), en respectant la règle existante (un clip sur un autre
-   préréglage est laissé tel quel).
+   préréglage est laissé tel quel). Un plan anamorphique d’un autre rapport utilise une variante « mlv2dng 1x<N> Fit … » portant aussi la réduction nécessaire pour tenir dans la timeline native.
 5. **Indicateur de synchro gyro** : dans la barre de menu (icône animée) et la fenêtre (« Synchro gyro : 3/6
    plans »), tant qu'une tâche tourne. Clic sur « Ouvrir Resolve » pendant une synchro : avertissement
    « Des fichiers .gyroflow sont encore en préparation » avec « Attendre » / « Ouvrir quand même ». Ordre de
@@ -117,9 +117,13 @@ avec leur son et désanamorphosés. L'utilisateur voit si des `.gyroflow` sont e
 ## Critères de réussite
 
 - Studio, tournage 20261025 (6 plans 4.8K dont M25-1745 corrigé + 2 plans 5.2K) : un clic crée le projet
-  « 20261025 », timeline 5208×2178 (plus grande taille, même rapport), 25 i/s, couleurs P3-D60 / Linear,
+  « 20261025 », timeline 4800×2008 (résolution majoritaire : 6 plans 4.8K contre 2 plans 5.2K), 25 i/s, couleurs P3-D60 / Linear,
   préréglage « mlv2dng » appliqué s'il existe, 8 plans dans le chutier avec leur son, désanamorphosés, plus aucun
   zoom manuel.
 - Second clic après ajout d'un plan : seul ce plan est ajouté.
 - Version gratuite : le guide mène au même résultat en UHD avec bandes noires.
 - Pendant une synchro gyro, l'indicateur est visible et « Ouvrir Resolve » avertit.
+
+## Ajustement du 25/10/2026
+
+La résolution la plus représentée remplace la plus grande résolution au rapport majoritaire. Ainsi, 5 rushs 4.8K et 2 rushs 5.2K donnent une timeline 4800×2008. En cas d’égalité du nombre de plans, la plus grande résolution est retenue.

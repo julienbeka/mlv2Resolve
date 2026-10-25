@@ -47,7 +47,10 @@ final class AppCore {
                          resolveRunner: ResolveDesqueeze.fuscriptRunner(),
                          resolveScriptsDir: ResolveDesqueeze.menuScriptsDirectory,
                          prepareResolvePresets: { ResolvePresets.prepare(factors: $0) },
-                         gyro: gyro)
+                         gyro: gyro,
+                         projectRunner: ResolveDesqueeze.fuscriptRunner(timeout: 120),
+                         projectProbeRunner: ResolveDesqueeze.fuscriptRunner(timeout: 2),
+                         prepareProjectPresets: { ResolvePresets.prepare(sizing: $0) })
     }
 
     /// Once FUSE-T is ready: observe disks, then restore the previous session.

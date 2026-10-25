@@ -16,3 +16,5 @@ data for sync! range.len: 0 ») : le profil d'objectif embarqué porte
 `calibration_data.sync_settings.do_autosync = true`. Le générateur (tâche 7) écrit donc
 `calibration_data.sync_settings.do_autosync = false`, `synchronization.do_autosync = false` et
 `synchronization.auto_sync_points = false`. Sans effet sur le plugin Resolve, qui lit les `offsets`.
+
+**Vérifié le 25/10/2026 :** avec ces trois valeurs à `false`, « Open in Gyroflow » s'ouvre sans erreur.

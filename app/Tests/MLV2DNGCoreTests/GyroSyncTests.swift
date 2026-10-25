@@ -99,6 +99,22 @@ final class GyroSyncTests: XCTestCase {
         }
     }
 
+    func testShortClipMostlyCoveredAndLongClipBarelyCovered() throws {
+        // 6 s clip, 5 s covered (83 %): accepted.
+        let gyro = makeGyro(seconds: 5, seed: 10)
+        let motion = makeMotion(gyro: gyro, lagMs: -1000, seconds: 6, noise: 0.5, seed: 11)
+        let res = try GyroSync.solve(motion: motion, fps: 25, gyro: gyro, rateHz: 1000, searchMs: -2000...0)
+        XCTAssertEqual(res.lagMs, -1000, accuracy: 2)
+
+        // 30 s clip, 7 s covered (< 8 s and < 80 %): no log covers it.
+        let short = makeGyro(seconds: 7, seed: 12)
+        let motion2 = makeMotion(gyro: short, lagMs: -23000, seconds: 30, noise: 0.5, seed: 13)
+        XCTAssertThrowsError(try GyroSync.solve(motion: motion2, fps: 25, gyro: short, rateHz: 1000,
+                                                searchMs: -25000...0)) {
+            XCTAssertEqual($0 as? SyncRefusal, .noOverlap)
+        }
+    }
+
     func testRealM24_1845() throws {
         guard let dir = ProcessInfo.processInfo.environment["MLV2DNG_GYRO_DIR"] else {
             throw XCTSkip("MLV2DNG_GYRO_DIR not set")

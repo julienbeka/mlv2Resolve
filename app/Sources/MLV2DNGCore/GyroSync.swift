@@ -36,8 +36,10 @@ public enum GyroSync {
     public static let minR2 = 0.35
     public static let minMargin = 0.15
     public static let minMotionRMS = 1.0
-    /// Fraction of (kept) frames a lag's window must lie inside the log to be scored.
-    public static let minCoverage = 0.5
+    /// A lag is scorable if the log covers at least this many seconds of the clip...
+    public static let minCoveredSeconds = 8.0
+    /// ...or at least this fraction of the clip duration.
+    public static let minCoveredFraction = 0.8
     static let minFrames = 8
     static let coarseStepMs = 10
     static let fineRadiusMs = 15
@@ -79,7 +81,7 @@ public enum GyroSync {
             dx[k] = s.dx; dy[k] = s.dy
         }
         let logCount = gyro.count
-        let needed = max(minFrames, Int((Double(count) * minCoverage).rounded(.up)))
+        let clipSeconds = Double(motion.count) / fps
 
         func score(_ lagMs: Int) -> (r2: Double, map: [[Double]])? {
             let off = Int((Double(lagMs) * samplesPerMs).rounded())
@@ -107,7 +109,9 @@ public enum GyroSync {
                     sxy[4] += g.z * yx; sxy[5] += g.z * yy
                 }
             }
-            guard m >= needed else { return nil }
+            let fraction = Double(m) / Double(count)
+            let covered = fraction * clipSeconds
+            guard m >= minFrames, covered >= minCoveredSeconds || fraction >= minCoveredFraction else { return nil }
             let mf = Double(m)
             // Centered normal equations (intercept eliminated): C b = c.
             let mean = sx / mf

@@ -31,8 +31,8 @@ mlvfs-bin: $(SRC)/main.c $(OBJS) $(HDRS)
 	$(CC) $(CFLAGS) $(SRC)/main.c $(OBJS) $(LIBS) -o mlvfs-bin
 
 # mlvmotion: per-frame image motion extractor (Accelerate + GCD, reuses the LJ92 decoder)
-mlvmotion-bin: mlvmotion/main.c mlvmotion/motion.c mlvmotion/motion.h $(SRC)/lj92.c $(SRC)/lj92.h $(SRC)/mlv.h
-	$(CC) $(ARCH) -O2 -Wall -std=gnu99 -I$(SRC) -Imlvmotion mlvmotion/main.c mlvmotion/motion.c $(SRC)/lj92.c -framework Accelerate -o mlvmotion-bin
+mlvmotion-bin: mlvmotion/main.c mlvmotion/motion.c mlvmotion/motion.h $(SRC)/lj92.c $(SRC)/lj92.h $(SRC)/mlv.h $(SRC)/raw.h
+	$(CC) $(ARCH) -O2 -Wall -Wno-deprecated-declarations -Wno-unused-function -Wno-unused-variable -D_FILE_OFFSET_BITS=64 -std=gnu99 -I$(SRC) -Imlvmotion mlvmotion/main.c mlvmotion/motion.c $(SRC)/lj92.c -framework Accelerate -o mlvmotion-bin
 
 mlvmotion: mlvmotion-bin
 

@@ -76,7 +76,8 @@ final class GyroflowProjectTests: XCTestCase {
         XCTAssertEqual(v["duration_ms"] as? Int, 21160)
         XCTAssertEqual(v["width"] as? Int, 1600)
         let raw = String(decoding: try GyroflowProject.make(clipDir: clipDir, timing: timing, log: log, offsetMs: -4192, calibration: [:], position: .top), as: UTF8.self)
-        XCTAssertTrue(raw.contains("\"output_width\" : 4800,"))
+        // key order is not stable: integer check without relying on what follows
+        XCTAssertNotNil(raw.range(of: #""output_width" : 4800\s*[,\n}]"#, options: .regularExpression))
         XCTAssertEqual(GyroflowProject.fileName(clipDir: "clip_1"), "clip_1_000000.gyroflow")
     }
 

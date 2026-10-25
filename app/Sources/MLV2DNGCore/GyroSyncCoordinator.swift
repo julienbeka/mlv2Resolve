@@ -12,6 +12,14 @@ public enum ClipGyroState: Equatable, Sendable {
     case failed(String)
 }
 
+/// Which lens profile went into a clip's `.gyroflow`.
+public enum LensProfileKind: String, Sendable {
+    /// Distortion-free profile computed from the focal length.
+    case computed
+    /// A calibrated profile imported for the lens.
+    case calibrated
+}
+
 /// Background gyro sync: for every mounted shoot, finds the SenseFlow A1 logs of the chosen folder, syncs each
 /// MLV clip and writes its `.gyroflow` next to the MLV (the running MLVFS mount then lists it in the clip folder).
 ///
@@ -25,7 +33,8 @@ public enum ClipGyroState: Equatable, Sendable {
 /// - `gyroShootPosition` / `gyroClipPosition`: `[path: MountingPosition.rawValue]`.
 /// - `gyroDefaultPosition`: `MountingPosition.rawValue`, for shoots without their own position (default `.top`).
 /// - `gyroWritten`: `[String]`, MLV paths whose `.gyroflow` mlv2dng wrote.
-/// - `gyroWrittenMeta`: `[MLV path: ["r2": Double, "log": String, "offsetMs": Double]]`, to restore `.synced`.
+/// - `gyroWrittenMeta`: `[MLV path: ["r2": Double, "log": String, "offsetMs": Double, "profile": String]]`, to
+///   restore `.synced` and tell which lens profile was used (`profile`: `LensProfileKind.rawValue`).
 ///
 /// One job at a time per shoot (serial chain); different shoots run concurrently. Heavy work (log reading,
 /// motion, solving, writing) runs off the main actor.
@@ -166,6 +175,51 @@ public final class GyroSyncCoordinator: ObservableObject {
         clipSettingChanged(clip)
     }
 
+    /// Removes a lens and the shoot/clip choices pointing to it, then re-evaluates the mounted clips that used
+    /// it: files mlv2dng wrote are rewritten with the lens that now applies (backup first), or the clip reports
+    /// that a lens is needed. Files mlv2dng did not write are left alone.
+    public func removeLens(id: UUID) {
+        var affected: [String: [String]] = [:]
+        for (k, ctx) in contexts {
+            let clips = ctx.shoot.clips.compactMap { $0.files.first.map(AppState.key) }
+                .filter { lens(forClip: $0)?.id == id }
+            if !clips.isEmpty { affected[k] = clips }
+        }
+        lenses.removeAll { $0.id == id }
+        for key in [Key.shootLens, Key.clipLens] {
+            objectWillChange.send()
+            defaults.set(dict(key).filter { $0.value != id.uuidString }, forKey: key)
+        }
+        let w = written
+        for (k, clips) in affected {
+            for c in clips { states[c] = .pending }
+            schedule(k, clips: clips, force: Set(clips.filter(w.contains)))
+        }
+    }
+
+    /// The lens profile used for the clip's last `.gyroflow` written by mlv2dng (nil: none written).
+    public func profileKind(forClip clip: String) -> LensProfileKind? {
+        guard written.contains(clip), let m = defaults.dictionary(forKey: Key.meta)?[clip] as? [String: Any] else {
+            return nil
+        }
+        return (m["profile"] as? String).flatMap(LensProfileKind.init(rawValue:))
+    }
+
+    /// A `.gyroflow` mlv2dng did not write sits next to the clip's MLV: replacing it needs the user's consent.
+    public func hasForeignGyroflow(clip: String) -> Bool {
+        guard !written.contains(clip) else { return false }
+        return Self.gyroflowExists(mlv: URL(fileURLWithPath: clip))
+    }
+
+    /// Whether the MLV's folder holds a `<clip folder>_000000.gyroflow` for it (clip folder named
+    /// `<MLV basename><MLV extension>_1_…`, see `clipDir(mountPoint:mlv:)`).
+    nonisolated static func gyroflowExists(mlv: URL) -> Bool {
+        let prefix = mlv.deletingPathExtension().lastPathComponent + mlv.pathExtension + "_1_"
+        let suffix = GyroflowProject.fileName(clipDir: "")
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: mlv.deletingLastPathComponent().path)) ?? []
+        return names.contains { $0.hasPrefix(prefix) && $0.hasSuffix(suffix) }
+    }
+
     // MARK: Mount events
 
     /// Syncs every clip of the shoot; returns when that job is done (or cancelled).
@@ -296,11 +350,12 @@ public final class GyroSyncCoordinator: ObservableObject {
         let outcome = await job.run(onSolve: observer)
         // Unmounted meanwhile (the file, if any, was written before the cancel was seen: atomic, complete).
         if Task.isCancelled || contexts[AppState.key(ctx.shoot.folder)] == nil {
-            if case .synced = outcome.state { recordWritten(clip, outcome.state) }
+            if case .synced = outcome.state { recordWritten(clip, outcome.state, profile: outcome.profile) }
             return
         }
+        // Recorded first, so views refreshed by `states` read the new profile kind.
+        if case .synced = outcome.state { recordWritten(clip, outcome.state, profile: outcome.profile) }
         states[clip] = outcome.state
-        if case .synced = outcome.state { recordWritten(clip, outcome.state) }
         if let entry = outcome.skewEntry {
             syncedByFolder[folderKey, default: []].append(entry)
             skews[folderKey] = LogMatcher.estimateSkew(syncedByFolder[folderKey] ?? [])
@@ -336,12 +391,12 @@ public final class GyroSyncCoordinator: ObservableObject {
 
     private var written: Set<String> { Set(defaults.stringArray(forKey: Key.written) ?? []) }
 
-    private func recordWritten(_ clip: String, _ s: ClipGyroState) {
+    private func recordWritten(_ clip: String, _ s: ClipGyroState, profile: LensProfileKind) {
         guard case let .synced(r2, log, offsetMs) = s else { return }
         var w = written; w.insert(clip)
         defaults.set(w.sorted(), forKey: Key.written)
         var m = defaults.dictionary(forKey: Key.meta) ?? [:]
-        m[clip] = ["r2": r2, "log": log, "offsetMs": offsetMs]
+        m[clip] = ["r2": r2, "log": log, "offsetMs": offsetMs, "profile": profile.rawValue]
         defaults.set(m, forKey: Key.meta)
     }
 
@@ -428,6 +483,9 @@ public final class GyroSyncCoordinator: ObservableObject {
 
     nonisolated static func runMotion(binary: URL, mlv: URL) async throws -> [MotionSample] {
         let fm = FileManager.default
+        guard fm.isExecutableFile(atPath: binary.path) else {
+            throw MotionError(message: String(localized: "The motion analyzer (mlvmotion) is missing from the app. Reinstall mlv2dng.", bundle: L10n.bundle))
+        }
         let tmp = fm.temporaryDirectory
         let outURL = tmp.appendingPathComponent("mlvmotion-\(UUID().uuidString).csv")
         let errURL = tmp.appendingPathComponent("mlvmotion-\(UUID().uuidString).err")
@@ -489,6 +547,7 @@ private struct Job: Sendable {
     struct Outcome: Sendable {
         var state: ClipGyroState
         var skewEntry: (clip: ClipTiming, log: A1Log, lagMs: Int)?
+        var profile: LensProfileKind = .computed
     }
 
     nonisolated func run(onSolve: (@Sendable (URL, ClosedRange<Int>) async -> Void)?) async -> Outcome {
@@ -531,8 +590,10 @@ private struct Job: Sendable {
         }
 
         let calibration: [String: Any]
+        var profile = LensProfileKind.computed
         if let c = lens.calibratedProfiles.lazy.compactMap({ try? LensProfile.calibrated($0, for: timing) }).first {
             calibration = c
+            profile = .calibrated
         } else {
             do { calibration = try LensProfile.computed(focalMM: lens.focalMM, lensName: lens.name, timing: timing) }
             catch { return fail(String(localized: "Couldn't build the lens profile: \(String(describing: error))", bundle: L10n.bundle)) }
@@ -557,7 +618,7 @@ private struct Job: Sendable {
         }
         let light = A1Log(url: best.log.url, start: best.log.start, rateHz: best.log.rateHz, gyro: [])
         return Outcome(state: .synced(r2: best.result.r2, log: best.log.url.lastPathComponent, offsetMs: offsetMs),
-                       skewEntry: (timing, light, best.result.lagMs))
+                       skewEntry: (timing, light, best.result.lagMs), profile: profile)
     }
 
     /// Copies the file about to be replaced to `<backupDir>/<name>-<yyyyMMdd-HHmmss>.gyroflow`.

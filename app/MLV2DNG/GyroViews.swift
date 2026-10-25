@@ -95,9 +95,15 @@ struct GyroStateDescription {
 
 struct GyroStateBadge: View {
     let state: ClipGyroState?
+    /// Profile of the written file (shown next to « Synced »).
+    var profile: LensProfileKind? = nil
+    /// The clip's lens has calibrated profiles: a computed profile then means none of them fitted.
+    var lensHasCalibrated = false
 
     var body: some View {
         let d = GyroStateDescription(state)
+        let synced: Bool = { if case .synced? = state { return true } else { return false } }()
+        let fallback = synced && profile == .computed && lensHasCalibrated
         HStack(spacing: 4) {
             if state == .running {
                 ProgressView().controlSize(.mini)
@@ -105,22 +111,29 @@ struct GyroStateBadge: View {
                 Image(systemName: d.icon).foregroundStyle(d.tint)
             }
             Text(verbatim: d.text).lineLimit(1).truncationMode(.tail)
+            if synced, let profile {
+                Text(verbatim: "· " + (profile == .calibrated ? String(localized: "calibrated profile")
+                                                              : String(localized: "computed profile")))
+                    .lineLimit(1).truncationMode(.tail)
+                    .foregroundStyle(fallback ? Color.orange : Color.secondary)
+            }
         }
         .font(.callout)
-        .help(d.help)
+        .help(fallback ? d.help + "\n\n" + String(localized: "None of this lens's calibrated profiles matches the clip's format (or its file is unreadable): the computed profile was used.") : d.help)
     }
 }
 
-/// Asks before replacing a `.gyroflow` mlv2dng did not write.
-@MainActor
-func confirmReplaceExistingGyroflow() -> Bool {
-    NSApp.activate(ignoringOtherApps: true)
-    let a = NSAlert()
-    a.messageText = String(localized: "Replace the existing .gyroflow?")
-    a.informativeText = String(localized: "The current file is first backed up to ~/Library/Application Support/mlv2dng/gyroflow-backups.")
-    a.addButton(withTitle: String(localized: "Regenerate"))
-    a.addButton(withTitle: String(localized: "Cancel"))
-    return a.runModal() == .alertFirstButtonReturn
+/// Where imported lens profiles are copied (`<root>/<lens id>/<file name>`).
+enum LensProfileStore {
+    static var root: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("mlv2dng", isDirectory: true)
+            .appendingPathComponent("lens-profiles", isDirectory: true)
+    }
+
+    static func prune(lensID: UUID, keep: [URL]) {
+        LensProfile.pruneImported(lensID: lensID, root: root, keep: keep)
+    }
 }
 
 // MARK: Main window
@@ -215,22 +228,31 @@ struct GyroShootView: View {
     }
 }
 
+/// A per-clip change that rewrites the clip's `.gyroflow`.
+enum ClipGyroChange {
+    case lens(UUID?), position(MountingPosition?), regenerate
+}
+
 struct GyroClipRow: View {
     let clip: Clip
     let key: String
     @ObservedObject var gyro: GyroSyncCoordinator
+    /// Waiting for the user to accept replacing a `.gyroflow` mlv2dng did not write.
+    @State private var pending: ClipGyroChange?
 
     var body: some View {
         let state = gyro.states[key]
         HStack(spacing: 8) {
             Text(verbatim: clip.name).lineLimit(1).frame(width: 96, alignment: .leading)
-            GyroStateBadge(state: state).frame(maxWidth: .infinity, alignment: .leading)
+            GyroStateBadge(state: state, profile: gyro.profileKind(forClip: key),
+                           lensHasCalibrated: !(gyro.lens(forClip: key)?.calibratedProfiles.isEmpty ?? true))
+                .frame(maxWidth: .infinity, alignment: .leading)
             Menu {
                 Picker("Lens", selection: Binding<UUID?>(
                     get: { gyro.ownLens(forClip: key)?.id },
                     set: { id in
-                        guard id != gyro.ownLens(forClip: key)?.id, confirmIfExisting() else { return }
-                        gyro.setLens(gyro.lenses.first { $0.id == id }, forClip: key)
+                        guard id != gyro.ownLens(forClip: key)?.id else { return }
+                        request(.lens(id))
                     })) {
                     Text("Shoot default").tag(UUID?.none)
                     ForEach(gyro.lenses) { Text(verbatim: $0.label).tag(Optional($0.id)) }
@@ -239,8 +261,8 @@ struct GyroClipRow: View {
                 Picker("Sensor position", selection: Binding<MountingPosition?>(
                     get: { gyro.ownPosition(forClip: key) },
                     set: { p in
-                        guard p != gyro.ownPosition(forClip: key), confirmIfExisting() else { return }
-                        gyro.setPosition(p, forClip: key)
+                        guard p != gyro.ownPosition(forClip: key) else { return }
+                        request(.position(p))
                     })) {
                     Text("Same as shoot").tag(MountingPosition?.none)
                     ForEach(MountingPosition.allCases, id: \.self) { Text(verbatim: $0.label).tag(Optional($0)) }
@@ -252,13 +274,31 @@ struct GyroClipRow: View {
             .menuStyle(.borderlessButton)
             .frame(width: 130, alignment: .trailing)
             .help("Lens and sensor position of this clip (changing them rewrites its .gyroflow)")
-            Button("Regenerate") {
-                guard confirmIfExisting() else { return }
-                Task { await gyro.regenerate(clip: key) }
-            }
-            .controlSize(.small)
-            .disabled(state == .running)
-            .help("Sync this clip again and rewrite its .gyroflow (the current file is backed up first)")
+            Button("Regenerate") { request(.regenerate) }
+                .controlSize(.small)
+                .disabled(state == .running)
+                .help("Sync this clip again and rewrite its .gyroflow (the current file is backed up first)")
+        }
+        .confirmationDialog("Replace the existing .gyroflow?",
+                            isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }),
+                            presenting: pending) { change in
+            Button("Regenerate") { apply(change) }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("The current file is first backed up to ~/Library/Application Support/mlv2dng/gyroflow-backups.")
+        }
+    }
+
+    /// Asks first when a `.gyroflow` mlv2dng did not write would be replaced, whatever the clip's state.
+    private func request(_ change: ClipGyroChange) {
+        if gyro.hasForeignGyroflow(clip: key) { pending = change } else { apply(change) }
+    }
+
+    private func apply(_ change: ClipGyroChange) {
+        switch change {
+        case let .lens(id): gyro.setLens(gyro.lenses.first { $0.id == id }, forClip: key)
+        case let .position(p): gyro.setPosition(p, forClip: key)
+        case .regenerate: Task { await gyro.regenerate(clip: key) }
         }
     }
 
@@ -266,11 +306,6 @@ struct GyroClipRow: View {
         let lens = gyro.ownLens(forClip: key)?.label ?? String(localized: "Shoot default")
         guard let p = gyro.ownPosition(forClip: key) else { return lens }
         return "\(lens) · \(p.label)"
-    }
-
-    private func confirmIfExisting() -> Bool {
-        guard gyro.states[key] == .existing else { return true }
-        return confirmReplaceExistingGyroflow()
     }
 }
 
@@ -280,6 +315,7 @@ struct GyroClipRow: View {
 struct GyroSettingsSections: View {
     @ObservedObject var gyro: GyroSyncCoordinator
     @State private var editing: LensDraft?
+    @State private var removing: Lens?
 
     var body: some View {
         Section("Lenses") {
@@ -296,7 +332,7 @@ struct GyroSettingsSections: View {
                     }
                     Spacer()
                     Button("Edit…") { editing = LensDraft(lens) }
-                    Button("Remove") { remove(lens) }
+                    Button("Remove") { removing = lens }
                 }
             }
             Button("Add Lens…") { editing = LensDraft() }
@@ -317,6 +353,17 @@ struct GyroSettingsSections: View {
                 gyro.lenses = all
             }
         }
+        .confirmationDialog(removing.map { String(localized: "Remove the lens “\($0.label)”?") } ?? "",
+                            isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
+                            presenting: removing) { lens in
+            Button("Remove", role: .destructive) {
+                gyro.removeLens(id: lens.id)
+                LensProfileStore.prune(lensID: lens.id, keep: [])
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Clips using it are synced again with the lens that now applies, or wait for one. Files mlv2dng did not write are kept; replaced files are backed up first.")
+        }
     }
 
     private func details(_ lens: Lens) -> String {
@@ -324,16 +371,6 @@ struct GyroSettingsSections: View {
         let n = lens.calibratedProfiles.count
         if n == 0 { return String(localized: "\(focal) · computed profile") }
         return "\(focal) · \(String(localized: "\(n) calibrated profiles"))"
-    }
-
-    private func remove(_ lens: Lens) {
-        let a = NSAlert()
-        a.messageText = String(localized: "Remove the lens “\(lens.label)”?")
-        a.informativeText = String(localized: "Shoots and clips using it will need another lens. The .gyroflow files already written are kept.")
-        a.addButton(withTitle: String(localized: "Remove"))
-        a.addButton(withTitle: String(localized: "Cancel"))
-        guard a.runModal() == .alertFirstButtonReturn else { return }
-        gyro.lenses.removeAll { $0.id == lens.id }
     }
 }
 
@@ -344,10 +381,21 @@ struct LensDraft: Identifiable {
     var name: String
     var focal: String
     var profiles: [URL]
+    /// Profiles of the saved lens (kept on cancel).
+    let savedProfiles: [URL]
+    /// Description of each profile's dimensions, read once (on edit / import), never in `body`.
+    var dimensions: [URL: String] = [:]
 
-    init() { id = UUID(); isNew = true; name = ""; focal = ""; profiles = [] }
+    init() { id = UUID(); isNew = true; name = ""; focal = ""; profiles = []; savedProfiles = [] }
     init(_ lens: Lens) {
-        id = lens.id; isNew = false; name = lens.name; focal = formatFocal(lens.focalMM); profiles = lens.calibratedProfiles
+        id = lens.id; isNew = false; name = lens.name; focal = formatFocal(lens.focalMM)
+        profiles = lens.calibratedProfiles; savedProfiles = lens.calibratedProfiles
+        for url in profiles { dimensions[url] = Self.describe(url) }
+    }
+
+    static func describe(_ url: URL) -> String {
+        guard let d = try? LensProfile.dimensions(of: url) else { return String(localized: "File missing or unreadable") }
+        return String(localized: "Calibrated for \(d.width) × \(d.height), horizontal stretch \(formatFocal(d.stretch))")
     }
 }
 
@@ -385,7 +433,7 @@ struct LensEditor: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(verbatim: url.lastPathComponent).lineLimit(1).truncationMode(.middle)
-                        Text(dimensions(url)).font(.caption).foregroundStyle(.secondary)
+                        Text(verbatim: draft.dimensions[url] ?? "").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
                     Button("Remove") { draft.profiles.removeAll { $0 == url } }
@@ -407,10 +455,16 @@ struct LensEditor: View {
             }
             HStack {
                 Spacer()
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Cancel") {
+                    // Copies imported in this session and not saved are dropped.
+                    LensProfileStore.prune(lensID: draft.id, keep: draft.savedProfiles)
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
                 Button("Save") {
                     guard let f = focal, !trimmedName.isEmpty else { return }
                     onSave(Lens(id: draft.id, name: trimmedName, focalMM: f, calibratedProfiles: draft.profiles))
+                    LensProfileStore.prune(lensID: draft.id, keep: draft.profiles)
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
@@ -419,11 +473,6 @@ struct LensEditor: View {
         }
         .padding(20)
         .frame(width: 440)
-    }
-
-    private func dimensions(_ url: URL) -> String {
-        guard let d = try? LensProfile.dimensions(of: url) else { return String(localized: "File missing or unreadable") }
-        return String(localized: "Calibrated for \(d.width) × \(d.height), horizontal stretch \(formatFocal(d.stretch))")
     }
 
     private func importProfile() {
@@ -435,15 +484,21 @@ struct LensEditor: View {
         panel.allowsMultipleSelection = false
         panel.prompt = String(localized: "Import")
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        let copy: URL
         do {
-            _ = try LensProfile.dimensions(of: url)
+            // Copied into Application Support, so the lens keeps its profile if the original moves.
+            copy = try LensProfile.importProfile(url, lensID: draft.id, root: LensProfileStore.root)
         } catch LensProfileError.unreadable {
             importError = String(localized: "Couldn't read “\(url.lastPathComponent)”.")
             return
-        } catch {
+        } catch LensProfileError.invalid {
             importError = String(localized: "“\(url.lastPathComponent)” is not a Gyroflow lens profile (no calib_dimension).")
             return
+        } catch {
+            importError = String(localized: "Couldn't import “\(url.lastPathComponent)”: \(error.localizedDescription)")
+            return
         }
-        if !draft.profiles.contains(url) { draft.profiles.append(url) }
+        if !draft.profiles.contains(copy) { draft.profiles.append(copy) }
+        draft.dimensions[copy] = LensDraft.describe(copy)
     }
 }

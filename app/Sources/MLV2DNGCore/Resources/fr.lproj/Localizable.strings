@@ -45,3 +45,4 @@
 "Couldn't build the lens profile: %@" = "Impossible de créer le profil d’objectif : %@";
 "Couldn't write the Gyroflow project: %@" = "Impossible d’écrire le projet Gyroflow : %@";
 "Couldn't back up the existing Gyroflow project: %@" = "Impossible de sauvegarder le projet Gyroflow existant : %@";
+"The motion analyzer (mlvmotion) is missing from the app. Reinstall mlv2dng." = "L’analyseur de mouvement (mlvmotion) manque dans l’app. Réinstallez mlv2dng.";

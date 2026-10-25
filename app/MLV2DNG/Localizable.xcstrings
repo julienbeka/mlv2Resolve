@@ -1606,23 +1606,6 @@
         }
       }
     },
-    "Shoots and clips using it will need another lens. The .gyroflow files already written are kept.": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Shoots and clips using it will need another lens. The .gyroflow files already written are kept."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Les tournages et plans qui l’utilisent devront en choisir un autre. Les .gyroflow déjà écrits sont conservés."
-          }
-        }
-      }
-    },
     "New Lens": {
       "extractionState": "manual",
       "localizations": {
@@ -1966,6 +1949,91 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "calibrated profile": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "calibrated profile"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "profil calibré"
+          }
+        }
+      }
+    },
+    "computed profile": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "computed profile"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "profil calculé"
+          }
+        }
+      }
+    },
+    "None of this lens's calibrated profiles matches the clip's format (or its file is unreadable): the computed profile was used.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "None of this lens's calibrated profiles matches the clip's format (or its file is unreadable): the computed profile was used."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucun profil calibré de cet objectif ne correspond au format du plan (ou son fichier est illisible) : le profil calculé a été utilisé."
+          }
+        }
+      }
+    },
+    "Clips using it are synced again with the lens that now applies, or wait for one. Files mlv2dng did not write are kept; replaced files are backed up first.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clips using it are synced again with the lens that now applies, or wait for one. Files mlv2dng did not write are kept; replaced files are backed up first."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les plans qui l’utilisent sont resynchronisés avec l’objectif qui s’applique désormais, ou en attendent un. Les fichiers que mlv2dng n’a pas écrits sont conservés ; les fichiers remplacés sont d’abord sauvegardés."
+          }
+        }
+      }
+    },
+    "Couldn't import “%@”: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't import “%1$@”: %2$@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible d’importer « %1$@ » : %2$@"
           }
         }
       }

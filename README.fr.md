@@ -38,8 +38,11 @@ que le plugin Gyroflow de Resolve stabilise les DNG. Plus besoin de NiYien Tool 
    Magic Lantern écrit dans le MLV n'est pas fiable). mlv2dng calcule un profil sans distorsion à partir de la
    focale.
 3. Dans la fenêtre mlv2dng, chaque tournage monté a un **Objectif** par défaut et une **Position du capteur**
-   (l'emplacement de l'A1 sur la caméra ; **Dessus** par défaut, modifiable dans **Réglages… → Synchro gyro**). Le
-   menu de chaque plan permet de choisir un autre objectif ou une autre position pour ce plan seulement.
+   (l'emplacement de l'A1 sur la caméra ; **Dessus** par défaut, modifiable dans **Réglages… → Synchro gyro**, ce
+   qui s'applique aux plans synchronisés ensuite). Le menu de chaque plan permet de choisir un autre objectif ou une
+   autre position pour ce plan seulement. Changer l'objectif ou la position d'un tournage réécrit les `.gyroflow`
+   que mlv2dng a écrits pour ses plans sans objectif ni position propres (les fichiers précédents sont
+   sauvegardés) ; les fichiers que mlv2dng n'a pas écrits ne sont jamais touchés.
 4. Les plans sont synchronisés en arrière-plan, un à la fois par tournage. Chaque plan affiche son état :
    **Synchronisé (R² 0,78)** (le R² indique à quel point le mouvement du plan correspond au gyro, 1 = parfait),
    **Aucun log ne couvre ce plan**, **Mouvement de caméra insuffisant**, **Correspondance incertaine** (rien
@@ -49,8 +52,10 @@ que le plugin Gyroflow de Resolve stabilise les DNG. Plus besoin de NiYien Tool 
    Gyroflow → **Load for current file**.
 
 Les objectifs courts (p. ex. 12 mm) ont trop de distorsion pour un profil calculé : calibrez l'objectif dans
-Gyroflow, puis importez son `.json` dans **Réglages… → Objectifs → Modifier… → Importer un profil calibré…**. Un
-profil calibré sert aux plans dont le format correspond à ses dimensions ; les autres gardent le profil calculé.
+Gyroflow, puis importez son `.json` dans **Réglages… → Objectifs → Modifier… → Importer un profil calibré…**
+(mlv2dng en garde une copie dans `~/Library/Application Support/mlv2dng/lens-profiles`). Un profil calibré sert
+aux plans dont le format correspond à ses dimensions ; les autres gardent le profil calculé. L'état du plan
+indique lequel a été utilisé (« profil calibré » / « profil calculé »).
 
 Un `.gyroflow` existant que mlv2dng n'a pas écrit (p. ex. fait avec NiYien Tool) est conservé. **Régénérer** sur
 un plan le remplace, tout comme changer l'objectif ou la position de ce plan ; le fichier remplacé est d'abord

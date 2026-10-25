@@ -101,6 +101,32 @@ final class LensProfileTests: XCTestCase {
         XCTAssertThrowsError(try LensProfile.dimensions(of: missing)) { XCTAssertEqual($0 as? LensProfileError, .unreadable) }
     }
 
+    func testImportCopiesAndPrunes() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("profiles-\(UUID())", isDirectory: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let src = try writeJSON(["calib_dimension": ["w": 1920, "h": 1080]])
+        let id = UUID()
+        let copy = try LensProfile.importProfile(src, lensID: id, root: root)
+        XCTAssertEqual(copy.deletingLastPathComponent().lastPathComponent, id.uuidString)
+        XCTAssertEqual(copy.lastPathComponent, src.lastPathComponent)
+        try fm.removeItem(at: src)
+        XCTAssertEqual(try LensProfile.dimensions(of: copy).width, 1920)  // survives the original's removal
+
+        // Same name again: replaced.
+        try JSONSerialization.data(withJSONObject: ["calib_dimension": ["w": 1280, "h": 720]]).write(to: src)
+        XCTAssertEqual(try LensProfile.importProfile(src, lensID: id, root: root), copy)
+        XCTAssertEqual(try LensProfile.dimensions(of: copy).width, 1280)
+
+        let bad = try writeJSON(["name": "x"])
+        XCTAssertThrowsError(try LensProfile.importProfile(bad, lensID: id, root: root))
+
+        LensProfile.pruneImported(lensID: id, root: root, keep: [copy])
+        XCTAssertTrue(fm.fileExists(atPath: copy.path))
+        LensProfile.pruneImported(lensID: id, root: root, keep: [])
+        XCTAssertFalse(fm.fileExists(atPath: LensProfile.importedDirectory(lensID: id, root: root).path))
+    }
+
     func testCalibratedInvalid() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("bad-\(UUID()).json")
         try Data("not json".utf8).write(to: url)

@@ -36,8 +36,10 @@ Resolve's Gyroflow plugin can stabilize the DNGs. No NiYien Tool and no referenc
 2. Declare your lenses once in **Settings… → Lenses**: a name and the real focal length in mm (the one Magic
    Lantern writes in the MLV is not reliable). mlv2dng computes a distortion-free profile from the focal length.
 3. In the mlv2dng window, each mounted shoot gets a default **Lens** and a **Sensor position** (where the A1 sits
-   on the camera; **Top** by default, changeable in **Settings… → Gyro Sync**). Each clip's menu can pick another
-   lens or position for that clip only.
+   on the camera; **Top** by default, changeable in **Settings… → Gyro Sync**, which applies to clips synced
+   afterwards). Each clip's menu can pick another lens or position for that clip only. Changing a shoot's lens or
+   position rewrites the `.gyroflow` files mlv2dng wrote for its clips that have no lens or position of their own
+   (the previous files are backed up); files mlv2dng did not write are never touched.
 4. Clips are synced in the background, one at a time per shoot. Each clip shows its state: **Synced (R² 0.78)**
    (R² = how well the clip's motion matches the gyro, 1 = perfect), **No log covers this clip**, **Not enough
    camera motion**, **Uncertain match** (nothing is written rather than a doubtful sync), **Syncing…**,
@@ -46,8 +48,10 @@ Resolve's Gyroflow plugin can stabilize the DNGs. No NiYien Tool and no referenc
    in the clip's folder of the mount. In Resolve: Gyroflow plugin → **Load for current file**.
 
 Short lenses (e.g. 12 mm) have too much distortion for a computed profile: calibrate the lens in Gyroflow, then
-import its `.json` in **Settings… → Lenses → Edit… → Import Calibrated Profile…**. A calibrated profile is used
-for the clips whose format matches its dimensions; other clips keep the computed profile.
+import its `.json` in **Settings… → Lenses → Edit… → Import Calibrated Profile…** (mlv2dng keeps a copy in
+`~/Library/Application Support/mlv2dng/lens-profiles`). A calibrated profile is used for the clips whose format
+matches its dimensions; other clips keep the computed profile. The clip's state says which one was used
+(« calibrated profile » / « computed profile »).
 
 An existing `.gyroflow` that mlv2dng did not write (e.g. made with NiYien Tool) is kept. **Regenerate** on a
 clip replaces it, as does changing that clip's lens or position; the replaced file is first copied to

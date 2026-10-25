@@ -256,6 +256,66 @@ final class GyroSyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(again.defaultPosition, .left)
     }
 
+    func testProfileKindIsRecorded() async throws {
+        let (a, ka, _) = try makeClip("A001", atSecond: 10)
+        let (b, kb, _) = try makeClip("A002", atSecond: 20)
+        try makeLog("t1", atSecond: 0)
+        let good = tmp.appendingPathComponent("good.json"), bad = tmp.appendingPathComponent("bad.json")
+        try JSONSerialization.data(withJSONObject: ["calib_dimension": ["w": 1600, "h": 900], "name": "cal"]).write(to: good)
+        try JSONSerialization.data(withJSONObject: ["calib_dimension": ["w": 1920, "h": 800]]).write(to: bad)
+        let c = coordinator()
+        let calibrated = Lens(name: "Cal", focalMM: 12, calibratedProfiles: [good])
+        let mismatched = Lens(name: "Mis", focalMM: 12, calibratedProfiles: [bad])
+        c.lenses = [calibrated, mismatched]
+        c.setDefaultLens(calibrated, forShoot: AppState.key(shootDir))
+        c.setLens(mismatched, forClip: kb)
+        XCTAssertNil(c.profileKind(forClip: ka))
+        await c.shootMounted(shoot([a, b]), mountPoint: mountPoint, chosenFolder: chosen)
+        XCTAssertEqual(c.profileKind(forClip: ka), .calibrated)
+        XCTAssertEqual(c.profileKind(forClip: kb), .computed)
+    }
+
+    func testRemoveLensReevaluatesItsClips() async throws {
+        let (clip, key, dir) = try makeClip("A001", atSecond: 10)
+        try makeLog("t1", atSecond: 0)
+        let c = coordinator()
+        let lens = withLens(c)
+        await c.shootMounted(shoot([clip]), mountPoint: mountPoint, chosenFolder: chosen)
+        guard case .synced? = c.states[key] else { return XCTFail("got \(String(describing: c.states[key]))") }
+
+        c.removeLens(id: lens.id)
+        XCTAssertTrue(c.lenses.isEmpty)
+        XCTAssertNil(c.defaultLens(forShoot: AppState.key(shootDir)))
+        await c.idle()
+        XCTAssertEqual(c.states[key], .failed("Choose a lens for this shoot"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: gyroflow(dir).path))  // never deleted
+    }
+
+    func testHasForeignGyroflow() async throws {
+        let (clip, key, dir) = try makeClip("A001", atSecond: 10)
+        try makeLog("t1", atSecond: 0)
+        let c = coordinator()
+        XCTAssertFalse(c.hasForeignGyroflow(clip: key))
+        try Data("{}".utf8).write(to: gyroflow(dir))
+        XCTAssertTrue(c.hasForeignGyroflow(clip: key))
+        try FileManager.default.removeItem(at: gyroflow(dir))
+        _ = withLens(c)
+        await c.shootMounted(shoot([clip]), mountPoint: mountPoint, chosenFolder: chosen)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: gyroflow(dir).path))
+        XCTAssertFalse(c.hasForeignGyroflow(clip: key))  // mlv2dng's own file
+    }
+
+    func testMLVMotionRunnerMissingBinary() async throws {
+        let run = GyroSyncCoordinator.mlvmotionRunner(binary: tmp.appendingPathComponent("no-mlvmotion"))
+        do {
+            _ = try await run(URL(fileURLWithPath: "/x.MLV"))
+            XCTFail("expected a throw")
+        } catch {
+            XCTAssertEqual(error.localizedDescription,
+                           "The motion analyzer (mlvmotion) is missing from the app. Reinstall mlv2dng.")
+        }
+    }
+
     func testNoLensChosenNoFile() async throws {
         let (clip, key, dir) = try makeClip("A001", atSecond: 10)
         try makeLog("t1", atSecond: 0)

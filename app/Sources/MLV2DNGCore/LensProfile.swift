@@ -93,6 +93,43 @@ public enum LensProfile {
         return (Int(w.rounded()), Int(h.rounded()), stretch)
     }
 
+    /// Where imported profiles are copied: `<root>/<lens id>/`.
+    public static func importedDirectory(lensID: UUID, root: URL) -> URL {
+        root.appendingPathComponent(lensID.uuidString, isDirectory: true)
+    }
+
+    /// Checks a Gyroflow lens profile and copies it to `<root>/<lens id>/<file name>` (replacing a previous copy
+    /// of the same name), so the lens keeps working if the original is moved. Returns the copy's URL.
+    public static func importProfile(_ url: URL, lensID: UUID, root: URL) throws -> URL {
+        _ = try dimensions(of: url)
+        let fm = FileManager.default
+        let dir = importedDirectory(lensID: lensID, root: root)
+        let dest = dir.appendingPathComponent(url.lastPathComponent)
+        if dest.standardizedFileURL == url.standardizedFileURL { return dest }
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let tmp = dir.appendingPathComponent(".import-\(UUID().uuidString)")
+        try fm.copyItem(at: url, to: tmp)
+        if fm.fileExists(atPath: dest.path) {
+            _ = try fm.replaceItemAt(dest, withItemAt: tmp)
+        } else {
+            try fm.moveItem(at: tmp, to: dest)
+        }
+        return dest
+    }
+
+    /// Deletes the copies in `<root>/<lens id>/` that are not in `keep` (all of them when `keep` is empty).
+    public static func pruneImported(lensID: UUID, root: URL, keep: [URL]) {
+        let fm = FileManager.default
+        let dir = importedDirectory(lensID: lensID, root: root)
+        let kept = Set(keep.map { $0.standardizedFileURL.path })
+        let names = (try? fm.contentsOfDirectory(atPath: dir.path)) ?? []
+        for n in names {
+            let u = dir.appendingPathComponent(n)
+            if !kept.contains(u.standardizedFileURL.path) { try? fm.removeItem(at: u) }
+        }
+        if ((try? fm.contentsOfDirectory(atPath: dir.path)) ?? []).isEmpty { try? fm.removeItem(at: dir) }
+    }
+
     private static func today() -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")

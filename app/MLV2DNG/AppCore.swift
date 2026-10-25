@@ -36,8 +36,8 @@ final class AppCore {
                                paths: MountPaths(root: Self.mountRoot),
                                launcher: FoundationLauncher(), unmounter: UmountUnmounter())
         // Built-in SenseFlow A1 gyro sync: the bundled mlvmotion analyses each clip's motion.
-        let mlvmotion = Bundle.main.url(forResource: "mlvmotion", withExtension: nil)
-            ?? resources.appendingPathComponent("mlvmotion")
+        // A missing binary is reported per clip (« mlvmotion is missing from the app »).
+        let mlvmotion = resources.appendingPathComponent("mlvmotion")
         let backups = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("mlv2dng", isDirectory: true)
             .appendingPathComponent("gyroflow-backups", isDirectory: true)

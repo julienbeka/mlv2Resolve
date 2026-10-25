@@ -175,24 +175,8 @@ final class GyroSyncTests: XCTestCase {
         guard let dir = ProcessInfo.processInfo.environment["MLV2DNG_GYRO_DIR"] else {
             throw XCTSkip("MLV2DNG_GYRO_DIR not set")
         }
-        let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-        let tool = repo.appendingPathComponent("build/engine/mlvmotion")
-        guard FileManager.default.isExecutableFile(atPath: tool.path) else { throw XCTSkip("mlvmotion not built") }
         let base = URL(fileURLWithPath: dir)
-        let p = Process()
-        p.executableURL = tool
-        p.arguments = [base.appendingPathComponent("M24-1845.MLV").path]
-        let pipe = Pipe()
-        p.standardOutput = pipe
-        try p.run()
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        p.waitUntilExit()
-        XCTAssertEqual(p.terminationStatus, 0)
-        let motion: [MotionSample] = String(decoding: data, as: UTF8.self).split(separator: "\n").dropFirst().compactMap {
-            let c = $0.split(separator: ",").compactMap { Double($0) }
-            return c.count == 4 ? MotionSample(frame: Int(c[0]), dx: c[1], dy: c[2], peak: c[3]) : nil
-        }
+        let motion = try RealGyroFixture.motion(base: base)
         let log = try A1Log.read(base.appendingPathComponent("2026-10-24_18-44-36_mix.bin"))
         let t0 = Date()
         let res = try GyroSync.solve(motion: motion, fps: 25, gyro: log.gyro, rateHz: log.rateHz, searchMs: 0...25000)

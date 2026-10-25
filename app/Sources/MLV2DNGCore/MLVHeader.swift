@@ -52,7 +52,7 @@ public enum MLVHeader {
         func u64(_ d: Data, _ o: Int) -> UInt64 { u32(d, o) | u32(d, o + 4) << 32 }
 
         func walk(_ file: URL, isMain: Bool) -> Bool {
-            guard let fh = try? FileHandle(forReadingFrom: file) else { return !isMain ? true : false }
+            guard let fh = try? FileHandle(forReadingFrom: file) else { return !isMain }
             defer { try? fh.close() }
             guard let end = try? fh.seekToEnd() else { return false }
             var offset: UInt64 = 0
@@ -75,6 +75,10 @@ public enum MLVHeader {
                     }
                 case "RTCI" where isMain && rtc == nil:
                     if size >= 28, let b = try? fh.read(upToCount: 12), b.count == 12 {
+                        let sec = u16(b, 0), min = u16(b, 2), hour = u16(b, 4)
+                        let day = u16(b, 6), mon = u16(b, 8), year = u16(b, 10) + 1900
+                        guard (0...59).contains(sec), (0...59).contains(min), (0...23).contains(hour),
+                              (1...31).contains(day), (0...11).contains(mon), year >= 2000 else { return false }
                         var c = DateComponents()
                         c.second = u16(b, 0); c.minute = u16(b, 2); c.hour = u16(b, 4)
                         c.day = u16(b, 6); c.month = u16(b, 8) + 1; c.year = u16(b, 10) + 1900
@@ -82,6 +86,7 @@ public enum MLVHeader {
                         rtc = c; rtcTs = u64(head, 8)
                     }
                 case "VIDF":
+                    guard offset + size <= end else { break }
                     frames += 1
                     if firstTs == nil { firstTs = u64(head, 8) }
                 default: break

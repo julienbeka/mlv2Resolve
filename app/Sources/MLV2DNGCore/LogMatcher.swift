@@ -26,7 +26,9 @@ public enum LogMatcher {
             guard hi >= 0, lo <= log.duration else { continue }
             let ms = Int((expected * 1000).rounded())
             let wms = Int(w * 1000)
-            out.append((log, (ms - wms)...(ms + wms), abs(expected)))
+            let dist = expected < 0 ? -expected : max(0, expected - log.duration)
+            let key = dist * 1e6 + abs(expected - log.duration / 2)  // inside-log ties: nearest the log centre
+            out.append((log, (ms - wms)...(ms + wms), key))
         }
         return out.sorted { $0.key < $1.key }.map { ($0.log, $0.searchMs) }
     }

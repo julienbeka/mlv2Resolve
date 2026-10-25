@@ -36,9 +36,9 @@ final class LogMatcherTests: XCTestCase {
         let c = try log("c_mix.bin", offset: 20, seconds: 60)       // 18:00:20-18:01:20
         // clip at 18:00:30 camera, skew +2 -> A1 time 18:00:32, 10 s long
         let r = LogMatcher.candidates(for: clip(offset: 30), logs: [b, a, c], skew: 2)
-        XCTAssertEqual(r.map { $0.log.url.lastPathComponent }, ["c_mix.bin", "a_mix.bin"])  // c: 12 s in, a: 32 s in
-        XCTAssertEqual(r[0].searchMs, (12000 - 30000)...(12000 + 30000))
-        XCTAssertEqual(r[1].searchMs, (32000 - 30000)...(32000 + 30000))
+        XCTAssertEqual(r.map { $0.log.url.lastPathComponent }, ["a_mix.bin", "c_mix.bin"])  // both inside; a: 32 s (centre 30), c: 12 s
+        XCTAssertEqual(r[0].searchMs, (32000 - 30000)...(32000 + 30000))
+        XCTAssertEqual(r[1].searchMs, (12000 - 30000)...(12000 + 30000))
     }
 
     func testCandidatesWithSkewWindowEdges() throws {
@@ -46,6 +46,20 @@ final class LogMatcherTests: XCTestCase {
         // clip starts 40 s after log end -> expected 40 s, window lo = 10 s -> touches end
         XCTAssertEqual(LogMatcher.candidates(for: clip(offset: 40), logs: [a], skew: 0).count, 1)
         XCTAssertEqual(LogMatcher.candidates(for: clip(offset: 41), logs: [a], skew: 0).count, 0)
+    }
+
+    func testClipBeforeLogStartEdgeAndOrdering() throws {
+        let a = try log("a_mix.bin", offset: 100, seconds: 60)
+        // clip 10 s long ending 31 s before the log start: hi = -31+10+30 < 0 -> excluded
+        XCTAssertEqual(LogMatcher.candidates(for: clip(offset: 59), logs: [a], skew: 0).count, 0)
+        // clip ends 29 s before log start -> included
+        let r = LogMatcher.candidates(for: clip(offset: 61), logs: [a], skew: 0)
+        XCTAssertEqual(r.count, 1)
+        XCTAssertEqual(r[0].searchMs, (-39000 - 30000)...(-39000 + 30000))
+        // inside a log (dist 0) outranks one the clip is before
+        let b = try log("b_mix.bin", offset: 0, seconds: 200)
+        let r2 = LogMatcher.candidates(for: clip(offset: 61), logs: [a, b], skew: 0)
+        XCTAssertEqual(r2.map { $0.log.url.lastPathComponent }, ["b_mix.bin", "a_mix.bin"])
     }
 
     func testHugeClockSkewStillMatchesOrRefuses() throws {

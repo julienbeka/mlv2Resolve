@@ -108,6 +108,25 @@ final class MLVHeaderTests: XCTestCase {
         XCTAssertEqual(Double(c.nanosecond ?? 0) / 1e9, 0.216, accuracy: 0.001)
     }
 
+    func testTimingTruncatedAndInvalid() throws {
+        let full = try Data(contentsOf: try timingClip(chunkFrames: 0))
+        let u = tmp.appendingPathComponent("cut.MLV")
+        // cut mid second VIDF payload: only the first frame counts
+        try full.prefix(full.count - 20).write(to: u)
+        XCTAssertEqual(MLVHeader.timing(of: u)?.frames, 1)
+        // cut every possible length: never crashes
+        for n in stride(from: 0, to: full.count, by: 7) {
+            try full.prefix(n).write(to: u)
+            _ = MLVHeader.timing(of: u)
+        }
+        // all-zero RTCI date (year 1900) is rejected
+        var bad = full
+        let r = bad.range(of: Data("RTCI".utf8))!.lowerBound
+        bad.replaceSubrange((r + 16)..<(r + 28), with: Data(count: 12))
+        try bad.write(to: u)
+        XCTAssertNil(MLVHeader.timing(of: u))
+    }
+
     func testTimingNilWithoutRTCI() throws {
         let d = SyntheticMLV.data(sampling: (1, 2, 1, 0))
         let u = tmp.appendingPathComponent("n.MLV"); try d.write(to: u)

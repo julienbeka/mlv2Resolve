@@ -67,13 +67,17 @@ public final class AppState: ObservableObject {
     /// Where the Resolve menu script is written (nil: never written, e.g. in tests).
     private let resolveScriptsDir: URL?
     private let prepareResolvePresets: (([Int]) -> ResolvePresets.Preparation)?
+    /// Background gyro sync, told about every mount and unmount (nil: no gyro sync, e.g. in tests).
+    public let gyro: GyroSyncCoordinator?
 
     public init(manager: MountManager, defaults: UserDefaults, scan: @escaping (URL) throws -> [Shoot],
                 restartDelays: [Duration] = [.seconds(1), .seconds(5)],
                 restartWindow: Duration = .seconds(60),
                 resolveRunner: ResolveDesqueeze.Runner? = nil, resolveScriptsDir: URL? = nil,
-                prepareResolvePresets: (([Int]) -> ResolvePresets.Preparation)? = nil) {
+                prepareResolvePresets: (([Int]) -> ResolvePresets.Preparation)? = nil,
+                gyro: GyroSyncCoordinator? = nil) {
         self.manager = manager
+        self.gyro = gyro
         self.resolveRunner = resolveRunner
         self.resolveScriptsDir = resolveScriptsDir
         self.prepareResolvePresets = prepareResolvePresets
@@ -120,6 +124,7 @@ public final class AppState: ObservableObject {
                 try await manager.unmount(shoot)
                 mounted.remove(k)
                 saved.removeAll { $0 == k }
+                gyro?.shootUnmounted(shoot)
             } catch {
                 alert = Self.busyAlert([shoot.name])
             }
@@ -139,6 +144,7 @@ public final class AppState: ObservableObject {
                 try await manager.unmount(shoot)
                 mounted.remove(k)
                 saved.removeAll { $0 == k }
+                gyro?.shootUnmounted(shoot)
             } catch { failed.append(shoot.name) }
         }
         // Anything not known to the manager anymore is no longer mounted.
@@ -227,6 +233,7 @@ public final class AppState: ObservableObject {
         alert = Self.unplugAlert(volume)
         let live = await manager.mounted.keys
         for shoot in live where affected.contains(Self.key(shoot.folder)) {
+            gyro?.shootUnmounted(shoot)
             try? await manager.unmount(shoot, force: true) // the disk is going away
         }
         // Anything that refused to unmount is still mounted.
@@ -307,6 +314,7 @@ public final class AppState: ObservableObject {
                                               fixFocusPixels: fixFocusPixels)
             noteMountPoint(shoot, url)
             mounted.insert(Self.key(shoot.folder))
+            startGyro(shoot, mountPoint: url)
             noteSqueeze(shoot)
             noteCollision(shoot, mountedAt: url)
             return true
@@ -345,6 +353,20 @@ public final class AppState: ObservableObject {
         return n
     }
 
+    /// Starts the gyro sync of a freshly mounted shoot in the background. Logs are searched in the chosen
+    /// folder when the shoot lies in it, else in the shoot's own folder.
+    private func startGyro(_ shoot: Shoot, mountPoint: URL) {
+        guard let gyro else { return }
+        let chosen = folder.flatMap { f in
+            Self.key(shoot.folder).hasPrefix(Self.prefix(f)) || Self.key(shoot.folder) == Self.key(f) ? f : nil
+        } ?? shoot.folder
+        let k = Self.key(shoot.folder)
+        Task { [weak self] in
+            guard self?.mounted.contains(k) == true else { return }  // unmounted before this task started
+            await gyro.shootMounted(shoot, mountPoint: mountPoint, chosenFolder: chosen)
+        }
+    }
+
     private func noteMountPoint(_ shoot: Shoot, _ url: URL) {
         let k = Self.key(shoot.folder)
         _ = squeezeFactor(shoot)
@@ -369,6 +391,7 @@ public final class AppState: ObservableObject {
             // Only shoots we consider mounted (startup failures are alerted by `mount`,
             // unplugged disks are dropped from `mounted` before their engines stop).
             guard mounted.remove(Self.key(shoot.folder)) != nil else { return }
+            gyro?.shootUnmounted(shoot)
             engineCrashed(shoot, status: status)
         }
     }
@@ -410,6 +433,7 @@ public final class AppState: ObservableObject {
             let url = try await manager.mount(shoot, mode: mode, fixBadPixels: fixBadPixels, fixFocusPixels: fixFocusPixels)
             noteMountPoint(shoot, url)
             mounted.insert(k)
+            startGyro(shoot, mountPoint: url)
         } catch {
             if case let .exitedDuringStartup(status)? = error as? MountError {
                 engineCrashed(shoot, status: status)

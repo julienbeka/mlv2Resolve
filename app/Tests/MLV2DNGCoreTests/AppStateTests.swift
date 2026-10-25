@@ -504,3 +504,24 @@ extension AppStateTests {
         XCTAssertTrue(mounted.isEmpty)
     }
 }
+
+// MARK: Gyro sync wiring
+extension AppStateTests {
+    func testMountStartsGyroSyncAndUnmountStopsIt() async throws {
+        let dir = try makeShootFolder("A")
+        let gyro = GyroSyncCoordinator(motionRunner: { _ in [] }, defaults: defaults,
+                                       backupsRoot: tmp.appendingPathComponent("backups", isDirectory: true))
+        let state = AppState(manager: makeManager(), defaults: defaults, scan: ShootScanner.scan,
+                             restartDelays: [.milliseconds(10)], gyro: gyro)
+        await state.choose(folder: volume)
+        let a = try shoot(state, "A")
+        await state.toggle(a)
+        let clip = key(dir.appendingPathComponent("A001.MLV"))
+        await waitUntil { gyro.states[clip] != nil && gyro.states[clip] != .pending && gyro.states[clip] != .running }
+        // The fake mount has no clip folder, so the clip fails; nothing is written next to the MLV.
+        XCTAssertEqual(gyro.states[clip], .failed("Clip folder not found in the mount"))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path), ["A001.MLV"])
+        await state.toggle(a)
+        XCTAssertNil(gyro.states[clip])
+    }
+}

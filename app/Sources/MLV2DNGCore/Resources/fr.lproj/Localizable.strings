@@ -38,3 +38,10 @@
 "Input Sizing presets created in the local Resolve library. A backup was saved beside the settings file. Open that library and a project in Resolve, then click Desqueeze in Resolve again. Shared or relocated libraries require manual preset creation." = "Les presets Input Sizing ont été créés dans la bibliothèque locale de Resolve. Une sauvegarde a été enregistrée à côté du fichier de réglages. Ouvrez cette bibliothèque et un projet dans Resolve, puis cliquez à nouveau sur Désqueezer dans Resolve. Les bibliothèques partagées ou déplacées nécessitent une création manuelle des presets.";
 "To install the presets automatically, quit Resolve and click Desqueeze in Resolve again. Automatic installation supports only the default local library. Otherwise, create the presets manually:" = "Pour installer les presets automatiquement, quittez Resolve puis cliquez à nouveau sur Désqueezer dans Resolve. L’installation automatique prend uniquement en charge la bibliothèque locale par défaut. Sinon, créez les presets manuellement :";
 "The Resolve desqueeze script failed." = "Le script de désanamorphosage dans Resolve a échoué.";
+"Choose a lens for this shoot" = "Choisissez un objectif pour ce tournage";
+"Clip folder not found in the mount" = "Dossier du plan introuvable dans le montage";
+"Couldn't read the clip's timing" = "Impossible de lire l’horodatage du plan";
+"Motion analysis failed: %@" = "Échec de l’analyse du mouvement : %@";
+"Couldn't build the lens profile: %@" = "Impossible de créer le profil d’objectif : %@";
+"Couldn't write the Gyroflow project: %@" = "Impossible d’écrire le projet Gyroflow : %@";
+"Couldn't back up the existing Gyroflow project: %@" = "Impossible de sauvegarder le projet Gyroflow existant : %@";

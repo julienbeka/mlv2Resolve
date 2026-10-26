@@ -28,9 +28,15 @@ struct MainWindowView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(verbatim: "mlv2Resolve").font(.largeTitle.weight(.semibold))
-                            Text("Your footage. Ready for Resolve.").foregroundStyle(.secondary)
+                        HStack(spacing: 14) {
+                            Image(nsImage: NSWorkspace.shared.icon(forFile: Bundle.main.bundlePath))
+                                .resizable().interpolation(.high)
+                                .frame(width: 64, height: 64)
+                                .accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(verbatim: "mlv2Resolve").font(.largeTitle.weight(.semibold))
+                                Text("Your footage. Ready for Resolve.").foregroundStyle(.secondary)
+                            }
                         }
                         Spacer()
                         Text(verbatim: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.2").font(.caption.monospacedDigit()).foregroundStyle(.secondary)

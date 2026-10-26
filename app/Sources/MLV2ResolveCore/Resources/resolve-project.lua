@@ -83,25 +83,20 @@ local ok,err=pcall(function()
       local exists=false
       for _,name in ipairs(pm:GetProjectListInCurrentFolder() or {}) do if name==shoot.name then exists=true end end
       if exists then project=pm:LoadProject(shoot.name); created=false
-      else project=pm:CreateProject(shoot.name); created=true end
+      else
+        if not pm:ImportProject(PROJECT_TEMPLATE,shoot.name) then error('Could not import bundled project model: ' .. shoot.name) end
+        project=pm:LoadProject(shoot.name); created=true
+      end
     end
     if not project then error('Could not open project: ' .. shoot.name) end
     if created then
       if not studio and (shoot.width>3840 or shoot.height>2160) then shoot.width=3840; shoot.height=2160 end
-      if not project:SetPreset('mlv2Resolve') and not project:SetPreset('mlv2dng') then missing=missing+1; warn(shoot.name .. ': preset mlv2Resolve missing') end
-      local settings={
-        {'colorScienceMode','davinciYRGB'}, {'separateColorSpaceAndGamma','1'},
-        {'colorSpaceTimeline','DaVinci WG'}, {'colorSpaceTimelineGamma','DaVinci Intermediate'},
-        {'colorSpaceOutput','Same as Timeline'},
-        {'timelineFrameRate',tostring(shoot.fps)}, {'timelineInputResMismatchBehavior','scaleToFit'},
-        {'timelineResolutionWidth',tostring(studio and shoot.width or math.min(shoot.width,3840))},
-        {'timelineResolutionHeight',tostring(studio and shoot.height or math.min(shoot.height,2160))}}
-      for _,setting in ipairs(settings) do
-        if not project:SetSetting(setting[1],setting[2]) then error(shoot.name .. ': setting refused ' .. setting[1]) end
-      end
+      -- Set the cadence before importing a model containing a clip: Resolve locks it afterwards.
+      if not project:SetSetting('timelineFrameRate',tostring(shoot.fps)) then error('Project frame rate refused') end
+
     end
     local targetWidth,targetHeight=shoot.width,shoot.height
-    do
+    if not created then
       local got,w,h=pcall(function() return tonumber(project:GetSetting('timelineResolutionWidth')),tonumber(project:GetSetting('timelineResolutionHeight')) end)
       if got and w and h and w>0 and h>0 then targetWidth,targetHeight=w,h end
     end
@@ -109,21 +104,57 @@ local ok,err=pcall(function()
     local root=pool:GetRootFolder()
     local seen={}; visit(root,seen)
     pool:SetCurrentFolder(root)
-    local rushs=nil
+    local rushs,gyroTemplate,gyroSource,anchor=nil,nil,nil,nil
+    local modelFolderName='__mlv2Resolve_gyro_model'
+    local function hasGyro(item)
+      local graph=item:GetNodeGraph()
+      if not graph then return false end
+      for n=1,graph:GetNumNodes() do
+        for _,tool in ipairs(graph:GetToolsInNode(n) or {}) do
+          if tool:lower():find('gyroflow(niyien)',1,true) then return true end
+        end
+      end
+      return false
+    end
     -- Existing projects receive media only. Never create or modify a timeline on a later run.
     if created then
+      -- An existing empty timeline anchors the chosen project cadence during DRT imports.
+      anchor=pool:CreateEmptyTimeline('__mlv2Resolve_format_anchor')
+      if not anchor then error('Could not initialize project format') end
+      if INCLUDE_ALL_SHOTS then
+        gyroTemplate=pool:ImportTimelineFromFile(GYRO_TEMPLATE,{importIntoSubFolderName=modelFolderName})
+        if gyroTemplate then gyroSource=(gyroTemplate:GetItemListInTrack('video',1) or {})[1] end
+        if not gyroSource or not hasGyro(gyroSource) then
+          gyroSource=nil
+          warn('Gyroflow(NiYien) plugin unavailable: install it before creating the project')
+        end
+      end
       rushs=pool:ImportTimelineFromFile(TIMELINE_TEMPLATE,{timelineName=TIMELINE_NAME})
-      if not rushs or not project:SetCurrentTimeline(rushs) then error('Could not import the timeline CST model. This Resolve version may not support it.') end
+      if not rushs or not project:SetCurrentTimeline(rushs) then error('Could not open the bundled project CST timeline. This Resolve version may not support it.') end
+      if not pool:DeleteTimelines({anchor}) then error('Could not remove format anchor') end
       if not rushs:SetName(TIMELINE_NAME) then error('Could not name timeline: ' .. TIMELINE_NAME) end
       local graph=rushs:GetNodeGraph()
       if not graph or graph:GetNumNodes()~=2 or not graph:SetNodeEnabled(1,true) or not graph:SetNodeEnabled(2,false) then
         error('Could not prepare timeline CST states; Rec.709 export node must remain disabled')
       end
-      for _,setting in ipairs({{'useCustomSettings','1'},{'timelineFrameRate',tostring(shoot.fps)},
-                                {'timelineResolutionWidth',tostring(targetWidth)},{'timelineResolutionHeight',tostring(targetHeight)},
-                                {'timelineInputResMismatchBehavior','scaleToFit'}}) do
-        if not rushs:SetSetting(setting[1],setting[2]) then error('Timeline setting refused: ' .. setting[1]) end
+      -- DRT imports reset project format. Apply project settings AFTER both model imports.
+      local settings={
+        {'colorScienceMode','davinciYRGB'}, {'separateColorSpaceAndGamma','1'},
+        {'colorSpaceTimeline','DaVinci WG'}, {'colorSpaceTimelineGamma','DaVinci Intermediate'},
+        {'colorSpaceOutput','DaVinci WG'}, {'colorSpaceOutputGamma','DaVinci Intermediate'},
+        {'timelineFrameRate',tostring(shoot.fps)}, {'timelineInputResMismatchBehavior','scaleToFit'},
+        {'timelineResolutionWidth',tostring(studio and shoot.width or math.min(shoot.width,3840))},
+        {'timelineResolutionHeight',tostring(studio and shoot.height or math.min(shoot.height,2160))}}
+      for _,setting in ipairs(settings) do
+        -- Resolve 21 exposes the output gamma for reading but rejects Intermediate in its setter.
+        -- The bundled DRP carries it; retain an already matching value.
+        local readable,current=pcall(function() return project:GetSetting(setting[1]) end)
+        if not readable or tostring(current)~=setting[2] then
+          if not project:SetSetting(setting[1],setting[2]) then error(shoot.name .. ': setting refused ' .. setting[1]) end
+        end
       end
+      -- The project owns format, cadence and colour. Imported models must inherit it.
+      if not rushs:SetSetting('useCustomSettings','0') then error('Could not inherit project settings') end
     end
     for _,name in ipairs(shoot.warnings) do warn(shoot.name .. ': ' .. name) end
     for _,c in ipairs(shoot.clips) do
@@ -141,6 +172,7 @@ local ok,err=pcall(function()
               if not synced then warn(c.name .. ': audio sync refused') end
             end
           else warn(c.name .. ': no WAV') end
+          local sizingApplied=c.factor==1
           if c.factor>1 then
             local wanted='mlv2Resolve 1x' .. c.factor
             local fitZoom=1
@@ -153,20 +185,42 @@ local ok,err=pcall(function()
             end
             local preset=property(video,'Input Sizing Preset')
             if preset=='' or preset=='None' then
-              if not video:SetClipProperty('Input Sizing Preset',wanted) then warn(c.name .. ': sizing preset missing ' .. wanted .. string.format(' (Width=%.12g, Height=%.12g). Select it for this clip after saving the preset.',c.factor*fitZoom,fitZoom)) end
-            elseif preset~=wanted then warn(c.name .. ': existing sizing preset kept') end
+              sizingApplied=video:SetClipProperty('Input Sizing Preset',wanted)
+              if not sizingApplied and not INCLUDE_ALL_SHOTS then warn(c.name .. ': sizing preset missing ' .. wanted) end
+            else
+              sizingApplied=true -- Preserve a user's custom input sizing.
+              if preset~=wanted then warn(c.name .. ': existing sizing preset kept') end
+            end
           end
           if rushs and INCLUDE_ALL_SHOTS then
             local timelineItems=pool:AppendToTimeline({video}) or {}
             if #timelineItems==0 then warn(c.name .. ': timeline append refused') end
             for _,item in ipairs(timelineItems) do
+              if gyroSource and (not gyroSource:CopyGrades({item}) or not hasGyro(item)) then
+                warn(c.name .. ': Gyroflow(NiYien) node could not be applied')
+              end
               local rawFit=math.min(targetWidth/c.width,targetHeight/c.height)
-              local zoom=studio and 1 or math.min(1,math.min(targetWidth/(c.width*c.factor),targetHeight/c.height)/rawFit)
-              if not item:SetProperty('ZoomX',zoom) or not item:SetProperty('ZoomY',zoom) then warn(c.name .. ': UHD zoom refused') end
+              local zoom=math.min(1,math.min(targetWidth/(c.width*c.factor),targetHeight/c.height)/rawFit)
+              local x,y=1,1
+              if not sizingApplied then x=c.factor*zoom; y=zoom
+              elseif not studio then x=zoom; y=zoom end
+              if not item:SetProperty('ZoomGang',false) or not item:SetProperty('ZoomX',x) or not item:SetProperty('ZoomY',y) then
+                warn(c.name .. ': desqueeze/fit transform refused')
+              end
             end
           end
         end)
         if not success then failed=failed+1; warn(c.name .. ': ' .. tostring(reason)) end
+      end
+    end
+    if gyroTemplate then
+      project:SetCurrentTimeline(rushs)
+      if not pool:DeleteTimelines({gyroTemplate}) then warn('Could not remove temporary Gyroflow model timeline') end
+      for _,folder in ipairs(root:GetSubFolderList() or {}) do
+        if folder:GetName()==modelFolderName then
+          pool:SetCurrentFolder(root)
+          if not pool:DeleteFolders({folder}) then warn('Could not remove temporary Gyroflow model bin') end
+        end
       end
     end
     if not pm:SaveProject() then error(shoot.name .. ': project save refused') end
@@ -175,11 +229,13 @@ local ok,err=pcall(function()
       if type(db)=='table' and db.DbName then
         local function hex(s) return (s:gsub('.',function(c) return string.format('%02x',string.byte(c)) end)) end
         local identity=(db.DbType or '') .. '|' .. (db.IpAddress or '') .. '|' .. db.DbName
-        local receipt='LINK ' .. hex(shoot.source) .. ' ' .. hex(shoot.name) .. ' ' .. hex(identity)
+        for _,source in ipairs(shoot.sources or {shoot.source}) do
+        local receipt='LINK ' .. hex(source) .. ' ' .. hex(shoot.name) .. ' ' .. hex(identity)
         print(receipt)
         if RECEIPTS then
           local f=io.open(RECEIPTS,'a')
           if f then f:write(receipt .. '\n'); f:close() else warn('Could not remember linked project') end
+        end
         end
       else warn('Could not identify Resolve library; project link not cached') end
     end

@@ -42,7 +42,7 @@ struct MainWindowView: View {
                     if let info = state.info {
                         banner(info, tint: .blue, icon: "info.circle.fill") { state.clearInfo() }
                     }
-                    WorkflowSection(number: "01", title: "Mount", subtitle: "Virtual CinemaDNG, without copying your footage.", icon: "externaldrive") {
+                    WorkflowSection(number: "01", title: "Footage", subtitle: "Virtual CinemaDNG, without copying your footage.", icon: "externaldrive") {
                         mountSection
                     }
                     WorkflowSection(number: "02", title: "Gyro Sync", subtitle: "SenseFlow A1 · Lens and motion matching", icon: "gyroscope") {
@@ -52,7 +52,7 @@ struct MainWindowView: View {
                         }
                     }
                     ResolveSection(state: state, projects: state.projects)
-                    WorkflowSection(number: "04", title: "Settings & Tips", subtitle: "Make this workflow yours.", icon: "slider.horizontal.3") {
+                    WorkflowSection(number: "04", title: "Editing", subtitle: "Make this workflow yours.", icon: "slider.horizontal.3") {
                         HStack {
                             Button("Settings…", systemImage: "gearshape") { state.showSettings() }
                             if state.needsFuseT { Button("Install FUSE-T…") { AppDelegate.shared?.showOnboarding() } }
@@ -158,7 +158,14 @@ struct ResolveSection: View {
     @State private var existingPrompt = false
     private var working: Bool { state.openingResolve || state.waitingForResolveGyro || state.desqueezing }
     private var relevant: [ResolveProjectStore.Link] {
-        projects.links.filter { state.mounted.contains($0.source) }
+        distinctLinks(projects.links.filter { state.mounted.contains($0.source) })
+    }
+    private var uniqueLinks: [ResolveProjectStore.Link] {
+        distinctLinks(projects.links)
+    }
+    private func distinctLinks(_ links: [ResolveProjectStore.Link]) -> [ResolveProjectStore.Link] {
+        var seen = Set<[String]>()
+        return links.filter { seen.insert([$0.database, $0.name] + $0.folder).inserted }
     }
     var body: some View {
         WorkflowSection(number: "03", title: "Resolve", subtitle: "From mounted footage to your edit.", icon: "play.rectangle") {
@@ -171,6 +178,8 @@ struct ResolveSection: View {
                 Spacer()
                 if working { ProgressView().controlSize(.small) }
             }
+            TextField("Project name", text: $state.projectName)
+                .textFieldStyle(.roundedBorder).disabled(working)
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                 Button {
                     projects.reloadReceipts()
@@ -178,9 +187,9 @@ struct ResolveSection: View {
                 } label: { Label("Create Project", systemImage: "plus.rectangle.on.rectangle").frame(maxWidth: .infinity) }
                     .buttonStyle(.borderedProminent).disabled(working || state.mounted.isEmpty || MenuActions.resolveURL == nil)
                 Menu {
-                    ForEach(projects.links) { link in
+                    ForEach(uniqueLinks) { link in
                         Button { MenuActions.openLinked(link, state: state) } label: {
-                            Text(verbatim: link.name + " — " + URL(fileURLWithPath: link.source).lastPathComponent)
+                            Text(verbatim: link.name)
                         }
                     }
                 } label: { Label("Open Project", systemImage: "folder").frame(maxWidth: .infinity) }

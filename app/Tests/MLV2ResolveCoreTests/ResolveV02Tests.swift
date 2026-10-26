@@ -2,6 +2,15 @@ import XCTest
 @testable import MLV2ResolveCore
 
 final class ResolveV02Tests: XCTestCase {
+    func testMountedFoldersCombineIntoOneNamedProjectAndKeepEveryLink() throws {
+        let shoots = [ResolveProject.ShootMedia(name: "Day 1", media: [clip], source: "/day1"),
+                      ResolveProject.ShootMedia(name: "Day 2", media: [clip, clip], source: "/day2")]
+        let grouped = try XCTUnwrap(ResolveProject.combined(shoots, name: "  My film  ").first)
+        XCTAssertEqual(grouped.name, "My film")
+        XCTAssertEqual(grouped.media.count, 3)
+        XCTAssertEqual(grouped.sources, ["/day1", "/day2"])
+        XCTAssertEqual(ResolveProject.combined([], name: "Empty"), [])
+    }
     let clip = ResolveProject.Media(name: "A", directory: "/mnt/A", pattern: "/mnt/A/A_%06d.dng", first: 0, last: 100, wav: nil, width: 1600, height: 2008, factor: 3, fps: 24)
     func testTimelineSizesKeepCadenceAndEntireAnamorphicImage() throws {
         for (size, width, height) in [(ResolveTimelineSize.automatic,4800,2008),(.uhd,3840,2160),(.hd,1920,1080)] {
@@ -41,8 +50,12 @@ final class ResolveV02Tests: XCTestCase {
         let state = AppState(manager:manager,defaults:defaults,scan:{ _ in [] })
         XCTAssertTrue(state.includeAllShots)
         XCTAssertEqual(state.timelineName,"All shots")
+        state.projectName = "  My film  "
         state.includeAllShots = false; state.timelineName = "  My edit  "
         let restored = AppState(manager:manager,defaults:defaults,scan:{ _ in [] })
+        XCTAssertEqual(restored.resolvedProjectName,"My film")
+        restored.projectName = "   "
+        XCTAssertEqual(restored.resolvedProjectName,"mlv2Resolve")
         XCTAssertFalse(restored.includeAllShots)
         XCTAssertEqual(restored.resolvedTimelineName,"My edit")
         restored.timelineName = "   "

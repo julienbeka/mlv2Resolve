@@ -2810,7 +2810,37 @@
         }
       }
     },
-    "Timeline color: DaVinci Wide Gamut / Intermediate. CST 01 converts P3-D60 / Linear to the working space. CST 02 converts to Rec.709 / Rec.709-A and starts disabled. Enable it only before a Rec.709 export.": {
+    "Footage": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rushs"
+          }
+        }
+      }
+    },
+    "Editing": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Montage"
+          }
+        }
+      }
+    },
+    "Project name": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nom du projet"
+          }
+        }
+      }
+    },
+    "Project working and output color: DaVinci Wide Gamut / Intermediate. CST 01 converts P3-D60 / Linear to the working space. CST 02 converts to Rec.709 / Rec.709-A and starts disabled. Enable it only before a Rec.709 export.": {
       "extractionState": "manual",
       "localizations": {
         "en": {
@@ -2822,7 +2852,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Couleur de la timeline : DaVinci Wide Gamut / Intermediate. Le CST 01 convertit P3-D60 / Linear vers l’espace de travail. Le CST 02 convertit vers Rec.709 / Rec.709-A et reste désactivé au départ. Activez-le uniquement avant un export Rec.709."
+            "value": "Espace de travail et sortie du projet : DaVinci Wide Gamut / Intermediate. Le CST 01 convertit P3-D60 / Linear vers cet espace. Le CST 02 convertit vers Rec.709 / Rec.709-A et reste désactivé. Activez-le uniquement avant un export Rec.709."
           }
         }
       }

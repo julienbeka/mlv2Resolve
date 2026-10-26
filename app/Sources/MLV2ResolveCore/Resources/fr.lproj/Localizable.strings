@@ -47,3 +47,6 @@
 "Couldn't back up the existing Gyroflow project: %@" = "Impossible de sauvegarder le projet Gyroflow existant : %@";
 "The motion analyzer (mlvmotion) is missing from the app. Reinstall mlv2Resolve." = "L’analyseur de mouvement (mlvmotion) manque dans l’app. Réinstallez mlv2Resolve.";
 "%@: header says %@, corrected to %@ like the other clips" = "%@ : l’en-tête indique %@, corrigé en %@ comme les autres plans";
+
+"1 clip desqueezed in Resolve." = "1 plan désanamorphosé dans Resolve.";
+"%@ clips desqueezed in Resolve." = "%@ plans désanamorphosés dans Resolve.";

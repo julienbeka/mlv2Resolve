@@ -26,20 +26,20 @@ To build from source, see [Building](#building).
 2. Click a shoot to mount it. The DNGs appear in `~/MLV Mounts/<shoot>` (**Show DNGs in Finder**). Use **Create Project** to prepare the project and import the clips, or import them manually from that folder.
 3. Mounted shoots are remounted automatically at launch and when their disk is plugged back in, always at the same path, so Resolve finds its clips again.
 4. **Dual ISO**: use **Smooth Editing** while editing and **Grading Quality** before grading. The switch is applied live; in Resolve, select the clips and right-click → Refresh.
-5. Anamorphic footage: **Create Project** applies the matching Input Sizing presets when available. **Desqueeze in Resolve** can also apply them to clips already imported. If a preset cannot be installed, the app explains how to save it manually (for 1x3: Color → Sizing → Input Sizing → **Width = 3**, **Height = 1**, with fit adjustments when needed).
+5. Anamorphic footage: previews are automatically desqueezed. **Create Project** desqueezes timeline clips even when no Input Sizing preset exists, using separate horizontal/vertical zoom to fit the entire image. **Desqueeze in Resolve** also fixes existing timeline clips and preserves custom framing. Media-pool-only clips can still use Input Sizing presets.
 
 ### Prepare a Resolve project
 
-Four sections organize the window: **Mount**, **Gyro Sync**, **Resolve**, and **Settings & Tips**. Settings opens in a left drawer and includes Dual ISO with explanations of both modes.
+Four sections organize the window: **Footage**, **Gyro Sync**, **Resolve**, and **Editing**. Settings opens in a left drawer and includes Dual ISO with explanations of both modes.
 
-- **Create Project** creates a separate project per mounted shoot, imports CinemaDNG with matching WAV audio, and syncs audio by timecode. **Open Project** opens a linked project without changing media or timelines. **Open Resolve** only launches the app. **Desqueeze in Resolve** stays separate.
-- **Settings → Resolve** offers Automatic (majority desqueezed resolution), UHD or HD. HD/UHD show the entire image, with bars if needed. Frame rate follows the majority of the footage by default; a manual choice overrides it for new timelines.
+- **Create Project** creates one project for all mounted shoots, using the editable project name, imports CinemaDNG with matching WAV audio, and syncs audio by timecode. **Open Project** opens a linked project without changing media or timelines. **Open Resolve** only launches the app. **Desqueeze in Resolve** stays separate.
+- **Settings → Resolve** offers Automatic (majority desqueezed resolution), UHD or HD. HD/UHD show the entire image, with bars if needed. Frame rate follows the majority of the footage by default; a manual choice overrides it at project level.
 - **Add all shots to timeline** is enabled by default. The name **All shots** is editable. Disable the option for an empty timeline with the CST nodes prepared.
-- Working space: **DaVinci Wide Gamut / Intermediate**. Timeline CST 01 is enabled: **P3-D60 / Linear → DWG / Intermediate**. CST 02 is disabled: **DWG / Intermediate → Rec.709 / Rec.709-A**. Enable the second only before a Rec.709 export. The model ships with the app, so other users need no CST setup. Import tested in Resolve **21.1.1**; incompatible versions produce an explicit error.
+- Project working and output space: **DaVinci Wide Gamut / Intermediate**. Timeline CST 01 is enabled: **P3-D60 / Linear → DWG / Intermediate**. CST 02 is disabled: **DWG / Intermediate → Rec.709 / Rec.709-A**. Enable the second only before a Rec.709 export. The model ships with the app, so other users need no CST setup. Import tested in Resolve **21.1.1**; incompatible versions produce an explicit error.
 - **Clear Project Links** removes cached associations without deleting Resolve projects or footage.
 - **Resolve Studio**: enable **External scripting using: Local** to run actions from the app. **Resolve Free**: choose an action in the app, then run **Workspace → Scripts → mlv2Resolve** in Resolve. New project links are collected when returning to the app.
 
-Switching projects saves existing work after confirmation. Opening a linked project preserves grades and settings. Existing mlv2dng Camera Raw project presets remain recognized; a project preset named mlv2Resolve can store your RAW preferences too.
+Switching projects saves existing work after confirmation. Opening a linked project preserves grades and settings. New projects use a bundled empty colour project; no personal Resolve preset is required. Adjust Camera Raw preferences in the resulting project as needed.
 
 ### Gyro sync (SenseFlow A1)
 
@@ -86,8 +86,7 @@ header disagrees with the majority of clips of the same size. The values come fr
 
 For an unknown format, a valid readout time from an imported lens profile is kept; otherwise rolling shutter
 correction is disabled. Existing projects are preserved: choose **Regenerate** on a clip to apply the new values
-(with a backup), then **Load for current file** in Resolve's Gyroflow plugin. Add the plugin to a Color node
-manually; mlv2Resolve prepares its project file.
+(with a backup), then **Load for current file** in Resolve's Gyroflow plugin. New populated timelines already have Gyroflow(NiYien) on each clip’s Color node when the plugin is installed. For existing projects, add it manually if needed.
 
 ### Files saved into a clip folder (sidecars)
 

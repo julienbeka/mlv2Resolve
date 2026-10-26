@@ -63,6 +63,13 @@ public final class AppState: ObservableObject {
     @Published public var includeAllShots: Bool {
         didSet { defaults.set(includeAllShots, forKey: "resolveIncludeAllShots"); refreshProjectMenuScript() }
     }
+    @Published public var projectName: String {
+        didSet { defaults.set(projectName, forKey: "resolveProjectName"); refreshProjectMenuScript() }
+    }
+    public var resolvedProjectName: String {
+        let name = projectName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? "mlv2Resolve" : name
+    }
     @Published public var timelineName: String {
         didSet { defaults.set(timelineName, forKey: "resolveTimelineName"); refreshProjectMenuScript() }
     }
@@ -72,6 +79,11 @@ public final class AppState: ObservableObject {
     }
     public func showSettings(section: String = "general") {
         settingsSection = section; settingsPresented = true
+    }
+    public func previewSqueeze(clip: Clip, shoot: Shoot) async -> Int {
+        guard let mlv = clip.files.first else { return 1 }
+        let correction = resolveShoots[Self.key(shoot.folder)]?.corrections[SqueezeFix.relativeName(of: mlv, in: shoot.folder)]
+        return await Task.detached { max(1, correction ?? MLVHeader.horizontalSqueeze(of: mlv) ?? 1) }.value
     }
     public func previewDirectory(clip: Clip, shoot: Shoot) async -> URL? {
         guard let mount = mountPoints[Self.key(shoot.folder)], mounted.contains(Self.key(shoot.folder)), let mlv = clip.files.first else { return nil }
@@ -125,6 +137,7 @@ public final class AppState: ObservableObject {
         let savedFPS = defaults.double(forKey: "resolveTimelineFrameRate")
         self.timelineFrameRate = Self.timelineFrameRates.contains(savedFPS) ? savedFPS : nil
         self.includeAllShots = defaults.object(forKey: "resolveIncludeAllShots") == nil || defaults.bool(forKey: "resolveIncludeAllShots")
+        self.projectName = defaults.string(forKey: "resolveProjectName") ?? "mlv2Resolve"
         self.timelineName = defaults.string(forKey: "resolveTimelineName") ?? "All shots"
         self.timelineSize = ResolveTimelineSize(rawValue: defaults.string(forKey: "resolveTimelineSize") ?? "") ?? .automatic
         self.manager = manager
@@ -260,9 +273,7 @@ public final class AppState: ObservableObject {
         openingResolve = true
         defer { openingResolve = false }
         let discovered = await resolveProjectMedia()
-        let media = createOnly ? discovered.map { shoot in
-            ResolveProject.ShootMedia(name: shoot.name + " · " + String(UUID().uuidString.prefix(6)), media: shoot.media, warnings: shoot.warnings, source: shoot.source)
-        } : discovered
+        let media = ResolveProject.combined(discovered, name: resolvedProjectName)
         let factors = Set(media.flatMap(\.media).map(\.factor).filter { $0 > 1 }).sorted()
         let presets = ResolveProject.sizingPresets(shoots: media, timelineSize: timelineSize)
         let preparation = prepareProjectPresets?(presets) ?? prepareResolvePresets?(factors)
@@ -288,7 +299,7 @@ public final class AppState: ObservableObject {
                 if !result.text.contains(ResolveProject.guide) { result.text += "\n\n" + ResolveProject.guide }
                 defaults.set(true, forKey: "resolveProjectGuideShown")
             }
-            if preparation == .manual { result.text += "\n\n" + ResolvePresets.manualMessage() + "\n" + presets.map(\.manualStep).joined(separator: "\n") }
+            if preparation == .manual && !includeAllShots { result.text += "\n\n" + ResolvePresets.manualMessage() + "\n" + presets.map(\.manualStep).joined(separator: "\n") }
         }
         return result
     }
@@ -343,7 +354,7 @@ public final class AppState: ObservableObject {
         projectMenuTask = Task { [weak self] in
             guard let self else { return }
             let discovered = await self.resolveProjectMedia()
-            let media = discovered.map { ResolveProject.ShootMedia(name: $0.name + " · " + String(UUID().uuidString.prefix(6)), media: $0.media, warnings: $0.warnings, source: $0.source) }
+            let media = ResolveProject.combined(discovered, name: self.resolvedProjectName)
             guard !Task.isCancelled, case .create = self.projectMenuAction else { return }
             do { try ResolveProject.installMenuScript(shoots: media, in: dir, timelineSize: self.timelineSize, createOnly: true, receiptsURL: self.projectReceiptsURL, includeAllShots: self.includeAllShots, timelineName: self.resolvedTimelineName, frameRate: self.timelineFrameRate) }
             catch { self.alert = error.localizedDescription }

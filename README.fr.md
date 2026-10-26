@@ -26,20 +26,20 @@ Pour compiler depuis les sources, voir [Compiler](#compiler).
 2. Cliquez sur un tournage pour le monter. Les DNG apparaissent dans `~/MLV Mounts/<tournage>` (**Afficher les DNG dans le Finder**). Utilisez **Créer projet** pour préparer le projet et importer les plans, ou importez-les manuellement depuis ce dossier.
 3. Les tournages montés sont remontés automatiquement au lancement et à la reconnexion de leur disque, toujours au même chemin : Resolve retrouve ses plans.
 4. **Dual ISO** : utilisez « Montage fluide » pendant le montage et « Qualité étalonnage » avant l'étalonnage. La bascule s'applique à chaud ; dans Resolve, sélectionnez les plans puis clic droit → Rafraîchir.
-5. Rushs anamorphosés : **Créer projet** applique les préréglages Input Sizing correspondants lorsqu’ils sont disponibles. **Désqueezer dans Resolve** permet aussi de les appliquer à des plans déjà importés. Si un préréglage ne peut pas être installé, l’app explique comment l’enregistrer manuellement (en 1x3 : Color → Sizing → Input Sizing → **Width = 3**, **Height = 1**, avec ajustement au cadre si nécessaire).
+5. Les aperçus sont automatiquement désanamorphosés. **Créer projet** désanamorphose aussi les plans de la timeline sans préréglage Input Sizing, avec un zoom horizontal/vertical qui garde l’image entière. **Desqueeze dans Resolve** corrige les timelines existantes et préserve les cadrages personnalisés. Les plans uniquement dans le Media Pool peuvent utiliser les préréglages Input Sizing.
 
 ### Préparer un projet Resolve
 
-Quatre sections structurent la fenêtre : **Monter**, **Synchro gyro**, **Resolve**, **Réglages et conseils**. Les réglages s’ouvrent dans un tiroir gauche ; le Dual ISO et ses explications s’y trouvent aussi.
+Quatre sections structurent la fenêtre : **Rushs**, **Synchro gyro**, **Resolve**, **Montage**. Les réglages s’ouvrent dans un tiroir gauche ; le Dual ISO et ses explications s’y trouvent aussi.
 
-- **Créer projet** crée un projet distinct par tournage monté, importe les CinemaDNG et WAV associés, et synchronise l’audio par timecode. **Ouvrir projet** retrouve un projet lié sans toucher à ses médias ou timelines. **Ouvrir Resolve** lance seulement l’app. **Desqueeze dans Resolve** reste séparé.
-- **Réglages → Resolve** : taille Automatique (résolution désanamorphosée majoritaire), UHD ou HD. HD/UHD montrent l’image entière, avec des bandes si nécessaire. Cadence majoritaire des rushs par défaut, ou cadence choisie pour les nouvelles timelines.
+- **Créer projet** crée un seul projet pour tous les tournages montés, avec un nom modifiable, importe les CinemaDNG et WAV associés, et synchronise l’audio par timecode. **Ouvrir projet** retrouve un projet lié sans toucher à ses médias ou timelines. **Ouvrir Resolve** lance seulement l’app. **Desqueeze dans Resolve** reste séparé.
+- **Réglages → Resolve** : taille Automatique (résolution désanamorphosée majoritaire), UHD ou HD. HD/UHD montrent l’image entière, avec des bandes si nécessaire. Cadence majoritaire des rushs par défaut, ou cadence choisie au niveau du projet.
 - **Ajouter tous les rushs à la timeline** est activé par défaut. Le nom **All shots** est modifiable. Désactivez l’option pour obtenir une timeline vide avec les CST préparés.
-- Espace de travail : **DaVinci Wide Gamut / Intermediate**. CST de timeline 01 actif **P3-D60 / Linear → DWG / Intermediate** ; CST 02 désactivé **DWG / Intermediate → Rec.709 / Rec.709-A**. Activez le second uniquement avant un export Rec.709. Le modèle est inclus dans l’app, sans préparation des CST chez les autres utilisateurs. Import testé avec Resolve **21.1.1** ; une version incompatible est signalée.
+- Espace de travail et sortie du projet : **DaVinci Wide Gamut / Intermediate**. CST de timeline 01 actif **P3-D60 / Linear → DWG / Intermediate** ; CST 02 désactivé **DWG / Intermediate → Rec.709 / Rec.709-A**. Activez le second uniquement avant un export Rec.709. Le modèle est inclus dans l’app, sans préparation des CST chez les autres utilisateurs. Import testé avec Resolve **21.1.1** ; une version incompatible est signalée.
 - **Effacer les liens des projets** retire les associations mémorisées, sans supprimer de projet ni de rush.
 - **Resolve Studio** : activez **External scripting using: Local** dans Resolve pour exécuter les actions depuis l’app. **Resolve gratuit** : choisissez l’action dans l’app, puis lancez **Workspace → Scripts → mlv2Resolve** dans Resolve. Les liens des nouveaux projets sont récupérés au retour dans l’app.
 
-Un changement de projet enregistre le travail existant après confirmation. Une simple ouverture conserve étalonnage et réglages. Les préréglages Camera Raw mlv2dng existants restent reconnus ; vous pouvez aussi enregistrer un préréglage de projet mlv2Resolve pour vos préférences RAW.
+Un changement de projet enregistre le travail existant après confirmation. Une simple ouverture conserve étalonnage et réglages. Les nouveaux projets partent d’un modèle couleur vide inclus dans l’app ; aucun préréglage personnel Resolve n’est nécessaire. Adaptez les préférences Camera Raw dans le projet créé si besoin.
 
 ### Synchro gyro (SenseFlow A1)
 
@@ -91,7 +91,7 @@ sur l’image. Consultez le [tableau des modes et le détail du calcul](docs/res
 Pour un format inconnu, le temps valide d’un profil optique importé est conservé ; sans valeur valide, la
 correction du rolling shutter est désactivée. Les projets existants sont préservés : utilisez **Régénérer** sur
 un plan pour appliquer les nouvelles valeurs (avec sauvegarde), puis **Load for current file** dans le plugin
-Gyroflow de Resolve. Ajoutez le plugin manuellement sur un nœud Color ; mlv2Resolve prépare son fichier de projet.
+Gyroflow de Resolve. Les nouvelles timelines remplies reçoivent automatiquement Gyroflow(NiYien) sur le nœud Color de chaque plan, si le plugin est installé. Dans les projets existants, ajoutez-le manuellement si nécessaire.
 
 ### Fichiers enregistrés dans un dossier de plan (fichiers annexes)
 

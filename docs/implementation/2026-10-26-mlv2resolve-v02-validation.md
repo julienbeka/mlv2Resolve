@@ -1,38 +1,39 @@
-# mlv2Resolve 0.2 — validation
+# mlv2Resolve 0.2 — validation des correctifs
 
-## Résultat
+- 260 tests Swift, aucun échec ; 9 tests ignorés faute de rushs/fixtures de référence.
+- Application Release arm64, macOS 14 minimum, SDK 26.2 ; icône fournie avec coins transparents.
+- Revue indépendante du correctif : aucun défaut matériel confirmé. Les deux vérifications complémentaires demandées ont été effectuées ci-dessous.
 
-- Application Release arm64 compilée avec Xcode 26.2, cible minimale macOS 14.
-- 255 tests Swift : aucun échec ; 9 tests ignorés faute de rushs/fixtures réels.
-- Contrôles moteur `resolve-name-test`, `sidecar-test`, `dual-iso-cache-test` réussis.
-- Revue indépendante : deux défauts matériels corrigés (SDK des workflows GitHub et conservation de l’action d’ouverture lors d’un rafraîchissement du script Resolve Free).
-- Vérification visuelle du composant principal dans une application de contrôle isolée : quatre sections, tiroir gauche, contrôles de taille/cadence, option All shots activée et nom modifiable. Apparence claire rendue ; apparence sombre vérifiée dans une vraie fenêtre macOS 26.
-- Nouvelle icône fournie par l’utilisateur : suppression du damier imprimé pour recréer la transparence, génération des dix tailles, vérification alpha RGBA et coins transparents.
+## Vérifications réelles — Resolve Studio 21.1.1
 
-## Resolve 21.1.1 Studio — tests réels
+Deux dossiers et trois séquences Bayer DNG synthétiques, 1600 × 2008, facteur horizontal 3 :
 
-Un projet modèle distinct a été créé. L’utilisateur a réglé les CST :
+- un seul projet nommé, deux associations de dossiers vers le même projet ;
+- cadence majoritaire 25 i/s (sources 24/25/25), puis second projet avec choix manuel 29,97 i/s ;
+- paramètres du projet HD 1920 × 1080, espace de travail **DaVinci WG / DaVinci Intermediate**, sortie **DaVinci WG / DaVinci Intermediate** ;
+- timeline `All shots` héritant du projet (`useCustomSettings=0`), avec trois clips ;
+- CST 01 P3-D60 / Linear → DWG / Intermediate actif ; CST 02 DWG / Intermediate → Rec.709 / Rec.709-A désactivé ;
+- Gyroflow(NiYien) présent sur le graphe Color de chaque clip ; modèle temporaire supprimé ;
+- sans aucun préréglage Input Sizing : ZoomX=2,231111111 et ZoomY=0,743703704, rapport 3 et image entièrement visible ;
+- action Desqueeze sur les clips ramenés à leur zoom initial : `applied=3`, puis `already=3` au second passage ;
+- projet utilisateur sauvegardé avant les essais et rouvert après chaque validation.
 
-1. P3-D60 / Linear → DaVinci Wide Gamut / DaVinci Intermediate, actif, tone mapping None.
-2. DaVinci Wide Gamut / DaVinci Intermediate → Rec.709 / Rec.709-A, désactivé.
+Résultats confirmés par les sentinelles `COMBINED_FIXES_INTEGRATION_OK`, `DESQUEEZE_BUTTON_INTEGRATION_OK`, `ORIGINAL_RESTORED`.
 
-L’application de grades DRX via l’API a provoqué un plantage de Resolve pendant les essais. Cette voie a été abandonnée et ne figure pas dans l’implémentation livrée. Le modèle embarqué est une timeline **DRT vide**. Son import conserve deux CST ; les états des nœuds sont explicitement réappliqués par le script. La timeline accepte une cadence et une résolution différentes de celles du modèle.
+Sur un véritable DNG monté 1600 × 2008, ImageIO produit une vignette 765 × 960, avec ou sans transformation activée. Il n’applique pas déjà DefaultScale : l’ajustement de rapport horizontal dans l’aperçu SwiftUI est nécessaire et ne double pas la désanamorphose.
 
-La création complète a été exercée avec trois images Bayer DNG synthétiques dans un nouveau projet :
+## Modèles portables
 
-- import d’une séquence DNG réussi ;
-- timeline nommée `All shots test`, 25 i/s choisis malgré une source à 24 i/s, 1920 × 1080 ;
-- espace de travail de projet `DaVinci WG`, gamma `DaVinci Intermediate`, sortie `Same as Timeline` ;
-- deux nœuds CST sur la timeline ; le plan garde son graphe de clip par défaut à un nœud ;
-- association retournée après sauvegarde ;
-- réouverture via le script dédié : projet, nombre de timelines, nom, cadence et nombre de plans conservés.
+Resolve refuse de définir `DaVinci Intermediate` via le setter du gamma de sortie dans la version testée. Un **projet DRP vide sans timeline** contient donc les réglages couleur exacts ; sa cadence reste modifiable. Après choix de la cadence, une timeline vide provisoire empêche les imports DRT de réinitialiser les paramètres du projet. Le script importe ensuite le modèle de nœud Gyroflow et la timeline CST, supprime les éléments provisoires et impose l’héritage du projet.
 
-L’import DRT ignore `importOptions.timelineName` dans cette version : un `SetName` explicite a été ajouté et testé. Les résultats attendus ont été confirmés par `INTEGRATION_OK` puis `OPEN_ONLY_OK`.
+Le nœud Gyroflow préparé par l’utilisateur a été copié sur une image synthétique puis exporté. Les chemins, projet/profil optique chargé, identifiant d’instance, caches et vignettes ont été retirés des ressources distribuées, y compris dans les réglages compressés. Son import et sa copie fonctionnent même quand l’image synthétique de référence est hors ligne. **Load for current file** reste l’action qui charge le fichier `.gyroflow` du clip dans le plugin.
 
-Les données synthétiques n’ont pas de WAV ni de préréglage Camera Raw personnel : les avertissements correspondants étaient attendus. Les anciens préréglages Camera Raw `mlv2dng` restent reconnus pour la migration ; les nouveaux utilisateurs peuvent enregistrer leur préréglage `mlv2Resolve`.
+Aucun appel `ApplyGradeFromDRX` n’est utilisé : cette voie avait provoqué un plantage pendant les premiers essais.
 
-## Limites des vérifications
+## Limites
 
-Les essais ne constituent pas une validation de décodage/lecture/gyro de nouveaux rushs caméra réels. Resolve Free n’est pas installé séparément : sa voie de script de menu est couverte par les tests Lua et les tests de conservation de l’action sélectionnée. L’import du modèle couleur est validé sur Resolve 21.1.1 ; les versions incompatibles reçoivent une erreur explicite.
+Le plugin NiYien doit être installé ; son absence est signalée. Une timeline vide ne contient naturellement aucun nœud de clip. Les clips seulement dans le Media Pool peuvent nécessiter un préréglage Input Sizing ; le correctif par zoom s’applique aux occurrences en timeline et préserve les cadrages personnalisés.
 
-La release publique v0.2 n’est pas publiée automatiquement par ce travail.
+Les nouveaux réglages concernent les créations de projets ; ouvrir un projet lié ne modifie pas son contenu. Resolve Free n’est pas installé ici : son script de menu et la conservation de l’action sélectionnée sont couverts par les tests. Les essais synthétiques ne constituent pas une validation de stabilisation ou de décodage sur tous les modes caméra. Les ressources sont validées sur Resolve 21.1.1 ; une version incompatible produit une erreur.
+
+La release publique v0.2 n’est pas publiée automatiquement.

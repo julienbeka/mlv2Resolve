@@ -69,7 +69,7 @@ final class ResolveDesqueezeTests: XCTestCase {
         XCTAssertFalse(s.contains("local SUMMARY = nil"))
         XCTAssertTrue(s.contains("function SUMMARY.show"))
         XCTAssertTrue(s.contains("[3] = [[« mlv2Resolve 1x3 »]]"))
-        XCTAssertTrue(s.contains("{1} plans désanamorphosés dans Resolve (préréglage Input Sizing {2})."))
+        XCTAssertTrue(s.contains("{1} plans désanamorphosés dans Resolve."))
         XCTAssertTrue(s.contains("Puis relancez Workspace → Scripts → mlv2Resolve Desqueeze."))
         XCTAssertTrue(s.contains("Width = 3."), "the free-version hint names the factor")
     }
@@ -103,6 +103,32 @@ final class ResolveDesqueezeTests: XCTestCase {
     }
 
     // MARK: Running
+
+    func testTimelineFallbackWorksWithoutSizingPresetsAndIsIdempotent() async throws {
+        try XCTSkipUnless(RD.fuscriptURL() != nil)
+        let fixture = """
+        zx=1; zy=1; writes=0
+        local media={GetClipProperty=function(self,key)
+          if key=='File Path' then return '/test/shoot/A/A_000000.dng'
+          elseif key=='Resolution' then return '1600x2008' else return 'None' end
+        end,SetClipProperty=function() error('Timeline fallback must not require a preset') end}
+        local item={GetMediaPoolItem=function() return media end,
+          GetProperty=function(self,k) return k=='ZoomX' and zx or zy end,
+          SetProperty=function(self,k,v) writes=writes+1; if k=='ZoomX' then zx=v elseif k=='ZoomY' then zy=v end; return true end}
+        local t={GetTrackCount=function() return 1 end,GetItemListInTrack=function() return {item} end,
+          GetSetting=function(self,k) return k=='timelineResolutionWidth' and '1920' or '1080' end}
+        local root={GetClipList=function() return {media} end,GetSubFolderList=function() return {} end}
+        local project={GetTimelineCount=function() return 1 end,GetTimelineByIndex=function() return t end,
+          GetMediaPool=function() return {GetRootFolder=function() return root end} end}
+        resolve={GetProductName=function() return 'DaVinci Resolve Studio' end,
+          GetProjectManager=function() return {GetCurrentProject=function() return project end} end}
+        """
+        let script = RD.script(targets:[.init(prefix:"/test/shoot",factor:3)])
+        let out = try await RD.fuscriptRunner()(fixture + "\n" + script + "\nassert(math.abs(zx/zy-3)<0.0001 and writes==3)\n" + script + "\nassert(writes==3); print('TIMELINE_FALLBACK_VERIFIED')")
+        XCTAssertTrue(out.contains("applied=1 already=0"),out)
+        XCTAssertTrue(out.contains("applied=0 already=1"),out)
+        XCTAssertTrue(out.contains("TIMELINE_FALLBACK_VERIFIED"),out)
+    }
 
     func testTraversalIgnoresResolveCollectionMetadata() async throws {
         try XCTSkipUnless(RD.fuscriptURL() != nil, "Resolve Lua interpreter is not installed")
@@ -198,9 +224,9 @@ final class ResolveDesqueezeTests: XCTestCase {
     func testSuccessMessages() {
         let t = [shoot]
         func msg(_ r: RD.Report) -> String { RD.message(for: .report(r), targets: t).text }
-        XCTAssertEqual(msg(RD.Report(applied: 4)), "4 clips desqueezed in Resolve (Input Sizing preset “mlv2Resolve 1x3”).")
+        XCTAssertEqual(msg(RD.Report(applied: 4)), "4 clips desqueezed in Resolve.")
         XCTAssertEqual(msg(RD.Report(applied: 1, otherPreset: 2)),
-                       "1 clip desqueezed in Resolve (Input Sizing preset “mlv2Resolve 1x3”).\n\n2 clips kept their own sizing preset.")
+                       "1 clip desqueezed in Resolve.\n\n2 clips kept their own sizing preset.")
         XCTAssertEqual(msg(RD.Report(already: 3)), "Already done.")
         XCTAssertEqual(msg(RD.Report(already: 1, otherPreset: 1)), "Already done.\n\n1 clip kept its own sizing preset.")
         XCTAssertEqual(msg(RD.Report()), "No anamorphic clip from mlv2Resolve found in the open project.")
@@ -219,7 +245,7 @@ final class ResolveDesqueezeTests: XCTestCase {
         """)
         let two = RD.message(for: .report(RD.Report(applied: 2, missingPreset: [2])),
                              targets: [shoot, RD.Target(prefix: "/m/x", factor: 2)]).text
-        XCTAssertTrue(two.hasPrefix("2 clips desqueezed in Resolve (Input Sizing preset “mlv2Resolve 1x3”)."))
+        XCTAssertTrue(two.hasPrefix("2 clips desqueezed in Resolve."))
         XCTAssertTrue(two.contains("set Width to 2"))
     }
 
@@ -239,7 +265,7 @@ final class ResolveDesqueezeTests: XCTestCase {
     func testFrenchMessages() {
         L10n.bundle = L10nTests.bundle("fr")
         XCTAssertEqual(RD.message(for: .report(RD.Report(applied: 2, otherPreset: 1)), targets: [shoot]).text,
-                       "2 plans désanamorphosés dans Resolve (préréglage Input Sizing « mlv2Resolve 1x3 »).\n\n1 plan a gardé son propre préréglage de sizing.")
+                       "2 plans désanamorphosés dans Resolve.\n\n1 plan a gardé son propre préréglage de sizing.")
         XCTAssertEqual(RD.hintSuffix(), "Ou utilisez Désanamorphoser dans Resolve.")
     }
 

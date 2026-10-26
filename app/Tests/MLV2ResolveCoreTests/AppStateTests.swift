@@ -418,7 +418,7 @@ extension AppStateTests {
 
         XCTAssertNil(state.resolveReachable)
         let result = await state.desqueezeInResolve()
-        XCTAssertEqual(result?.text, "2 clips desqueezed in Resolve (Input Sizing preset “mlv2Resolve 1x3”).")
+        XCTAssertEqual(result?.text, "2 clips desqueezed in Resolve.")
         XCTAssertEqual(result?.isError, false)
         XCTAssertEqual(state.resolveReachable, true)
         XCTAssertFalse(state.desqueezing)

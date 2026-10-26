@@ -51,7 +51,7 @@ final class ResolveProjectTests: XCTestCase {
     func testScriptCreatesProjectImportsPairsAndSecondRunLeavesExistingUntouched() async throws {
         try XCTSkipUnless(ResolveDesqueeze.fuscriptURL() != nil, "Resolve Lua interpreter unavailable")
         let script = RP.script(shoots: [.init(name: "20261025", media: [clip("a"), clip("b")])])
-        let output = try await ResolveDesqueeze.fuscriptRunner()(fixture + "\n" + script + "\n" + "existing = true\n" + script + "\nassert(imports == 4 and syncs == 2 and settings == 9 and presets == 1)")
+        let output = try await ResolveDesqueeze.fuscriptRunner()(fixture + "\n" + script + "\n" + "existing = true\n" + script + "\nassert(imports == 4 and syncs == 2 and settings == 11 and presets == 0)")
         XCTAssertFalse(output.contains("ERROR"), output)
         XCTAssertTrue(output.contains("imported=2"), output)
         XCTAssertTrue(output.contains("already=2"), output)
@@ -141,7 +141,7 @@ final class ResolveProjectTests: XCTestCase {
         p.SetSetting=function() return true end
         """
         let output = try await ResolveDesqueeze.fuscriptRunner()(fixture + "\n" + setup + "\n" + RP.script(shoots: [.init(name: "20261025", media: [clip("a"), clip("b")])]))
-        XCTAssertTrue(output.contains("imported=1 already=0 failed=1 missing=1"), output)
+        XCTAssertTrue(output.contains("imported=1 already=0 failed=1 missing=0"), output)
         XCTAssertFalse(output.contains("ERROR"), output)
     }
     func testGyroProgressCountsPendingAndRunningAsUnfinished() {
@@ -298,16 +298,32 @@ final class ResolveProjectTests: XCTestCase {
       end,
       AutoSyncAudio=function(self,pair,opts) assert(#pair==2 and opts[1]==0 and opts[2]==true); syncs=syncs+1; return true end,
       ImportTimelineFromFile=function(self,path,options)
+        if path:match('resolve%-clip%-gyro.drt$') then
+          return {GetItemListInTrack=function() return {{
+            GetNodeGraph=function() return {GetNumNodes=function() return 1 end,GetToolsInNode=function() return {'OFX: Gyroflow(Niyien)'} end} end,
+            CopyGrades=function(self,targets) gyroCopied=(gyroCopied or 0)+#targets; for _,t in ipairs(targets) do t.gyro=true end; return true end
+          }} end}
+        end
         assert(path:match('resolve%-timeline%-cst.drt$') and options.timelineName=='All shots'); rushs=rushs+1
         return {SetName=function() return true end, SetSetting=function() return true end, GetNodeGraph=function() return {
           GetNumNodes=function() return 2 end, SetNodeEnabled=function() return true end} end}
       end,
-      AppendToTimeline=function(self,clips) return {{SetProperty=function(self,k,v) zoom=v; return true end}} end}
+      CreateEmptyTimeline=function(self,name) assert(name=='__mlv2Resolve_format_anchor'); return {} end,
+      DeleteTimelines=function() modelRemoved=true; return true end,
+      AppendToTimeline=function(self,clips) return {{
+        GetNodeGraph=function(self) return {GetNumNodes=function() return 1 end,GetToolsInNode=function() return self.gyro and {'OFX: Gyroflow(Niyien)'} or {} end} end,
+        SetProperty=function(self,k,v) zoom=v; return true end}} end}
     local project={GetName=function() return currentName end, SetPreset=function(self,n) assert(not existing and n=='mlv2Resolve'); presets=presets+1; return true end,
-      SetSetting=function(self,k,v) assert(not existing and presets==1); settings=settings+1; return true end,
+      SetSetting=function(self,k,v) assert(not existing); settings=settings+1; return true end,
+      GetTimelineByIndex=function(self,i)
+        assert(i==1); rushs=rushs+1
+        return {SetName=function() return true end, SetSetting=function() return true end, GetNodeGraph=function() return {
+          GetNumNodes=function() return 2 end, SetNodeEnabled=function() return true end} end}
+      end,
       GetMediaPool=function() return pool end, SetCurrentTimeline=function() return true end}
     local pm={GetCurrentProject=function() if currentName then return project end end,
       GetProjectListInCurrentFolder=function() if existing then return {'20261025'} else return {} end end,
+      ImportProject=function(self,path,name) assert(path:match('resolve%-project%-cst.drp$')); projectModelImported=true; return true end,
       CreateProject=function(self,n) assert(not existing); currentName=n; return project end,
       LoadProject=function(self,n) currentName=n; return project end, SaveProject=function() return true end}
     resolve={GetProjectManager=function() return pm end, GetProductName=function() return studio and 'DaVinci Resolve Studio' or 'DaVinci Resolve' end,
@@ -316,6 +332,51 @@ final class ResolveProjectTests: XCTestCase {
 }
 
 extension ResolveProjectTests {
+    func testGyroflowNodeIsCopiedToEveryCreatedTimelineClipAndModelRemoved() async throws {
+        try XCTSkipUnless(ResolveDesqueeze.fuscriptURL() != nil)
+        let output = try await ResolveDesqueeze.fuscriptRunner()(fixture + "\n" + RP.script(shoots:[.init(name:"20261025",media:[clip("a"),clip("b")])]) + "\nassert(gyroCopied==2 and modelRemoved); print('GYROFLOW_VERIFIED')")
+        XCTAssertTrue(output.contains("GYROFLOW_VERIFIED"),output)
+    }
+    func testMissingSizingPresetStillDesqueezesAndFitsTimelineClips() async throws {
+        try XCTSkipUnless(ResolveDesqueeze.fuscriptURL() != nil)
+        let setup = """
+        local p=resolve:GetProjectManager():CreateProject('20261025')
+        currentName=nil
+        local pool=p:GetMediaPool(); local original=pool.ImportMedia
+        pool.ImportMedia=function(self,list)
+          local out=original(self,list)
+          out[1].SetClipProperty=function() return false end
+          return out
+        end
+        pool.AppendToTimeline=function(self,clips)
+          return {{GetNodeGraph=function() return {GetNumNodes=function() return 1 end,GetToolsInNode=function() return {'OFX: Gyroflow(Niyien)'} end} end, SetProperty=function(self,k,v)
+            if k=='ZoomGang' then assert(v==false); unganged=true
+            elseif k=='ZoomX' then zx=v elseif k=='ZoomY' then zy=v end
+            return true
+          end}}
+        end
+        """
+        let out = try await ResolveDesqueeze.fuscriptRunner()(fixture + "\n" + setup + "\n" + RP.script(shoots:[.init(name:"20261025",media:[clip("a")])], timelineSize:.hd) + "\nassert(unganged and math.abs(zx/zy-3)<0.0001 and math.abs(zy-0.7437037)<0.0001); print('DESQUEEZE_VERIFIED')")
+        XCTAssertTrue(out.contains("DESQUEEZE_VERIFIED"),out)
+    }
+    func testProjectOwnsFormatAndExplicitOutputGammaAndTimelineInherits() async throws {
+        try XCTSkipUnless(ResolveDesqueeze.fuscriptURL() != nil)
+        let setup = """
+        local p=resolve:GetProjectManager():CreateProject('20261025')
+        currentName=nil
+        projectSettings={}
+        p.SetSetting=function(self,k,v) projectSettings[k]=v; return true end
+        local pool=p:GetMediaPool(); local original=pool.ImportTimelineFromFile
+        pool.ImportTimelineFromFile=function(self,path,opts)
+          local t=original(self,path,opts)
+          if path:match('resolve%-clip%-gyro.drt$') then return t end
+          t.SetSetting=function(self,k,v) assert(k=='useCustomSettings' and v=='0'); inherited=true; return true end
+          return t
+        end
+        """
+        let out = try await ResolveDesqueeze.fuscriptRunner()(fixture + "\n" + setup + "\n" + RP.script(shoots:[.init(name:"20261025",media:[clip("a")])], timelineSize:.hd, frameRate:29.97) + "\nassert(inherited and projectSettings.colorSpaceOutput=='DaVinci WG' and projectSettings.colorSpaceOutputGamma=='DaVinci Intermediate' and projectSettings.timelineFrameRate=='29.97' and projectSettings.timelineResolutionWidth=='1920'); print('PROJECT_SETTINGS_VERIFIED')")
+        XCTAssertTrue(out.contains("PROJECT_SETTINGS_VERIFIED"),out)
+    }
     func testPortableTimelineTemplateReceivesFormatAndNodeStates() async throws {
         try XCTSkipUnless(ResolveDesqueeze.fuscriptURL() != nil)
         let setup = """
@@ -323,13 +384,13 @@ extension ResolveProjectTests {
         currentName=nil
         local pool=p:GetMediaPool()
         pool.ImportTimelineFromFile=function(self,path,options)
-          assert(path:match('resolve%-timeline%-cst.drt$') and options.timelineName=='My edit')
+          assert(path:match('resolve%-timeline%-cst.drt$') and options.timelineName=='My edit' and projectModelImported)
           modelImported=true
           return {SetName=function(self,name) assert(name=='My edit'); renamed=true; return true end, SetSetting=function(self,k,v) return true end,
             GetNodeGraph=function() return {GetNumNodes=function() return 2 end,
               SetNodeEnabled=function(self,i,on) assert((i==1 and on) or (i==2 and not on)); statesSet=(statesSet or 0)+1; return true end} end}
         end
-        pool.CreateEmptyTimeline=function() error('Must import the configured timeline') end
+        pool.CreateEmptyTimeline=function(self,name) assert(name=='__mlv2Resolve_format_anchor'); return {} end
         """
         let out = try await ResolveDesqueeze.fuscriptRunner()(fixture + "\n" + setup + "\n" + RP.script(shoots:[.init(name:"20261025",media:[clip("a",width:1920,height:1080,factor:1)])], timelineSize:.hd, includeAllShots:false, timelineName:"My edit") + "\nassert(modelImported and renamed and statesSet==2 and zoom==0); print('TEMPLATE_VERIFIED')")
         XCTAssertFalse(out.contains("ERROR"),out)

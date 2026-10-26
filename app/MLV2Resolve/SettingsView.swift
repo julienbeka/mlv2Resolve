@@ -150,7 +150,7 @@ struct ResolveSettingsSection: View {
             TextField("Timeline Name", text: $state.timelineName, prompt: Text(verbatim: "All shots"))
             Text("Enabled: add all imported shots to the new timeline. Disabled: prepare an empty timeline with the color nodes. A blank name uses All shots.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Text("Timeline color: DaVinci Wide Gamut / Intermediate. CST 01 converts P3-D60 / Linear to the working space. CST 02 converts to Rec.709 / Rec.709-A and starts disabled. Enable it only before a Rec.709 export.")
+            Text("Project working and output color: DaVinci Wide Gamut / Intermediate. CST 01 converts P3-D60 / Linear to the working space. CST 02 converts to Rec.709 / Rec.709-A and starts disabled. Enable it only before a Rec.709 export.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             ForEach(projects.links) { link in
                 HStack {

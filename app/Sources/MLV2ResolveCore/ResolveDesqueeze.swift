@@ -294,6 +294,53 @@ public enum ResolveDesqueeze {
           return nil
         end
 
+        local timelineItems = {}
+        local function indexTimelines(project)
+          -- Older hosts may not expose timeline traversal; retain the media-pool preset path there.
+          local ok, count = pcall(function() return project:GetTimelineCount() end)
+          if not ok or not count then return end
+          for n=1,count do
+            local timeline=project:GetTimelineByIndex(n)
+            for track=1,timeline:GetTrackCount("video") do
+              for _,entry in ipairs(timeline:GetItemListInTrack("video",track) or {}) do
+                local media=entry:GetMediaPoolItem()
+                local path=media and prop(media,"File Path")
+                if path and factorFor(path) then
+                  timelineItems[path]=timelineItems[path] or {}
+                  table.insert(timelineItems[path],{item=entry,timeline=timeline})
+                end
+              end
+            end
+          end
+        end
+        local function fitTimeline(media,path,factor)
+          local entries=timelineItems[path]
+          if not entries or #entries==0 then return nil end
+          local resolution=prop(media,"Resolution") or ""
+          local width,height=resolution:match("(%d+)%s*x%s*(%d+)")
+          width,height=tonumber(width),tonumber(height)
+          if not width or not height or width<=0 or height<=0 then return nil end
+          local changed,other=false,false
+          for _,entry in ipairs(entries) do
+            local item,timeline=entry.item,entry.timeline
+            local x,y=tonumber(item:GetProperty("ZoomX")),tonumber(item:GetProperty("ZoomY"))
+            if x and y and y~=0 and math.abs(x/y-factor)<0.0001 then
+              -- Already desqueezed; preserve a user's subsequent crop/zoom.
+            elseif x and y and math.abs(x-1)<0.0001 and math.abs(y-1)<0.0001 then
+              local tw=tonumber(timeline:GetSetting("timelineResolutionWidth"))
+              local th=tonumber(timeline:GetSetting("timelineResolutionHeight"))
+              if not tw or not th or tw<=0 or th<=0 then return nil end
+              local rawFit=math.min(tw/width,th/height)
+              local zoom=math.min(1,math.min(tw/(width*factor),th/height)/rawFit)
+              if not DRY_RUN and (not item:SetProperty("ZoomGang",false) or
+                  not item:SetProperty("ZoomX",factor*zoom) or not item:SetProperty("ZoomY",zoom)) then return "failed" end
+              changed=true
+            else other=true end
+          end
+          if other then return "other" end
+          return changed and "applied" or "already"
+        end
+
         local function visit(folder)
           local clips = folder:GetClipList() or {}
           -- Resolve lists can also carry numeric metadata such as __flags.
@@ -307,7 +354,12 @@ public enum ResolveDesqueeze {
               local want = "mlv2Resolve 1x" .. f
               local cur = prop(item, "Input Sizing Preset")
               if cur == "" or cur == "None" then cur = nil end
-              if cur == want then
+              local fitted = cur == nil and fitTimeline(item,path,f) or nil
+              if fitted == "applied" then s.applied = s.applied + 1
+              elseif fitted == "already" then s.already = s.already + 1
+              elseif fitted == "other" then s.other = s.other + 1
+              elseif fitted == "failed" then s.missing[f] = true
+              elseif cur == want then
                 s.already = s.already + 1
               elseif cur ~= nil then
                 s.other = s.other + 1
@@ -335,6 +387,7 @@ public enum ResolveDesqueeze {
           local pool = project:GetMediaPool()
           local root = pool and pool:GetRootFolder()
           if root == nil then s.no_project = 1; return end
+          indexTimelines(project)
           visit(root)
         end
 
@@ -422,10 +475,10 @@ public enum ResolveDesqueeze {
     }
 
     static func appliedOneText(presets: String) -> String {
-        String(localized: "1 clip desqueezed in Resolve (Input Sizing preset \(presets)).", bundle: L10n.bundle)
+        String(localized: "1 clip desqueezed in Resolve.", bundle: L10n.bundle)
     }
     static func appliedManyText(n: String, presets: String) -> String {
-        String(localized: "\(n) clips desqueezed in Resolve (Input Sizing preset \(presets)).", bundle: L10n.bundle)
+        String(localized: "\(n) clips desqueezed in Resolve.", bundle: L10n.bundle)
     }
     static func keptOneText() -> String {
         String(localized: "1 clip kept its own sizing preset.", bundle: L10n.bundle)

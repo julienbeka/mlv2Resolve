@@ -23,11 +23,22 @@ public enum ResolveProject {
     public struct ShootMedia: Equatable, Sendable {
         public let name: String
         public let source: String
+        public let sources: [String]
         public let media: [Media]
         public let warnings: [String]
-        public init(name: String, media: [Media], warnings: [String] = [], source: String? = nil) {
+        public init(name: String, media: [Media], warnings: [String] = [], source: String? = nil, sources: [String]? = nil) {
             self.name = name; self.source = source ?? name; self.media = media; self.warnings = warnings
+            self.sources = sources ?? [source ?? name]
         }
+    }
+    /// One creation action combines all mounted folders; format voting includes every clip.
+    public static func combined(_ shoots: [ShootMedia], name: String) -> [ShootMedia] {
+        guard let first = shoots.first else { return [] }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return [.init(name: trimmed.isEmpty ? "mlv2Resolve" : trimmed,
+                      media: shoots.flatMap(\.media),
+                      warnings: shoots.flatMap { shoot in shoot.warnings.map { shoot.name + ": " + $0 } },
+                      source: first.source, sources: shoots.flatMap(\.sources))]
     }
     public struct Format: Equatable, Sendable {
         public let width: Int, height: Int
@@ -40,6 +51,8 @@ public enum ResolveProject {
         public let wav: String?
     }
     public static let menuScriptName = "mlv2Resolve.lua"
+    public static var projectTemplateURL: URL { Bundle.module.url(forResource: "resolve-project-cst", withExtension: "drp")! }
+    public static var gyroTemplateURL: URL { Bundle.module.url(forResource: "resolve-clip-gyro", withExtension: "drt")! }
     public static var timelineTemplateURL: URL { Bundle.module.url(forResource: "resolve-timeline-cst", withExtension: "drt")! }
 
     /// The most frequent desqueezed resolution wins; tied counts use the largest resolution.
@@ -133,7 +146,7 @@ public enum ResolveProject {
         var lua = "local SHOOTS = {\n"
         for shoot in shoots {
             let f = format(shoot.media, timelineSize: timelineSize, frameRate: frameRate) ?? Format(width: 0, height: 0, fps: 25, differentFPS: [])
-            lua += "{name=\(quote(shoot.name)),source=\(quote(shoot.source)),width=\(f.width),height=\(f.height),fps=\(f.fps),clips={\n"
+            lua += "{name=\(quote(shoot.name)),source=\(quote(shoot.source)),sources={\(shoot.sources.map(quote).joined(separator: ","))},width=\(f.width),height=\(f.height),fps=\(f.fps),clips={\n"
             for c in shoot.media {
                 lua += "{name=\(quote(c.name)),dir=\(quote(c.directory)),nfd=\(quote(c.directory.decomposedStringWithCanonicalMapping)),path=\(quote(c.pattern)),first=\(c.first),last=\(c.last),wav=\(c.wav.map(quote) ?? "nil"),factor=\(c.factor),width=\(c.width),height=\(c.height),zoom=\(uhdZoom(c))},\n"
             }
@@ -141,7 +154,7 @@ public enum ResolveProject {
         }
         lua += "}\nlocal APPROVED = \(approvedCurrent.map(quote) ?? "nil")\nlocal MENU = \(menu)\n"
         lua += "local TEXT = {switch=\(quote(text("Switch Resolve project?", "Changer de projet Resolve ?"))),cancel=\(quote(text("Cancel", "Annuler"))),open=\(quote(text("Open", "Ouvrir"))),guide=\(quote(guide)),done=\(quote(text("Project preparation finished. See the console for details.", "Préparation terminée. Consultez la console pour le détail.")))}\n"
-        lua += "local TIMELINE_TEMPLATE = \(quote(timelineTemplateURL.path))\nlocal INCLUDE_ALL_SHOTS = \(includeAllShots)\nlocal TIMELINE_NAME = \(quote(timelineName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "All shots" : timelineName.trimmingCharacters(in: .whitespacesAndNewlines)))\nlocal CREATE_ONLY = \(createOnly)\nlocal RECEIPTS = \(receiptsURL.map { quote($0.path) } ?? "nil")\n"
+        lua += "local PROJECT_TEMPLATE = \(quote(projectTemplateURL.path))\nlocal TIMELINE_TEMPLATE = \(quote(timelineTemplateURL.path))\nlocal GYRO_TEMPLATE = \(quote(gyroTemplateURL.path))\nlocal INCLUDE_ALL_SHOTS = \(includeAllShots)\nlocal TIMELINE_NAME = \(quote(timelineName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "All shots" : timelineName.trimmingCharacters(in: .whitespacesAndNewlines)))\nlocal CREATE_ONLY = \(createOnly)\nlocal RECEIPTS = \(receiptsURL.map { quote($0.path) } ?? "nil")\n"
         let url = Bundle.module.url(forResource: "resolve-project", withExtension: "lua")!
         return lua + (try! String(contentsOf: url, encoding: .utf8))
     }
@@ -304,7 +317,7 @@ public enum ResolveProject {
         L10n.bundle.preferredLocalizations.first?.hasPrefix("fr") == true ? fr : en
     }
     public static var guide: String {
-        text("Wait for gyro sync to finish. With Resolve Studio, enable Preferences → System → General → External scripting using: Local. With the free version, click the desired action in mlv2Resolve, then run Workspace → Scripts → mlv2Resolve in Resolve. The menu script performs that action.\n\nNew projects use your timeline-size setting and the footage frame rate. Create a Camera Raw project preset named “mlv2Resolve” once to reuse your RAW preferences.",
-             "Attendez la fin de la synchro gyro. Avec Resolve Studio, activez Preferences → System → General → External scripting using: Local. Avec la version gratuite, cliquez sur l’action souhaitée dans mlv2Resolve, puis lancez Workspace → Scripts → mlv2Resolve dans Resolve. Le script exécute cette action.\n\nLes nouveaux projets utilisent la taille de timeline choisie et la cadence des rushs. Créez une fois un préréglage de projet Camera Raw nommé « mlv2Resolve » pour réutiliser vos préférences RAW.")
+        text("Wait for gyro sync to finish. With Resolve Studio, enable Preferences → System → General → External scripting using: Local. With the free version, click the desired action in mlv2Resolve, then run Workspace → Scripts → mlv2Resolve in Resolve. The menu script performs that action.\n\nAll mounted folders are combined in one named project. Size and frame rate are project settings. The portable colour model prepares DWG/Intermediate and the timeline CST nodes.",
+             "Attendez la fin de la synchro gyro. Avec Resolve Studio, activez Preferences → System → General → External scripting using: Local. Avec la version gratuite, cliquez sur l’action souhaitée dans mlv2Resolve, puis lancez Workspace → Scripts → mlv2Resolve dans Resolve. Le script exécute cette action.\n\nTous les dossiers montés sont réunis dans un projet nommé. La taille et la cadence sont réglées au niveau du projet. Le modèle couleur portable prépare DWG/Intermediate et les CST de timeline.")
     }
 }

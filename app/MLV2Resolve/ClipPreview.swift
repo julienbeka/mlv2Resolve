@@ -40,6 +40,7 @@ struct ClipPreview: View {
     let shoot: Shoot
     @ObservedObject var state: AppState
     @State private var image: NSImage?
+    @State private var squeeze = 1
     @State private var loading = true
     @State private var expanded = false
     @State private var directory: URL?
@@ -48,7 +49,7 @@ struct ClipPreview: View {
         Button { if image != nil { expanded = true } } label: {
             ZStack {
                 RoundedRectangle(cornerRadius: 9).fill(.black.opacity(0.8))
-                if let image { Image(nsImage: image).resizable().scaledToFit() }
+                if let image { Image(nsImage: image).resizable().aspectRatio(image.size.width * Double(squeeze) / image.size.height, contentMode: .fit) }
                 else if loading { ProgressView().controlSize(.small) }
                 else { Image(systemName: "photo").foregroundStyle(.secondary) }
             }.frame(width: 96, height: 62).clipShape(RoundedRectangle(cornerRadius: 9))
@@ -65,6 +66,7 @@ struct ClipPreview: View {
             loading = true
             guard let dir = await state.previewDirectory(clip: clip, shoot: shoot) else { loading = false; return }
             directory = dir
+            squeeze = await state.previewSqueeze(clip: clip, shoot: shoot)
             let data = await PreviewLoader.shared.load(directory: dir)
             guard !Task.isCancelled else { return }
             image = data.flatMap(NSImage.init(data:)); loading = false
@@ -80,7 +82,7 @@ struct ClipPreview: View {
                     Spacer()
                     Button("Close") { expanded = false }.keyboardShortcut(.cancelAction)
                 }
-                if let image { Image(nsImage: image).resizable().scaledToFit().frame(maxWidth: .infinity, maxHeight: .infinity) }
+                if let image { Image(nsImage: image).resizable().aspectRatio(image.size.width * Double(squeeze) / image.size.height, contentMode: .fit).frame(maxWidth: .infinity, maxHeight: .infinity) }
             }.padding(24).frame(width: 760, height: 500)
         }
     }

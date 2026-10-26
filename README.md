@@ -4,42 +4,74 @@
 
 *[Version française](README.fr.md)*
 
-Edit Magic Lantern MLV footage directly in DaVinci Resolve: mlv2Resolve mounts your clips as CinemaDNG sequences on the fly — no conversion, no terminal.
+Edit Magic Lantern **MLV footage directly in DaVinci Resolve**, without converting or copying it first. mlv2Resolve mounts your shoots as virtual CinemaDNG sequences, prepares a Resolve project, and can synchronize SenseFlow A1 gyro data.
 
-mlv2Resolve is a macOS app with a main window and menu-bar controls that mounts Magic Lantern (MLV) shoots as virtual CinemaDNG sequences so you can edit them in DaVinci Resolve without converting or copying anything. It drives the MLVFS engine on FUSE-T (FUSE without a kernel extension), on Apple Silicon.
+## Download and install
 
-The interface follows the macOS language (English by default, French available). You can also pick the language in **Settings… → Language**.
+**[Download mlv2Resolve 0.2 for Apple Silicon](https://github.com/julienbeka/mlv2Resolve/releases/download/v0.2/mlv2Resolve-0.2-macos-arm64.zip)** · [Release notes and SHA-256](https://github.com/julienbeka/mlv2Resolve/releases/tag/v0.2)
 
-## Download
+- **Mac:** Apple Silicon, macOS 14 or later. The interface includes native macOS Tahoe icons and styling.
+- **Resolve:** tested with DaVinci Resolve Studio 21.1.1. Studio supports direct actions from the app; the free edition uses the Workspace script described below.
+- **FUSE-T:** required for virtual mounts. The app offers its installer if missing.
+- **Gyroflow(NiYien) OFX:** required only for stabilization inside Resolve; install it separately.
 
-Download the latest `mlv2Resolve-<version>-macos-arm64.zip` from the [Releases](https://github.com/julienbeka/mlv2Resolve/releases) page (Apple Silicon Mac, macOS 14 or later). Check it against the attached `.sha256` file: `shasum -a 256 -c <file>.sha256`.
+1. Unzip the download and move `mlv2Resolve.app` to `/Applications`.
+2. The app is not notarized: if macOS blocks the first launch, use **System Settings → Privacy & Security → Open Anyway**.
+3. Open the app and complete FUSE-T installation if prompted. The main window opens at launch; the app also appears in the Dock and **Command-Tab**. Its menu-bar camera **ML** icon gives quick access to the workflow.
 
-1. Unzip it and move `mlv2Resolve.app` to `/Applications`.
-2. The app is not notarized yet: on first launch, macOS blocks it. Open System Settings > Privacy & Security and click **Open Anyway**.
-3. If FUSE-T is missing, the app offers to download and install it on first launch (your administrator password is asked once), then carries on by itself.
+To verify the download, place the ZIP and its `.sha256` file in the same folder and run `shasum -a 256 -c mlv2Resolve-0.2-macos-arm64.zip.sha256`.
 
-To build from source, see [Building](#building).
+English and French are included. The interface follows macOS; choose a different language in **Settings → Language**.
 
-## Usage
+## Quick start
 
-1. The main window opens when the app launches; the app also appears in the Dock and Command-Tab. Click the menu-bar icon (or double-click the app to open the mlv2Resolve window if the icon is hidden behind the notch), then **Choose Folder…**. The folder can be a single shoot or a parent folder containing several shoots.
-2. Click a shoot to mount it. The DNGs appear in `~/MLV Mounts/<shoot>` (**Show DNGs in Finder**). Use **Create Project** to prepare the project and import the clips, or import them manually from that folder.
-3. Mounted shoots are remounted automatically at launch and when their disk is plugged back in, always at the same path, so Resolve finds its clips again.
-4. **Dual ISO**: use **Smooth Editing** while editing and **Grading Quality** before grading. The switch is applied live; in Resolve, select the clips and right-click → Refresh.
-5. Anamorphic footage: previews are automatically desqueezed. **Create Project** desqueezes timeline clips even when no Input Sizing preset exists, using separate horizontal/vertical zoom to fit the entire image. **Desqueeze in Resolve** also fixes existing timeline clips and preserves custom framing. Media-pool-only clips can still use Input Sizing presets.
+The window has four sections:
 
-### Prepare a Resolve project
+| Section | What to do |
+| --- | --- |
+| **Footage** | Choose a shoot folder or a parent folder containing several shoots. Mount each folder with its switch; **Unmount All** is available here. |
+| **Gyro Sync** | If using a SenseFlow A1, choose a lens and sensor position, then wait for synchronization. Desqueezed thumbnails and enlarged previews help identify each shot. |
+| **Editing** | Enter a project name and click **Create Project**. All mounted folders are combined into **one** Resolve project. |
+| **Settings** | Open the left drawer to configure lenses, Dual ISO, project size, cadence and the optional All shots timeline. |
 
-Four sections organize the window: **Footage**, **Gyro Sync**, **Editing**, and **Settings**. Settings opens in a left drawer and includes Dual ISO with explanations of both modes.
+DNG sequences appear in `~/MLV Mounts/<shoot>`. Keep the folders mounted while editing. Mounts are restored when the app launches or their disk is reconnected, using the same paths so Resolve can find the footage.
 
-- **Create Project** creates one project for all mounted shoots, using the editable project name, imports CinemaDNG with matching WAV audio, and syncs audio by timecode. **Open Project** opens a linked project without changing media or timelines. **Open Resolve** only launches the app. **Desqueeze in Resolve** stays separate.
-- **Settings → Resolve** offers Automatic (majority desqueezed resolution), UHD or HD. HD/UHD show the entire image, with bars if needed. Frame rate follows the majority of the footage by default; a manual choice overrides it at project level.
-- **Add all shots to timeline** is enabled by default. The name **All shots** is editable. Disable the option for an empty timeline with the CST nodes prepared.
-- Project working and output space: **DaVinci Wide Gamut / Intermediate**. Timeline CST 01 is enabled: **P3-D60 / Linear → DWG / Intermediate**, with **Apply Forward OOTF** enabled. CST 02 is disabled: **DWG / Intermediate → Rec.709 / Rec.709-A**. Enable the second only before a Rec.709 export. The model ships with the app, so other users need no CST setup. Import tested in Resolve **21.1.1**; incompatible versions produce an explicit error.
-- **Clear Project Links** removes cached associations without deleting Resolve projects or footage.
-- **Resolve Studio**: enable **External scripting using: Local** to run actions from the app. **Resolve Free**: choose an action in the app, then run **Workspace → Scripts → mlv2Resolve** in Resolve. New project links are collected when returning to the app.
+## Resolve workflow
 
-Switching projects saves existing work after confirmation. Opening a linked project preserves grades and settings. New projects use a bundled empty colour project; no personal Resolve preset is required. Adjust Camera Raw preferences in the resulting project as needed.
+With **Resolve Studio**, enable **Preferences → System → General → External scripting using: Local**. With **Resolve Free**, choose the action in mlv2Resolve, then run **Workspace → Scripts → mlv2Resolve** inside Resolve.
+
+| Action | Result |
+| --- | --- |
+| **Create Project** | Create one named project from all mounted shoots, import CinemaDNG and matching WAV audio, and synchronize audio by timecode. |
+| **Open Project** | Reopen a linked project without changing its media, timelines or grades. |
+| **Open Resolve** | Launch Resolve. |
+| **Desqueeze in Resolve** | Desqueeze existing timeline clips while preserving custom framing and avoiding a second stretch. |
+
+In **Settings → Resolve**:
+
+- **Project size:** Automatic uses the majority desqueezed resolution across mounted footage; UHD or HD fits the complete image, with bars where needed.
+- **Cadence:** use the majority footage frame rate or choose a manual value. Both project timeline cadence and playback cadence are prepared to match.
+- **All shots:** optionally add every imported shot to a timeline. It is enabled by default; the name is editable and defaults to **All shots**. Disable it to prepare an empty timeline with its CSTs.
+- **Project links:** clear the app's saved associations without deleting Resolve projects or footage.
+
+New populated timelines receive a **Gyroflow(NiYien)** Color node on each clip when the plugin is installed. In the plugin, use **Load for current file** to load that clip's `.gyroflow` data. Missing plugin installation is reported.
+
+### Color management
+
+Project working and output color are **DaVinci Wide Gamut / DaVinci Intermediate**. The prepared timeline inherits project settings and contains these two CSTs:
+
+| Timeline node | Conversion | Default state |
+| --- | --- | --- |
+| **CST 01** | P3-D60 / Linear → DWG / Intermediate; **Apply Forward OOTF** checked | Enabled |
+| **CST 02** | DWG / Intermediate → Rec.709 / Rec.709-A | Disabled |
+
+**Enable CST 02 only before a Rec.709 export.** The portable models ship with the app; other users do not need to prepare their own CSTs or project preset. Adjust Camera Raw preferences in the resulting project as needed. Creating a new project applies these defaults; opening a linked project preserves its existing settings.
+
+### Anamorphic footage and Dual ISO
+
+MLV previews are desqueezed automatically. Created timeline clips fit the whole image even when no Input Sizing preset exists, using separate horizontal/vertical zoom. Clips imported only into the Media Pool can still need an Input Sizing preset when assembling another timeline manually.
+
+Use **Smooth Editing** Dual ISO mode while editing and **Grading Quality** before grading/export. The switch applies live; select the clips in Resolve and use **Refresh** after changing it. Both modes are explained in Settings.
 
 ### Gyro sync (SenseFlow A1)
 
@@ -119,7 +151,7 @@ to the clip folder that created it.
 
 ## Building
 
-Requirements: Xcode (command-line tools), [XcodeGen](https://github.com/yonaskolb/XcodeGen) and FUSE-T (`brew install macos-fuse-t/homebrew-cask/fuse-t`).
+Requirements: full Xcode 26 or later (including its command-line tools), [XcodeGen](https://github.com/yonaskolb/XcodeGen) and FUSE-T (`brew install macos-fuse-t/homebrew-cask/fuse-t`).
 
     scripts/build-app.sh       # builds build/mlv2Resolve.app (engine + app, ad-hoc signed)
     cd app && swift test       # core tests

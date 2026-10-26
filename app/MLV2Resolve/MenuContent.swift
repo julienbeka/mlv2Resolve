@@ -131,7 +131,11 @@ struct MenuLabel: View {
             if state.alert != nil || state.needsFuseT {
                 Image(systemName: "exclamationmark.triangle")
             } else {
-                Image(systemName: "infinity")
+                Image("MenuIcon")
+                    .renderingMode(.template)
+                    .resizable().scaledToFit()
+                    .frame(width: 24, height: 18)
+                    .accessibilityLabel("mlv2Resolve")
                 if !state.mounted.isEmpty { Text("\(state.mounted.count)") }
             }
             if let gyro = state.gyro { GyroMenuActivity(gyro: gyro) }

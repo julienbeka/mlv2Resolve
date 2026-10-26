@@ -41,10 +41,10 @@ jobs:
           make -f Makefile.arm64 dual-iso-cache-test
 
       - name: Build app
-        env:
-          BUILD_NUMBER: ${{ github.run_number }}
         run: |
           export MARKETING_VERSION="${TAG#v}"
+          # Public builds stay above the local validation builds already distributed.
+          export BUILD_NUMBER="$((1000 + GITHUB_RUN_NUMBER))"
           scripts/build-app.sh
 
       - name: Package

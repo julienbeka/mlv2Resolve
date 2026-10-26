@@ -2300,23 +2300,6 @@
         }
       }
     },
-    "mlv2Resolve stays available in the menu bar (∞). Double-click the app to return to this window.": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "mlv2Resolve stays available in the menu bar (∞). Double-click the app to return to this window."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "mlv2Resolve reste accessible dans la barre des menus (∞). Double-cliquez sur l’app pour revenir à cette fenêtre."
-          }
-        }
-      }
-    },
     "Choose the folder containing your MLV shoots.": {
       "extractionState": "manual",
       "localizations": {
@@ -2853,6 +2836,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Espace de travail et sortie du projet : DaVinci Wide Gamut / Intermediate. Le CST 01 convertit P3-D60 / Linear vers cet espace. Le CST 02 convertit vers Rec.709 / Rec.709-A et reste désactivé. Activez-le uniquement avant un export Rec.709."
+          }
+        }
+      }
+    },
+    "mlv2Resolve stays available in the menu bar. Click its Dock icon to return to this window.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mlv2Resolve stays available in the menu bar. Click its Dock icon to return to this window."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mlv2Resolve reste accessible dans la barre des menus. Cliquez sur son icône dans le Dock pour retrouver cette fenêtre."
           }
         }
       }

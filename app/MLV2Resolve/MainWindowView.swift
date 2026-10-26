@@ -66,7 +66,7 @@ struct MainWindowView: View {
                         }
                         Text("Mount your shoots, wait for gyro sync, then create a Resolve project. Keep the folders mounted while editing.")
                             .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        Text("mlv2Resolve stays available in the menu bar (∞). Double-click the app to return to this window.")
+                        Text("mlv2Resolve stays available in the menu bar. Click its Dock icon to return to this window.")
                             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
                 }.padding(24).frame(maxWidth: 1040)

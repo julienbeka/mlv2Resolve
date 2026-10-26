@@ -2,7 +2,7 @@
 
 ### Changes in @VERSION@
 
-- **mlv2Resolve:** new name and four workflow sections: Footage, Gyro Sync, Resolve, Editing. Native mount switches, an in-window left settings drawer, and Tahoe styling.
+- **mlv2Resolve:** new name and four workflow sections: Footage, Gyro Sync, Editing, Settings. Native mount switches, an in-window left settings drawer, and Tahoe styling.
 - **Gyro previews:** identify shots with thumbnails and enlarged previews before assigning a lens. A settings link appears when no lens is declared. Dual ISO moves to Settings with explanations of fast preview and full-quality interpolation.
 - **Separate Resolve actions:** create one named project combining all mounted folders, open a linked project, launch Resolve, or desqueeze. Cached links can be removed without deleting Resolve projects or footage.
 - **Timeline control:** Automatic, UHD or HD sizing, with the entire anamorphic image visible. Use the majority footage frame rate or select a different one. Optionally populate the timeline with all shots; its default name, **All shots**, is editable.
@@ -22,7 +22,7 @@ Source (GPL-3.0-or-later): https://github.com/@REPO@/tree/@TAG@
 
 ### Nouveautés de @VERSION@
 
-- **mlv2Resolve :** nouveau nom et quatre sections : Rushs, Synchro gyro, Resolve, Montage. Interrupteurs de montage natifs, réglages dans un tiroir gauche intégré à la fenêtre, apparence Tahoe.
+- **mlv2Resolve :** nouveau nom et quatre sections : Rushs, Synchro gyro, Montage, Réglages. Interrupteurs de montage natifs, réglages dans un tiroir gauche intégré à la fenêtre, apparence Tahoe.
 - **Aperçus gyro :** identifiez les plans par leurs vignettes et aperçus agrandis avant d’attribuer un objectif. Un lien vers les réglages apparaît si aucun objectif n’est déclaré. Le Dual ISO passe dans les réglages, avec explications des modes aperçu rapide et interpolation complète.
 - **Actions Resolve séparées :** créer un seul projet nommé réunissant les dossiers montés, ouvrir un projet lié, lancer Resolve ou désanamorphoser. Les liens mémorisés peuvent être effacés sans supprimer les projets ni les rushs.
 - **Timeline personnalisable :** taille Automatique, UHD ou HD, avec l’image anamorphique entière. Cadence majoritaire des rushs ou cadence choisie. Option pour ajouter tous les plans à la timeline, nommée **All shots** par défaut et renommable.

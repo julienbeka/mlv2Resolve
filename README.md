@@ -30,7 +30,7 @@ To build from source, see [Building](#building).
 
 ### Prepare a Resolve project
 
-Four sections organize the window: **Footage**, **Gyro Sync**, **Resolve**, and **Editing**. Settings opens in a left drawer and includes Dual ISO with explanations of both modes.
+Four sections organize the window: **Footage**, **Gyro Sync**, **Editing**, and **Settings**. Settings opens in a left drawer and includes Dual ISO with explanations of both modes.
 
 - **Create Project** creates one project for all mounted shoots, using the editable project name, imports CinemaDNG with matching WAV audio, and syncs audio by timecode. **Open Project** opens a linked project without changing media or timelines. **Open Resolve** only launches the app. **Desqueeze in Resolve** stays separate.
 - **Settings → Resolve** offers Automatic (majority desqueezed resolution), UHD or HD. HD/UHD show the entire image, with bars if needed. Frame rate follows the majority of the footage by default; a manual choice overrides it at project level.

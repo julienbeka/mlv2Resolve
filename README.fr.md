@@ -30,7 +30,7 @@ Pour compiler depuis les sources, voir [Compiler](#compiler).
 
 ### Préparer un projet Resolve
 
-Quatre sections structurent la fenêtre : **Rushs**, **Synchro gyro**, **Resolve**, **Montage**. Les réglages s’ouvrent dans un tiroir gauche ; le Dual ISO et ses explications s’y trouvent aussi.
+Quatre sections structurent la fenêtre : **Rushs**, **Synchro gyro**, **Montage**, **Réglages**. Les réglages s’ouvrent dans un tiroir gauche ; le Dual ISO et ses explications s’y trouvent aussi.
 
 - **Créer projet** crée un seul projet pour tous les tournages montés, avec un nom modifiable, importe les CinemaDNG et WAV associés, et synchronise l’audio par timecode. **Ouvrir projet** retrouve un projet lié sans toucher à ses médias ou timelines. **Ouvrir Resolve** lance seulement l’app. **Desqueeze dans Resolve** reste séparé.
 - **Réglages → Resolve** : taille Automatique (résolution désanamorphosée majoritaire), UHD ou HD. HD/UHD montrent l’image entière, avec des bandes si nécessaire. Cadence majoritaire des rushs par défaut, ou cadence choisie au niveau du projet.

@@ -52,7 +52,7 @@ struct MainWindowView: View {
                         }
                     }
                     ResolveSection(state: state, projects: state.projects)
-                    WorkflowSection(number: "04", title: "Editing", subtitle: "Make this workflow yours.", icon: "slider.horizontal.3") {
+                    WorkflowSection(number: "04", title: "Settings", subtitle: "Make this workflow yours.", icon: "slider.horizontal.3") {
                         HStack {
                             Button("Settings…", systemImage: "gearshape") { state.showSettings() }
                             if state.needsFuseT { Button("Install FUSE-T…") { AppDelegate.shared?.showOnboarding() } }
@@ -168,7 +168,7 @@ struct ResolveSection: View {
         return links.filter { seen.insert([$0.database, $0.name] + $0.folder).inserted }
     }
     var body: some View {
-        WorkflowSection(number: "03", title: "Resolve", subtitle: "From mounted footage to your edit.", icon: "play.rectangle") {
+        WorkflowSection(number: "03", title: "Editing", subtitle: "From mounted footage to your edit.", icon: "play.rectangle") {
             HStack(spacing: 10) {
                 if let url = MenuActions.resolveURL {
                     Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().frame(width: 42, height: 42)

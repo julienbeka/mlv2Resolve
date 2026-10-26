@@ -6,7 +6,7 @@
 
 Edit Magic Lantern MLV footage directly in DaVinci Resolve: mlv2Resolve mounts your clips as CinemaDNG sequences on the fly — no conversion, no terminal.
 
-mlv2Resolve is a macOS menu-bar app that mounts Magic Lantern (MLV) shoots as virtual CinemaDNG sequences so you can edit them in DaVinci Resolve without converting or copying anything. It drives the MLVFS engine on FUSE-T (FUSE without a kernel extension), on Apple Silicon.
+mlv2Resolve is a macOS app with a main window and menu-bar controls that mounts Magic Lantern (MLV) shoots as virtual CinemaDNG sequences so you can edit them in DaVinci Resolve without converting or copying anything. It drives the MLVFS engine on FUSE-T (FUSE without a kernel extension), on Apple Silicon.
 
 The interface follows the macOS language (English by default, French available). You can also pick the language in **Settings… → Language**.
 
@@ -22,7 +22,7 @@ To build from source, see [Building](#building).
 
 ## Usage
 
-1. The main window opens when the app launches. Click the menu-bar icon (or double-click the app to open the mlv2Resolve window if the icon is hidden behind the notch), then **Choose Folder…**. The folder can be a single shoot or a parent folder containing several shoots.
+1. The main window opens when the app launches; the app also appears in the Dock and Command-Tab. Click the menu-bar icon (or double-click the app to open the mlv2Resolve window if the icon is hidden behind the notch), then **Choose Folder…**. The folder can be a single shoot or a parent folder containing several shoots.
 2. Click a shoot to mount it. The DNGs appear in `~/MLV Mounts/<shoot>` (**Show DNGs in Finder**). Use **Create Project** to prepare the project and import the clips, or import them manually from that folder.
 3. Mounted shoots are remounted automatically at launch and when their disk is plugged back in, always at the same path, so Resolve finds its clips again.
 4. **Dual ISO**: use **Smooth Editing** while editing and **Grading Quality** before grading. The switch is applied live; in Resolve, select the clips and right-click → Refresh.

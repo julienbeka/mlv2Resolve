@@ -6,7 +6,7 @@
 
 Montez vos rushs Magic Lantern (MLV) directement dans DaVinci Resolve : mlv2Resolve les présente à la volée en séquences CinemaDNG, sans conversion ni terminal.
 
-mlv2Resolve est une application de barre des menus macOS qui monte des tournages Magic Lantern (MLV) en séquences CinemaDNG virtuelles, pour les monter dans DaVinci Resolve sans conversion ni copie. Elle pilote le moteur MLVFS sur FUSE-T (FUSE sans extension noyau), sur Apple Silicon.
+mlv2Resolve est une application macOS avec une fenêtre principale et un menu dans la barre des menus qui monte des tournages Magic Lantern (MLV) en séquences CinemaDNG virtuelles, pour les monter dans DaVinci Resolve sans conversion ni copie. Elle pilote le moteur MLVFS sur FUSE-T (FUSE sans extension noyau), sur Apple Silicon.
 
 L'interface suit la langue de macOS (anglais par défaut, français disponible). Vous pouvez aussi choisir la langue dans **Réglages… → Langue**.
 
@@ -22,7 +22,7 @@ Pour compiler depuis les sources, voir [Compiler](#compiler).
 
 ## Utilisation
 
-1. La fenêtre principale s’ouvre au lancement de l’app. Cliquez sur l'icône de la barre des menus (ou double-cliquez sur l'app pour ouvrir la fenêtre mlv2Resolve si l'icône est cachée derrière l'encoche), puis **Choisir un dossier…**. Le dossier peut être un tournage ou un dossier parent contenant plusieurs tournages.
+1. La fenêtre principale s’ouvre au lancement de l’app ; elle apparaît aussi dans le Dock et dans ⌘ Tab. Cliquez sur l'icône de la barre des menus (ou double-cliquez sur l'app pour ouvrir la fenêtre mlv2Resolve si l'icône est cachée derrière l'encoche), puis **Choisir un dossier…**. Le dossier peut être un tournage ou un dossier parent contenant plusieurs tournages.
 2. Cliquez sur un tournage pour le monter. Les DNG apparaissent dans `~/MLV Mounts/<tournage>` (**Afficher les DNG dans le Finder**). Utilisez **Créer projet** pour préparer le projet et importer les plans, ou importez-les manuellement depuis ce dossier.
 3. Les tournages montés sont remontés automatiquement au lancement et à la reconnexion de leur disque, toujours au même chemin : Resolve retrouve ses plans.
 4. **Dual ISO** : utilisez « Montage fluide » pendant le montage et « Qualité étalonnage » avant l'étalonnage. La bascule s'applique à chaud ; dans Resolve, sélectionnez les plans puis clic droit → Rafraîchir.

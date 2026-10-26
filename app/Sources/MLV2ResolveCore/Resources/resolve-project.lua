@@ -143,7 +143,8 @@ local ok,err=pcall(function()
         {'colorScienceMode','davinciYRGB'}, {'separateColorSpaceAndGamma','1'},
         {'colorSpaceTimeline','DaVinci WG'}, {'colorSpaceTimelineGamma','DaVinci Intermediate'},
         {'colorSpaceOutput','DaVinci WG'}, {'colorSpaceOutputGamma','DaVinci Intermediate'},
-        {'timelineFrameRate',tostring(shoot.fps)}, {'timelineInputResMismatchBehavior','scaleToFit'},
+        {'timelineFrameRate',tostring(shoot.fps)}, {'timelinePlaybackFrameRate',tostring(shoot.fps)},
+        {'timelineInputResMismatchBehavior','scaleToFit'},
         {'timelineResolutionWidth',tostring(studio and shoot.width or math.min(shoot.width,3840))},
         {'timelineResolutionHeight',tostring(studio and shoot.height or math.min(shoot.height,2160))}}
       for _,setting in ipairs(settings) do

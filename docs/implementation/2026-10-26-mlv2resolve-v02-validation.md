@@ -45,3 +45,7 @@ Resolve ignore parfois `importIntoSubFolderName` pour le DRT Gyroflow et importe
 ## CST — Forward OOTF
 
 À la demande de l’utilisateur, `Apply Forward OOTF` est activé sur le premier CST. Un seul octet du paramètre booléen `doFwdOOTF` a changé dans le grade du modèle, les autres réglages restant identiques. Un import/export réel dans un projet temporaire Resolve confirme la conservation de cette valeur ; le projet temporaire a été supprimé et le projet utilisateur rouvert. Le second CST conserve son état désactivé à la création.
+
+## Dock et cadence de lecture
+
+La build 102 utilise `LSUIElement=false` pour être une application standard visible dans le Dock et Commande-Tab ; le menu SwiftUI MenuBarExtra est conservé. Le champ distinct `timelinePlaybackFrameRate` est maintenant réglé explicitement sur la cadence choisie pour le projet. Le test de régression vérifie 29,97 i/s pour timeline et lecture, puis la suite complète passe : 262 tests, 9 ignorés, aucun échec. Resolve n’était plus joignable lors de la tentative de nouveau contrôle réel de ce dernier champ ; aucun projet n’a été modifié par cette tentative.

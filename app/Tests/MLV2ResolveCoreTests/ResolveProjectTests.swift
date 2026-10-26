@@ -51,7 +51,7 @@ final class ResolveProjectTests: XCTestCase {
     func testScriptCreatesProjectImportsPairsAndSecondRunLeavesExistingUntouched() async throws {
         try XCTSkipUnless(ResolveDesqueeze.fuscriptURL() != nil, "Resolve Lua interpreter unavailable")
         let script = RP.script(shoots: [.init(name: "20261025", media: [clip("a"), clip("b")])])
-        let output = try await ResolveDesqueeze.fuscriptRunner()(fixture + "\n" + script + "\n" + "existing = true\n" + script + "\nassert(imports == 4 and syncs == 2 and settings == 11 and presets == 0)")
+        let output = try await ResolveDesqueeze.fuscriptRunner()(fixture + "\n" + script + "\n" + "existing = true\n" + script + "\nassert(imports == 4 and syncs == 2 and settings == 12 and presets == 0)")
         XCTAssertFalse(output.contains("ERROR"), output)
         XCTAssertTrue(output.contains("imported=2"), output)
         XCTAssertTrue(output.contains("already=2"), output)
@@ -388,7 +388,7 @@ extension ResolveProjectTests {
           return t
         end
         """
-        let out = try await ResolveDesqueeze.fuscriptRunner()(fixture + "\n" + setup + "\n" + RP.script(shoots:[.init(name:"20261025",media:[clip("a")])], timelineSize:.hd, frameRate:29.97) + "\nassert(inherited and projectSettings.colorSpaceOutput=='DaVinci WG' and projectSettings.colorSpaceOutputGamma=='DaVinci Intermediate' and projectSettings.timelineFrameRate=='29.97' and projectSettings.timelineResolutionWidth=='1920'); print('PROJECT_SETTINGS_VERIFIED')")
+        let out = try await ResolveDesqueeze.fuscriptRunner()(fixture + "\n" + setup + "\n" + RP.script(shoots:[.init(name:"20261025",media:[clip("a")])], timelineSize:.hd, frameRate:29.97) + "\nassert(inherited and projectSettings.colorSpaceOutput=='DaVinci WG' and projectSettings.colorSpaceOutputGamma=='DaVinci Intermediate' and projectSettings.timelineFrameRate=='29.97' and projectSettings.timelinePlaybackFrameRate=='29.97' and projectSettings.timelineResolutionWidth=='1920'); print('PROJECT_SETTINGS_VERIFIED')")
         XCTAssertTrue(out.contains("PROJECT_SETTINGS_VERIFIED"),out)
     }
     func testPortableTimelineTemplateReceivesFormatAndNodeStates() async throws {

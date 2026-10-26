@@ -1,0 +1,32 @@
+{
+  "fill" : {
+    "solid" : "srgb:0.06000,0.12000,0.19000,1.00000"
+  },
+  "groups" : [
+    {
+      "blur-material" : 0,
+      "layers" : [
+        {
+          "glass" : false,
+          "image-name" : "artwork.png",
+          "name" : "mlv2Resolve"
+        }
+      ],
+      "name" : "Original artwork",
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0
+      },
+      "specular" : false,
+      "translucency" : {
+        "enabled" : false,
+        "value" : 0
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : [
+      "macOS"
+    ]
+  }
+}

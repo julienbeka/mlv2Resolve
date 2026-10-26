@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -42,10 +42,10 @@ jobs:
         run: scripts/build-app.sh
 
       - name: Zip app
-        run: ditto -c -k --keepParent build/mlv2dng.app mlv2dng-macos-arm64.zip
+        run: ditto -c -k --keepParent build/mlv2Resolve.app mlv2Resolve-macos-arm64.zip
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mlv2dng-macos-arm64
-          path: mlv2dng-macos-arm64.zip
+          name: mlv2Resolve-macos-arm64
+          path: mlv2Resolve-macos-arm64.zip
           retention-days: 14

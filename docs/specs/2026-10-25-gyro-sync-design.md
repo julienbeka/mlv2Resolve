@@ -1,4 +1,4 @@
-# mlv2dng — synchro gyro SenseFlow A1 intégrée (remplace NiYien Tool)
+# mlv2Resolve — synchro gyro SenseFlow A1 intégrée (remplace NiYien Tool)
 
 *Document de conception — 25 octobre 2026*
 
@@ -6,7 +6,7 @@
 
 Aujourd'hui, stabiliser des rushs Magic Lantern filmés avec le logger NiYien SenseFlow A1 demande NiYien Tool :
 deux clips de référence (log + MLV lancés en même temps) pour caler les horloges, puis NiYien découpe le log
-continu en un `.gyroflow` par vidéo, avec un profil d'objectif qu'il génère. Sur les DNG de mlv2dng, la
+continu en un `.gyroflow` par vidéo, avec un profil d'objectif qu'il génère. Sur les DNG de mlv2Resolve, la
 synchro automatique de Gyroflow (NiYien) échoue (son décodeur d'analyse ne lit aucune image : « ffmpeg Error
 22 »), et l'appariement horaire de NiYien échoue sur des exports ProRes (date d'export ≠ date de tournage).
 
@@ -14,7 +14,7 @@ Validé le 25/10/2026 avec l'utilisateur sur le clip M24-1845 : en calculant le 
 mouvement de l'image (R² 0,78, pic suivant 0,23) et en l'écrivant dans le `.gyroflow`, le plugin Gyroflow de
 Resolve passe à « Synced » et la stabilisation est correcte.
 
-**But :** mlv2dng crée lui-même, sans NiYien Tool ni clips de référence, un `.gyroflow` synchronisé par MLV,
+**But :** mlv2Resolve crée lui-même, sans NiYien Tool ni clips de référence, un `.gyroflow` synchronisé par MLV,
 avec le bon profil d'objectif, visible dans le dossier de DNG monté. Dans Resolve, l'utilisateur n'a plus qu'à
 cliquer « Load for current file ».
 
@@ -32,8 +32,8 @@ cliquer « Load for current file ».
 
 ## Hors périmètre
 
-- Rendu stabilisé par mlv2dng (Gyroflow / le plugin Resolve s'en chargent).
-- Calibration d'objectif dans mlv2dng (elle se fait dans Gyroflow ; mlv2dng importe le `.json`).
+- Rendu stabilisé par mlv2Resolve (Gyroflow / le plugin Resolve s'en chargent).
+- Calibration d'objectif dans mlv2Resolve (elle se fait dans Gyroflow ; mlv2Resolve importe le `.json`).
 - Autres loggers / caméras que SenseFlow A1 et EOS M (le code ne doit pas l'interdire, mais ce n'est pas testé).
 - Application automatique du profil dans Resolve (le plugin lit le `.gyroflow`).
 
@@ -108,7 +108,7 @@ cliquer « Load for current file ».
 ### Interface (choix du concepteur, à affiner)
 
 - Réglages → « Objectifs » : liste (nom, focale, profil calibré optionnel) ; « Gyro » : position par défaut.
-- Fenêtre mlv2dng : par tournage, objectif par défaut et position ; liste des plans avec état gyro, objectif
+- Fenêtre mlv2Resolve : par tournage, objectif par défaut et position ; liste des plans avec état gyro, objectif
   (menu), et « Régénérer ».
 - Calculs en arrière-plan, un plan à la fois, avec progression ; reprise au relancement.
 
@@ -122,8 +122,8 @@ cliquer « Load for current file ».
   à l'anti-objectif « pas de fichiers découpés ». Le chemin du log peut rester dans le dossier d'origine (le
   plugin a déjà accepté un chemin hors montage).
 - **Références disponibles.** Le projet NiYien de M24-1845 (et sa copie d'origine), le profil NiYien 25 mm
-  (`~/Desktop/Tests mlv2dng/CANON_M_APSC_Horizontal_Squeeze_3.00_1920x1080_25fps_25.00mm.json`) et le jeu
-  « Test Gyroflow » (`~/Desktop/Tests mlv2dng/Test Gyroflow` : M24-1843/1844/1845 et trois logs) peuvent servir
+  (`~/Desktop/Tests mlv2Resolve/CANON_M_APSC_Horizontal_Squeeze_3.00_1920x1080_25fps_25.00mm.json`) et le jeu
+  « Test Gyroflow » (`~/Desktop/Tests mlv2Resolve/Test Gyroflow` : M24-1843/1844/1845 et trois logs) peuvent servir
   de référence et de jeu de test, en lecture seule (copies/clones APFS pour les tests ; ne jamais committer de
   MLV, de log ni de fichier contenant des chemins personnels). Plugin utilisé : Gyroflow (NiYien) 1.6.3
   (« DaVinci 2.1.2.60 ») — c'est la version cible du format.
@@ -133,7 +133,7 @@ cliquer « Load for current file ».
   les tournages du même dossier choisi.
 - **Changement d'objectif sur un `.gyroflow` fait par NiYien (choix du concepteur).** Changer l'objectif d'un
   plan vaut demande explicite de régénération, avec copie de l'ancien fichier dans
-  `~/Library/Application Support/mlv2dng/gyroflow-backups/<tournage>/` (jamais dans les rushs). mlv2dng note
+  `~/Library/Application Support/mlv2Resolve/gyroflow-backups/<tournage>/` (jamais dans les rushs). mlv2Resolve note
   quels `.gyroflow` il a écrits pour distinguer les deux cas dans l'interface.
 
 ## Laissé au constructeur

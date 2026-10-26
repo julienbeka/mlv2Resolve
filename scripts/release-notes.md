@@ -2,21 +2,19 @@
 
 ### Changes in @VERSION@
 
-- **Resolve project preparation:** create or open a project per mounted shoot, import CinemaDNG and matching WAV audio, and synchronize audio by timecode. Existing projects keep their settings and timelines; later runs import only missing clips.
-- **Majority-based project format:** choose the most common desqueezed resolution and frame rate, with the larger resolution winning ties. Resolve Free receives a fitted UHD Rushs timeline through Workspace → Scripts → mlv2dng.
-- **Anamorphic sizing:** apply matching Input Sizing presets, including fit variants, while preserving custom sizing choices. Supported preset installation backs up the local library and runs only while Resolve is closed.
-- **Built-in SenseFlow A1 gyro sync:** choose lenses and sensor mounting positions, generate per-clip Gyroflow projects, import calibrated lens profiles, and follow progress in the window and menu bar. Existing files are backed up before explicit regeneration.
-- **Mode-specific rolling shutter:** select EOS M Crop Mood Slim readout times from the actual recording format, including 32.128 ms for 4.8K and 35.3925 ms for 5.2K in 2.39:1. The 4.8K setting has been visually tested; other source-derived modes remain to be validated visually.
-- **Header correction:** follow the majority sampling of same-size clips when an MLV reports the wrong anamorphic format, including during Gyroflow generation.
-- **Startup fix:** skip Resolve’s empty, unsaved Untitled Project without requiring a save, while preserving confirmation and save checks for projects containing work.
+- **mlv2Resolve:** new name and four workflow sections: Footage, Gyro Sync, Editing, Settings. Native mount switches, an in-window left settings drawer, and Tahoe styling. The native app icon fills its Tahoe frame; the menu bar uses a matching monochrome ML camera. The window opens at launch, with Dock and Command-Tab support.
+- **Gyro previews:** identify shots with thumbnails and enlarged previews before assigning a lens. A settings link appears when no lens is declared. Dual ISO moves to Settings with explanations of fast preview and full-quality interpolation.
+- **Separate Resolve actions:** create one named project combining all mounted folders, open a linked project, launch Resolve, or desqueeze. Cached links can be removed without deleting Resolve projects or footage.
+- **Timeline control:** Automatic, UHD or HD sizing, with the entire anamorphic image visible. Use the majority footage frame rate or select a different one; project timeline and playback cadence match. Optionally populate the timeline with all shots; its default name, **All shots**, is editable.
+- **Portable timeline color setup:** project working and output space DaVinci Wide Gamut / Intermediate. Timeline CST 01 converts P3-D60 / Linear to DWG / Intermediate with Apply Forward OOTF enabled. CST 02 converts DWG / Intermediate to Rec.709 / Rec.709-A and starts disabled; enable it only before a Rec.709 export. The empty timeline model is bundled with the app and tested in Resolve 21.1.1. Existing projects keep their grades and settings.
+- **Automatic clip setup:** desqueezed previews, desqueezed timeline clips with full-frame fit even without presets, and a Gyroflow(NiYien) Color node on each clip when the plugin is installed. Use **Load for current file** in the plugin.
+- **Migration:** existing preferences, lenses and calibrated profiles are preserved. The bundle identity and virtual footage paths stay compatible.
 
-**mlv2dng** mounts Magic Lantern MLV footage as virtual CinemaDNG sequences for DaVinci Resolve, from the macOS menu bar. No conversion, no copy. It drives the (patched) MLVFS engine on FUSE-T.
+**Requirements:** Apple Silicon Mac, macOS 14 or later; Resolve 21.1.1 tested for the timeline model. Resolve Studio supports direct scripting; Resolve Free uses Workspace → Scripts → mlv2Resolve after choosing the action in the app. FUSE-T is offered on first launch if missing.
 
-**Requirements:** Apple Silicon Mac, macOS 14 or later. FUSE-T is installed by the app on first launch if missing.
+**Install:** unzip, move `mlv2Resolve.app` to `/Applications`, open it. The app is not notarized: for the first launch use **System Settings → Privacy & Security → Open Anyway**.
 
-**Install:** unzip, move `mlv2dng.app` to `/Applications`, open it. The app is not notarized (no Apple Developer account), so macOS blocks the first launch: open **System Settings → Privacy & Security**, scroll down and click **Open Anyway**, then confirm.
-
-Verify the download: `shasum -a 256 -c mlv2dng-@VERSION@-macos-arm64.zip.sha256`
+Verify: `shasum -a 256 -c mlv2Resolve-@VERSION@-macos-arm64.zip.sha256`
 
 Source (GPL-3.0-or-later): https://github.com/@REPO@/tree/@TAG@
 
@@ -24,20 +22,18 @@ Source (GPL-3.0-or-later): https://github.com/@REPO@/tree/@TAG@
 
 ### Nouveautés de @VERSION@
 
-- **Préparation des projets Resolve :** création ou ouverture d’un projet par tournage monté, import des CinemaDNG et WAV associés, synchronisation audio par timecode. Les projets existants conservent leurs réglages et timelines ; seuls les plans manquants sont ajoutés ensuite.
-- **Format majoritaire :** choix de la résolution désanamorphosée et de la cadence les plus fréquentes ; la plus grande résolution départage les égalités. Resolve gratuit reçoit une timeline UHD Rushs ajustée via Workspace → Scripts → mlv2dng.
-- **Désanamorphose :** application des préréglages Input Sizing adaptés, y compris les variantes de cadrage, en conservant les choix personnalisés. L’installation compatible sauvegarde la bibliothèque locale et s’effectue uniquement lorsque Resolve est fermé.
-- **Synchro SenseFlow A1 intégrée :** choix des objectifs et positions du capteur, génération d’un projet Gyroflow par plan, import de profils optiques calibrés, suivi dans la fenêtre et la barre des menus. Les fichiers existants sont sauvegardés avant régénération explicite.
-- **Rolling shutter par mode :** choix des temps de lecture EOS M Crop Mood Slim selon le format réel, dont 32,128 ms pour le 4,8K et 35,3925 ms pour le 5,2K en 2,39:1. Le 4,8K a été testé visuellement ; les autres modes calculés depuis le code restent à valider sur l’image.
-- **Correction d’en-tête :** utilisation de l’échantillonnage majoritaire des plans de même taille lorsqu’un MLV annonce un mauvais format anamorphique, y compris pour la génération Gyroflow.
-- **Correction au démarrage :** le projet Sans titre vide et non enregistré de Resolve est ignoré sans demander d’enregistrement ; les projets contenant du travail restent protégés par la confirmation et l’enregistrement préalable.
+- **mlv2Resolve :** nouveau nom et quatre sections : Rushs, Synchro gyro, Montage, Réglages. Interrupteurs de montage natifs, réglages dans un tiroir gauche intégré à la fenêtre, apparence Tahoe.
+- **Aperçus gyro :** identifiez les plans par leurs vignettes et aperçus agrandis avant d’attribuer un objectif. Un lien vers les réglages apparaît si aucun objectif n’est déclaré. Le Dual ISO passe dans les réglages, avec explications des modes aperçu rapide et interpolation complète.
+- **Actions Resolve séparées :** créer un seul projet nommé réunissant les dossiers montés, ouvrir un projet lié, lancer Resolve ou désanamorphoser. Les liens mémorisés peuvent être effacés sans supprimer les projets ni les rushs.
+- **Timeline personnalisable :** taille Automatique, UHD ou HD, avec l’image anamorphique entière. Cadence majoritaire des rushs ou cadence choisie, identique pour la timeline du projet et sa lecture. Option pour ajouter tous les plans à la timeline, nommée **All shots** par défaut et renommable.
+- **Couleur de timeline portable :** espace de travail et de sortie du projet DaVinci Wide Gamut / Intermediate. Le CST 01 convertit P3-D60 / Linear vers DWG / Intermediate avec Apply Forward OOTF activé. Le CST 02 convertit DWG / Intermediate vers Rec.709 / Rec.709-A et reste désactivé au départ ; activez-le uniquement avant un export Rec.709. Le modèle vide est inclus dans l’app et testé avec Resolve 21.1.1. Les projets existants conservent leurs grades et réglages.
+- **Préparation des plans :** aperçus désanamorphosés, plans de timeline désanamorphosés avec l’image entière même sans préréglage, et nœud Color Gyroflow(NiYien) sur chaque plan si le plugin est installé. Utilisez **Load for current file** dans le plugin.
+- **Migration :** conservation des préférences, objectifs et profils calibrés. L’identité applicative et les chemins des rushs virtuels restent compatibles.
 
-**mlv2dng** monte vos rushs Magic Lantern (MLV) en séquences CinemaDNG virtuelles pour DaVinci Resolve, depuis la barre des menus macOS, sans conversion ni copie. Elle pilote le moteur MLVFS (modifié) sur FUSE-T.
+**Prérequis :** Mac Apple Silicon, macOS 14 ou ultérieur ; modèle de timeline testé avec Resolve 21.1.1. Scripting direct avec Resolve Studio ; avec Resolve gratuit, lancez Workspace → Scripts → mlv2Resolve après avoir choisi l’action dans l’app. FUSE-T est proposé au premier lancement s’il manque.
 
-**Prérequis :** Mac Apple Silicon, macOS 14 ou plus récent. FUSE-T est installé par l'app au premier lancement s'il manque.
+**Installation :** décompressez, placez `mlv2Resolve.app` dans `/Applications`, ouvrez-la. L’app n’est pas notarisée : au premier lancement, utilisez **Réglages Système → Confidentialité et sécurité → Ouvrir quand même**.
 
-**Installation :** décompressez, placez `mlv2dng.app` dans `/Applications`, ouvrez-la. L'app n'est pas notarisée (pas de compte Apple Developer) : macOS bloque le premier lancement. Allez dans **Réglages Système → Confidentialité et sécurité**, faites défiler et cliquez sur **Ouvrir quand même**, puis confirmez.
-
-Vérifier le téléchargement : `shasum -a 256 -c mlv2dng-@VERSION@-macos-arm64.zip.sha256`
+Vérification : `shasum -a 256 -c mlv2Resolve-@VERSION@-macos-arm64.zip.sha256`
 
 Code source (GPL-3.0-or-later) : https://github.com/@REPO@/tree/@TAG@

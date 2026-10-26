@@ -1,69 +1,95 @@
-# mlv2dng
+# mlv2Resolve
+
+<img src="artwork/mlv2Resolve-icon.png" width="128" alt="mlv2Resolve">
 
 *[English version](README.md)*
 
-Montez vos rushs Magic Lantern (MLV) directement dans DaVinci Resolve : mlv2dng les présente à la volée en séquences CinemaDNG, sans conversion ni terminal.
+Montez vos **rushs Magic Lantern MLV directement dans DaVinci Resolve**, sans conversion ni copie préalable. mlv2Resolve présente vos tournages sous forme de séquences CinemaDNG virtuelles, prépare un projet Resolve et peut synchroniser les données gyro d’un SenseFlow A1.
 
-mlv2dng est une application de barre des menus macOS qui monte des tournages Magic Lantern (MLV) en séquences CinemaDNG virtuelles, pour les monter dans DaVinci Resolve sans conversion ni copie. Elle pilote le moteur MLVFS sur FUSE-T (FUSE sans extension noyau), sur Apple Silicon.
+## Téléchargement et installation
 
-L'interface suit la langue de macOS (anglais par défaut, français disponible). Vous pouvez aussi choisir la langue dans **Réglages… → Langue**.
+**[Télécharger mlv2Resolve 0.2 pour Apple Silicon](https://github.com/julienbeka/mlv2Resolve/releases/download/v0.2/mlv2Resolve-0.2-macos-arm64.zip)** · [Notes de version et empreinte SHA-256](https://github.com/julienbeka/mlv2Resolve/releases/tag/v0.2)
 
-## Téléchargement
+- **Mac :** Apple Silicon, macOS 14 ou ultérieur. L’interface intègre les icônes et l’apparence natives de macOS Tahoe.
+- **Resolve :** testé avec DaVinci Resolve Studio 21.1.1. Studio permet les actions directes depuis l’app ; l’édition gratuite utilise le script Workspace décrit plus bas.
+- **FUSE-T :** nécessaire aux montages virtuels. L’app propose son installation s’il manque.
+- **Gyroflow(NiYien) OFX :** nécessaire uniquement à la stabilisation dans Resolve ; à installer séparément.
 
-Téléchargez le dernier `mlv2dng-<version>-macos-arm64.zip` depuis la page [Releases](https://github.com/julienbeka/mlv2dng/releases) (Mac Apple Silicon, macOS 14 ou ultérieur). Vérifiez l'empreinte avec le fichier `.sha256` joint : `shasum -a 256 -c <fichier>.sha256`.
+1. Décompressez le téléchargement et placez `mlv2Resolve.app` dans `/Applications`.
+2. L’app n’est pas notarisée : si macOS bloque le premier lancement, utilisez **Réglages Système → Confidentialité et sécurité → Ouvrir quand même**.
+3. Ouvrez l’app et terminez l’installation de FUSE-T si elle est proposée. La fenêtre principale s’affiche au lancement ; l’app apparaît aussi dans le Dock et dans **⌘ Tab**. Son icône d’appareil photo **ML** dans la barre des menus donne un accès rapide au workflow.
 
-1. Décompressez et placez `mlv2dng.app` dans `/Applications`.
-2. L'app n'est pas encore notarisée : au premier lancement, macOS la bloque. Ouvrez Réglages Système > Confidentialité et sécurité et cliquez sur **Ouvrir quand même**.
-3. Si FUSE-T manque, l'app propose de le télécharger et de l'installer au premier lancement (votre mot de passe administrateur est demandé une fois), puis continue toute seule.
+Pour vérifier le téléchargement, placez le ZIP et son fichier `.sha256` dans le même dossier, puis lancez `shasum -a 256 -c mlv2Resolve-0.2-macos-arm64.zip.sha256`.
 
-Pour compiler depuis les sources, voir [Compiler](#compiler).
+Le français et l’anglais sont inclus. L’interface suit macOS ; choisissez une autre langue dans **Réglages → Langue**.
 
-## Utilisation
+## Démarrage rapide
 
-1. Cliquez sur l'icône de la barre des menus (ou double-cliquez sur l'app pour ouvrir la fenêtre mlv2dng si l'icône est cachée derrière l'encoche), puis **Choisir un dossier…**. Le dossier peut être un tournage ou un dossier parent contenant plusieurs tournages.
-2. Cliquez sur un tournage pour le monter. Les DNG apparaissent dans `~/MLV Mounts/<tournage>` (**Afficher les DNG dans le Finder**). Utilisez **Ouvrir Resolve** pour préparer le projet et importer les plans, ou importez-les manuellement depuis ce dossier.
-3. Les tournages montés sont remontés automatiquement au lancement et à la reconnexion de leur disque, toujours au même chemin : Resolve retrouve ses plans.
-4. **Dual ISO** : utilisez « Montage fluide » pendant le montage et « Qualité étalonnage » avant l'étalonnage. La bascule s'applique à chaud ; dans Resolve, sélectionnez les plans puis clic droit → Rafraîchir.
-5. Rushs anamorphosés : **Ouvrir Resolve** applique les préréglages Input Sizing correspondants lorsqu’ils sont disponibles. **Désqueezer dans Resolve** permet aussi de les appliquer à des plans déjà importés. Si un préréglage ne peut pas être installé, l’app explique comment l’enregistrer manuellement (en 1x3 : Color → Sizing → Input Sizing → **Width = 3**, **Height = 1**, avec ajustement au cadre si nécessaire).
+La fenêtre comporte quatre sections :
 
-### Préparer un projet Resolve en un clic
+| Section | Utilisation |
+| --- | --- |
+| **Rushs** | Choisissez un dossier de tournage ou un dossier parent contenant plusieurs tournages. Montez chaque dossier avec son interrupteur ; **Tout démonter** se trouve ici. |
+| **Synchro gyro** | Si vous utilisez un SenseFlow A1, choisissez un objectif et une position du capteur, puis attendez la synchronisation. Les vignettes désanamorphosées et les aperçus agrandis facilitent l’identification des plans. |
+| **Montage** | Saisissez un nom de projet puis cliquez sur **Créer projet**. Tous les dossiers montés sont réunis dans **un seul** projet Resolve. |
+| **Réglages** | Ouvrez le tiroir gauche pour régler les objectifs, le Dual ISO, la taille du projet, la cadence et la timeline All shots facultative. |
 
-**Ouvrir Resolve** crée ou ouvre un projet nommé comme chaque tournage monté et importe les séquences
-CinemaDNG avec leur audio WAV associé, synchronisé par timecode. Les fichiers annexes et aperçus GIF sont exclus.
+Les séquences DNG apparaissent dans `~/MLV Mounts/<tournage>`. Gardez les dossiers montés pendant le montage. Ils sont remontés au lancement de l’app et à la reconnexion de leur disque, avec les mêmes chemins pour que Resolve retrouve les plans.
 
-- Les nouveaux projets utilisent votre préréglage de projet **mlv2dng**. La résolution désanamorphosée et la
-  cadence les plus fréquentes déterminent le format ; à égalité de nombre de plans, la plus grande résolution
-  l’emporte. Cinq plans 4800 × 2008 et deux plans 5208 × 2178 donnent donc **4800 × 2008**.
-- Une nouvelle ouverture importe uniquement les plans manquants et conserve les réglages et timelines existants.
-- Avec **Resolve Studio**, la préparation se lance directement depuis l’app. Avec la **version gratuite**,
-  utilisez **Workspace → Scripts → mlv2dng** dans Resolve ; un nouveau projet reçoit une timeline UHD **Rushs**
-  avec cadrage ajusté par plan.
-- Si la synchro gyro est en cours, choisissez **Attendre** ou **Ouvrir quand même**. L’avancement apparaît dans
-  la fenêtre et la barre des menus.
-- Le projet **Sans titre** vide et non enregistré du démarrage est ignoré sans demander d’enregistrement.
-  Quitter un autre projet demande toujours confirmation et l’enregistre avant la bascule.
+## Workflow Resolve
 
-Les préréglages d’anamorphose sont installés avec sauvegarde dans la bibliothèque locale par défaut compatible,
-pendant que Resolve est fermé. Les cadrages personnalisés sont conservés ; les autres bibliothèques disposent
-d’instructions manuelles.
+Avec **Resolve Studio**, activez **Preferences → System → General → External scripting using: Local**. Avec **Resolve gratuit**, choisissez l’action dans mlv2Resolve puis lancez **Workspace → Scripts → mlv2Resolve** dans Resolve.
+
+| Action | Résultat |
+| --- | --- |
+| **Créer projet** | Crée un seul projet nommé à partir des tournages montés, importe les CinemaDNG et les WAV associés, et synchronise l’audio par timecode. |
+| **Ouvrir projet** | Retrouve un projet lié sans changer ses médias, timelines ou grades. |
+| **Ouvrir Resolve** | Lance Resolve. |
+| **Désqueezer dans Resolve** | Désanamorphose les plans déjà en timeline, en préservant les cadrages personnalisés et sans appliquer deux fois l’étirement. |
+
+Dans **Réglages → Resolve** :
+
+- **Taille du projet :** Automatique utilise la résolution désanamorphosée majoritaire des rushs montés ; UHD ou HD adapte le zoom pour montrer l’image entière, avec des bandes si nécessaire.
+- **Cadence :** utilisez la cadence majoritaire des rushs ou choisissez une valeur manuelle. La cadence de timeline du projet et sa cadence de lecture sont préparées à la même valeur.
+- **All shots :** ajoutez facultativement tous les plans importés à une timeline. L’option est activée par défaut ; son nom est modifiable et vaut **All shots** par défaut. Désactivez-la pour préparer une timeline vide avec ses CST.
+- **Liens de projets :** effacez les associations mémorisées par l’app sans supprimer les projets Resolve ni les rushs.
+
+Les nouvelles timelines remplies reçoivent un nœud Color **Gyroflow(NiYien)** sur chaque plan si le plugin est installé. Dans le plugin, utilisez **Load for current file** pour charger les données `.gyroflow` de ce plan. L’absence du plugin est signalée.
+
+### Gestion des couleurs
+
+L’espace de travail et de sortie du projet est **DaVinci Wide Gamut / DaVinci Intermediate**. La timeline préparée hérite des réglages du projet et comporte deux CST :
+
+| Nœud de timeline | Conversion | État initial |
+| --- | --- | --- |
+| **CST 01** | P3-D60 / Linear → DWG / Intermediate ; **Apply Forward OOTF** coché | Activé |
+| **CST 02** | DWG / Intermediate → Rec.709 / Rec.709-A | Désactivé |
+
+**Activez le CST 02 uniquement avant un export Rec.709.** Les modèles portables sont inclus dans l’app : les autres utilisateurs n’ont aucun CST ni préréglage de projet à préparer. Adaptez les préférences Camera Raw dans le projet créé si besoin. Ces valeurs s’appliquent aux nouvelles créations ; ouvrir un projet lié conserve ses réglages existants.
+
+### Rushs anamorphiques et Dual ISO
+
+Les aperçus MLV sont automatiquement désanamorphosés. Les plans des timelines créées montrent l’image entière même sans préréglage Input Sizing, grâce à un zoom horizontal et vertical distinct. Les plans importés uniquement dans le Media Pool peuvent encore nécessiter un préréglage Input Sizing lors de la création manuelle d’une autre timeline.
+
+Utilisez le mode Dual ISO **Montage fluide** pendant le montage et **Qualité étalonnage** avant l’étalonnage ou l’export. La bascule s’applique à chaud ; sélectionnez les plans dans Resolve puis utilisez **Refresh** après le changement. Les deux modes sont expliqués dans les réglages.
 
 ### Synchro gyro (SenseFlow A1)
 
-mlv2dng synchronise tout seul le gyro d'un SenseFlow A1 avec vos plans et écrit un projet Gyroflow par plan, pour
+mlv2Resolve synchronise tout seul le gyro d'un SenseFlow A1 avec vos plans et écrit un projet Gyroflow par plan, pour
 que le plugin Gyroflow de Resolve stabilise les DNG. Plus besoin de NiYien Tool ni de clips de référence.
 
 1. Copiez les logs de l'A1 (`*_mix.bin`) n'importe où dans le dossier choisi avec **Choisir un dossier…** (le
    dossier du tournage, un sous-dossier, ou un dossier parent commun à plusieurs tournages). Les logs et les MLV
    ne sont jamais modifiés.
 2. Déclarez vos objectifs une fois dans **Réglages… → Objectifs** : un nom et la vraie focale en mm (celle que
-   Magic Lantern écrit dans le MLV n'est pas fiable). mlv2dng calcule un profil sans distorsion à partir de la
+   Magic Lantern écrit dans le MLV n'est pas fiable). mlv2Resolve calcule un profil sans distorsion à partir de la
    focale.
-3. Dans la fenêtre mlv2dng, chaque tournage monté a un **Objectif** par défaut et une **Position du capteur**
+3. Dans la fenêtre mlv2Resolve, chaque tournage monté a un **Objectif** par défaut et une **Position du capteur**
    (l'emplacement de l'A1 sur la caméra ; **Dessus** par défaut, modifiable dans **Réglages… → Synchro gyro**, ce
    qui s'applique aux plans synchronisés ensuite). Le menu de chaque plan permet de choisir un autre objectif ou une
    autre position pour ce plan seulement. Changer l'objectif ou la position d'un tournage réécrit les `.gyroflow`
-   que mlv2dng a écrits pour ses plans sans objectif ni position propres (les fichiers précédents sont
-   sauvegardés) ; les fichiers que mlv2dng n'a pas écrits ne sont jamais touchés.
+   que mlv2Resolve a écrits pour ses plans sans objectif ni position propres (les fichiers précédents sont
+   sauvegardés) ; les fichiers que mlv2Resolve n'a pas écrits ne sont jamais touchés.
 4. Les plans sont synchronisés en arrière-plan, un à la fois par tournage. Chaque plan affiche son état :
    **Synchronisé (R² 0,78)** (le R² indique à quel point le mouvement du plan correspond au gyro, 1 = parfait),
    **Aucun log ne couvre ce plan**, **Mouvement de caméra insuffisant**, **Correspondance incertaine** (rien
@@ -74,17 +100,17 @@ que le plugin Gyroflow de Resolve stabilise les DNG. Plus besoin de NiYien Tool 
 
 Les objectifs courts (p. ex. 12 mm) ont trop de distorsion pour un profil calculé : calibrez l'objectif dans
 Gyroflow, puis importez son `.json` dans **Réglages… → Objectifs → Modifier… → Importer un profil calibré…**
-(mlv2dng en garde une copie dans `~/Library/Application Support/mlv2dng/lens-profiles`). Un profil calibré sert
+(mlv2Resolve en garde une copie dans `~/Library/Application Support/mlv2Resolve/lens-profiles`). Un profil calibré sert
 aux plans dont le format correspond à ses dimensions ; les autres gardent le profil calculé. L'état du plan
 indique lequel a été utilisé (« profil calibré » / « profil calculé »).
 
-Un `.gyroflow` existant que mlv2dng n'a pas écrit (p. ex. fait avec NiYien Tool) est conservé. **Régénérer** sur
+Un `.gyroflow` existant que mlv2Resolve n'a pas écrit (p. ex. fait avec NiYien Tool) est conservé. **Régénérer** sur
 un plan le remplace, tout comme changer l'objectif ou la position de ce plan ; le fichier remplacé est d'abord
-copié dans `~/Library/Application Support/mlv2dng/gyroflow-backups/<tournage>/`.
+copié dans `~/Library/Application Support/mlv2Resolve/gyroflow-backups/<tournage>/`.
 
 ### Rolling shutter adapté au mode d’enregistrement de l’EOS M
 
-Pour les modes **Canon EOS M Crop Mood Slim** pris en charge, mlv2dng détermine le temps de lecture du capteur
+Pour les modes **Canon EOS M Crop Mood Slim** pris en charge, mlv2Resolve détermine le temps de lecture du capteur
 à partir de la taille enregistrée, de la cadence et de l’échantillonnage, plutôt que d’utiliser une valeur unique.
 Le profil optique et la stabilisation Gyroflow reçoivent la même valeur : par exemple **32,128 ms pour le 4,8K
 4800 × 2008**, et **35,3925 ms pour le 5,2K 5208 × 2178**.
@@ -97,7 +123,7 @@ sur l’image. Consultez le [tableau des modes et le détail du calcul](docs/res
 Pour un format inconnu, le temps valide d’un profil optique importé est conservé ; sans valeur valide, la
 correction du rolling shutter est désactivée. Les projets existants sont préservés : utilisez **Régénérer** sur
 un plan pour appliquer les nouvelles valeurs (avec sauvegarde), puis **Load for current file** dans le plugin
-Gyroflow de Resolve. Ajoutez le plugin manuellement sur un nœud Color ; mlv2dng prépare son fichier de projet.
+Gyroflow de Resolve. Les nouvelles timelines remplies reçoivent automatiquement Gyroflow(NiYien) sur le nœud Color de chaque plan, si le plugin est installé. Dans les projets existants, ajoutez-le manuellement si nécessaire.
 
 ### Fichiers enregistrés dans un dossier de plan (fichiers annexes)
 
@@ -130,9 +156,9 @@ de plan ne peuvent pas utiliser le même nom : le fichier appartient au dossier 
 
 ## Compiler
 
-Prérequis : Xcode (outils en ligne de commande), [XcodeGen](https://github.com/yonaskolb/XcodeGen) et FUSE-T (`brew install macos-fuse-t/homebrew-cask/fuse-t`).
+Prérequis : Xcode 26 ou ultérieur complet (avec ses outils en ligne de commande), [XcodeGen](https://github.com/yonaskolb/XcodeGen) et FUSE-T (`brew install macos-fuse-t/homebrew-cask/fuse-t`).
 
-    scripts/build-app.sh       # produit build/mlv2dng.app (moteur + app, signature ad hoc)
+    scripts/build-app.sh       # produit build/mlv2Resolve.app (moteur + app, signature ad hoc)
     cd app && swift test       # tests du noyau
 
 Le moteur seul : `scripts/build-engine.sh` (écrit `build/engine/mlvfs`).

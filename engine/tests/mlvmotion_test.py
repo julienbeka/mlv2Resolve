@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """mlvmotion vs poc/mlv_motion.py on a real clip.
 
-Error-path and synthetic checks always run. Real-clip checks need MLV2DNG_GYRO_DIR (folder with M24-1845.MLV) and MLV2DNG_PY (python with numpy + imagecodecs);
+Error-path and synthetic checks always run. Real-clip checks need MLV2Resolve_GYRO_DIR (folder with M24-1845.MLV) and MLV2Resolve_PY (python with numpy + imagecodecs);
 skips (exit 0) when either is unset. The reference writes its CSV next to the clip, so the clip is
 symlinked into a temp dir first (the original folder is never written to).
 """
@@ -114,9 +114,9 @@ def main():
         assert os.path.exists(BIN), "build/engine/mlvmotion missing (run scripts/build-engine.sh)"
         error_paths(tmp)
         print("error paths OK")
-    d, py = os.environ.get("MLV2DNG_GYRO_DIR"), os.environ.get("MLV2DNG_PY")
+    d, py = os.environ.get("MLV2Resolve_GYRO_DIR"), os.environ.get("MLV2Resolve_PY")
     if not d or not py:
-        print("SKIP real-clip checks: MLV2DNG_GYRO_DIR / MLV2DNG_PY not set")
+        print("SKIP real-clip checks: MLV2Resolve_GYRO_DIR / MLV2Resolve_PY not set")
         return 0
     clip = os.path.join(d, "M24-1845.MLV")
     if not os.path.exists(clip):

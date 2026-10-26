@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   release:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 45
     env:
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
@@ -41,17 +41,17 @@ jobs:
           make -f Makefile.arm64 dual-iso-cache-test
 
       - name: Build app
-        env:
-          BUILD_NUMBER: ${{ github.run_number }}
         run: |
           export MARKETING_VERSION="${TAG#v}"
+          # Public builds stay above the local validation builds already distributed.
+          export BUILD_NUMBER="$((1000 + GITHUB_RUN_NUMBER))"
           scripts/build-app.sh
 
       - name: Package
         run: |
           VERSION="${TAG#v}"
-          ZIP="mlv2dng-${VERSION}-macos-arm64.zip"
-          ditto -c -k --keepParent build/mlv2dng.app "$ZIP"
+          ZIP="mlv2Resolve-${VERSION}-macos-arm64.zip"
+          ditto -c -k --keepParent build/mlv2Resolve.app "$ZIP"
           shasum -a 256 "$ZIP" > "$ZIP.sha256"
           cat "$ZIP.sha256"
           sed -e "s/@VERSION@/${VERSION}/g" -e "s/@TAG@/${TAG}/g" \
@@ -65,5 +65,5 @@ jobs:
             gh release edit "$TAG" --notes-file notes.md
           else
             gh release create "$TAG" "$ZIP" "$ZIP.sha256" \
-              --title "mlv2dng ${TAG#v}" --notes-file notes.md --verify-tag
+              --title "mlv2Resolve ${TAG#v}" --notes-file notes.md --verify-tag
           fi

@@ -104,7 +104,7 @@ local ok,err=pcall(function()
     local root=pool:GetRootFolder()
     local seen={}; visit(root,seen)
     pool:SetCurrentFolder(root)
-    local rushs,gyroTemplate,gyroSource,anchor=nil,nil,nil,nil
+    local rushs,gyroTemplate,gyroSource,gyroMedia,anchor=nil,nil,nil,nil,nil
     local modelFolderName='__mlv2Resolve_gyro_model'
     local function hasGyro(item)
       local graph=item:GetNodeGraph()
@@ -124,6 +124,7 @@ local ok,err=pcall(function()
       if INCLUDE_ALL_SHOTS then
         gyroTemplate=pool:ImportTimelineFromFile(GYRO_TEMPLATE,{importIntoSubFolderName=modelFolderName})
         if gyroTemplate then gyroSource=(gyroTemplate:GetItemListInTrack('video',1) or {})[1] end
+        if gyroSource then gyroMedia=gyroSource:GetMediaPoolItem() end
         if not gyroSource or not hasGyro(gyroSource) then
           gyroSource=nil
           warn('Gyroflow(NiYien) plugin unavailable: install it before creating the project')
@@ -216,6 +217,9 @@ local ok,err=pcall(function()
     if gyroTemplate then
       project:SetCurrentTimeline(rushs)
       if not pool:DeleteTimelines({gyroTemplate}) then warn('Could not remove temporary Gyroflow model timeline') end
+      -- DRT may ignore importIntoSubFolderName and place the placeholder at root.
+      -- Delete the exact imported object, never a user's media with a matching name.
+      if gyroMedia and not pool:DeleteClips({gyroMedia}) then warn('Could not remove temporary Gyroflow model media') end
       for _,folder in ipairs(root:GetSubFolderList() or {}) do
         if folder:GetName()==modelFolderName then
           pool:SetCurrentFolder(root)

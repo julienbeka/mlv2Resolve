@@ -283,6 +283,7 @@ final class ResolveProjectTests: XCTestCase {
     let fixture = """
     existing=false; studio=true; currentName=nil; imports=0; syncs=0; settings=0; presets=0; rushs=0; zoom=0
     local items={}
+    local modelMedia={}
     local function item(path)
       return {GetClipProperty=function(self,k) if k=='File Path' then return path else return '' end end,
               SetClipProperty=function(self,k,v) assert(k=='Input Sizing Preset' and v=='mlv2Resolve 1x3'); return true end}
@@ -300,6 +301,7 @@ final class ResolveProjectTests: XCTestCase {
       ImportTimelineFromFile=function(self,path,options)
         if path:match('resolve%-clip%-gyro.drt$') then
           return {GetItemListInTrack=function() return {{
+            GetMediaPoolItem=function() return modelMedia end,
             GetNodeGraph=function() return {GetNumNodes=function() return 1 end,GetToolsInNode=function() return {'OFX: Gyroflow(Niyien)'} end} end,
             CopyGrades=function(self,targets) gyroCopied=(gyroCopied or 0)+#targets; for _,t in ipairs(targets) do t.gyro=true end; return true end
           }} end}
@@ -310,6 +312,7 @@ final class ResolveProjectTests: XCTestCase {
       end,
       CreateEmptyTimeline=function(self,name) assert(name=='__mlv2Resolve_format_anchor'); return {} end,
       DeleteTimelines=function() modelRemoved=true; return true end,
+      DeleteClips=function(self,clips) assert(#clips==1 and clips[1]==modelMedia); modelMediaRemoved=true; return true end,
       AppendToTimeline=function(self,clips) return {{
         GetNodeGraph=function(self) return {GetNumNodes=function() return 1 end,GetToolsInNode=function() return self.gyro and {'OFX: Gyroflow(Niyien)'} or {} end} end,
         SetProperty=function(self,k,v) zoom=v; return true end}} end}
@@ -332,6 +335,17 @@ final class ResolveProjectTests: XCTestCase {
 }
 
 extension ResolveProjectTests {
+    func testModelMediaIsRemovedEvenWhenResolveImportsItAtRoot() async throws {
+        try XCTSkipUnless(ResolveDesqueeze.fuscriptURL() != nil)
+        let out = try await ResolveDesqueeze.fuscriptRunner()(fixture + "\n" + RP.script(shoots:[.init(name:"20261025",media:[clip("a")])]) + "\nassert(modelMediaRemoved); print('MODEL_MEDIA_REMOVED')")
+        XCTAssertTrue(out.contains("MODEL_MEDIA_REMOVED"),out)
+    }
+    func testCadenceWarningExplainsSourceAndProjectRates() {
+        let script = RP.script(shoots:[.init(name:"Film",media:[clip("a",fps:24),clip("b"),clip("c")])])
+        XCTAssertTrue(script.contains("24 fps"))
+        XCTAssertTrue(script.contains("25 fps"))
+        XCTAssertFalse(script.contains("a (fps)"))
+    }
     func testGyroflowNodeIsCopiedToEveryCreatedTimelineClipAndModelRemoved() async throws {
         try XCTSkipUnless(ResolveDesqueeze.fuscriptURL() != nil)
         let output = try await ResolveDesqueeze.fuscriptRunner()(fixture + "\n" + RP.script(shoots:[.init(name:"20261025",media:[clip("a"),clip("b")])]) + "\nassert(gyroCopied==2 and modelRemoved); print('GYROFLOW_VERIFIED')")

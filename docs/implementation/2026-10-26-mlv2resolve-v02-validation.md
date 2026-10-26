@@ -1,6 +1,6 @@
 # mlv2Resolve 0.2 — validation des correctifs
 
-- 260 tests Swift, aucun échec ; 9 tests ignorés faute de rushs/fixtures de référence.
+- 262 tests Swift, aucun échec ; 9 tests ignorés faute de rushs/fixtures de référence.
 - Application Release arm64, macOS 14 minimum, SDK 26.2 ; icône fournie avec coins transparents.
 - Revue indépendante du correctif : aucun défaut matériel confirmé. Les deux vérifications complémentaires demandées ont été effectuées ci-dessous.
 
@@ -37,3 +37,7 @@ Le plugin NiYien doit être installé ; son absence est signalée. Une timeline 
 Les nouveaux réglages concernent les créations de projets ; ouvrir un projet lié ne modifie pas son contenu. Resolve Free n’est pas installé ici : son script de menu et la conservation de l’action sélectionnée sont couverts par les tests. Les essais synthétiques ne constituent pas une validation de stabilisation ou de décodage sur tous les modes caméra. Les ressources sont validées sur Resolve 21.1.1 ; une version incompatible produit une erreur.
 
 La release publique v0.2 n’est pas publiée automatiquement.
+
+## Nettoyage du média de modèle
+
+Resolve ignore parfois `importIntoSubFolderName` pour le DRT Gyroflow et importe `TEST_[000000-000002].dng` à la racine. Le script conserve désormais l’objet MediaPool exact retourné par le clip modèle et le supprime après copie du grade et suppression de la timeline temporaire. Aucun nettoyage par nom n’est utilisé. Une vérification récursive réelle de tout le Media Pool a confirmé `MODEL_POOL_CLEANUP_INTEGRATION_OK`. Les messages de cadence affichent maintenant les valeurs source et projet, plutôt que le suffixe ambigu `(fps)`.

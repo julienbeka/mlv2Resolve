@@ -150,7 +150,12 @@ public enum ResolveProject {
             for c in shoot.media {
                 lua += "{name=\(quote(c.name)),dir=\(quote(c.directory)),nfd=\(quote(c.directory.decomposedStringWithCanonicalMapping)),path=\(quote(c.pattern)),first=\(c.first),last=\(c.last),wav=\(c.wav.map(quote) ?? "nil"),factor=\(c.factor),width=\(c.width),height=\(c.height),zoom=\(uhdZoom(c))},\n"
             }
-            lua += "},warnings={\((shoot.warnings + f.differentFPS.map { $0 + " (fps)" }).map(quote).joined(separator: ","))}},\n"
+            let cadenceWarnings = shoot.media.filter { abs($0.fps - f.fps) > 0.001 }.map { clip in
+                let source = String(format: "%g", locale: Locale(identifier: "en_US_POSIX"), clip.fps)
+                let target = String(format: "%g", locale: Locale(identifier: "en_US_POSIX"), f.fps)
+                return clip.name + text(": source ", " : source ") + source + " fps" + text("; project ", " ; projet ") + target + " fps. " + text("The clip frame rate differs from the project.", "La cadence du plan diffère de celle du projet.")
+            }
+            lua += "},warnings={\((shoot.warnings + cadenceWarnings).map(quote).joined(separator: ","))}},\n"
         }
         lua += "}\nlocal APPROVED = \(approvedCurrent.map(quote) ?? "nil")\nlocal MENU = \(menu)\n"
         lua += "local TEXT = {switch=\(quote(text("Switch Resolve project?", "Changer de projet Resolve ?"))),cancel=\(quote(text("Cancel", "Annuler"))),open=\(quote(text("Open", "Ouvrir"))),guide=\(quote(guide)),done=\(quote(text("Project preparation finished. See the console for details.", "Préparation terminée. Consultez la console pour le détail.")))}\n"

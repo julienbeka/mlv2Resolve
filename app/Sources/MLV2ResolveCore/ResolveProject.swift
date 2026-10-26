@@ -146,7 +146,10 @@ public enum ResolveProject {
         var lua = "local SHOOTS = {\n"
         for shoot in shoots {
             let f = format(shoot.media, timelineSize: timelineSize, frameRate: frameRate) ?? Format(width: 0, height: 0, fps: 25, differentFPS: [])
-            lua += "{name=\(quote(shoot.name)),source=\(quote(shoot.source)),sources={\(shoot.sources.map(quote).joined(separator: ","))},width=\(f.width),height=\(f.height),fps=\(f.fps),clips={\n"
+            let template: URL
+            do { template = try ResolveProjectTemplate.make(playbackFrameRate: f.fps) }
+            catch { return "print(" + quote("ERROR " + error.localizedDescription) + ")\n" }
+            lua += "{name=\(quote(shoot.name)),source=\(quote(shoot.source)),sources={\(shoot.sources.map(quote).joined(separator: ","))},template=\(quote(template.path)),width=\(f.width),height=\(f.height),fps=\(f.fps),clips={\n"
             for c in shoot.media {
                 lua += "{name=\(quote(c.name)),dir=\(quote(c.directory)),nfd=\(quote(c.directory.decomposedStringWithCanonicalMapping)),path=\(quote(c.pattern)),first=\(c.first),last=\(c.last),wav=\(c.wav.map(quote) ?? "nil"),factor=\(c.factor),width=\(c.width),height=\(c.height),zoom=\(uhdZoom(c))},\n"
             }
@@ -159,7 +162,7 @@ public enum ResolveProject {
         }
         lua += "}\nlocal APPROVED = \(approvedCurrent.map(quote) ?? "nil")\nlocal MENU = \(menu)\n"
         lua += "local TEXT = {switch=\(quote(text("Switch Resolve project?", "Changer de projet Resolve ?"))),cancel=\(quote(text("Cancel", "Annuler"))),open=\(quote(text("Open", "Ouvrir"))),guide=\(quote(guide)),done=\(quote(text("Project preparation finished. See the console for details.", "Préparation terminée. Consultez la console pour le détail.")))}\n"
-        lua += "local PROJECT_TEMPLATE = \(quote(projectTemplateURL.path))\nlocal TIMELINE_TEMPLATE = \(quote(timelineTemplateURL.path))\nlocal GYRO_TEMPLATE = \(quote(gyroTemplateURL.path))\nlocal INCLUDE_ALL_SHOTS = \(includeAllShots)\nlocal TIMELINE_NAME = \(quote(timelineName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "All shots" : timelineName.trimmingCharacters(in: .whitespacesAndNewlines)))\nlocal CREATE_ONLY = \(createOnly)\nlocal RECEIPTS = \(receiptsURL.map { quote($0.path) } ?? "nil")\n"
+        lua += "local TIMELINE_TEMPLATE = \(quote(timelineTemplateURL.path))\nlocal GYRO_TEMPLATE = \(quote(gyroTemplateURL.path))\nlocal INCLUDE_ALL_SHOTS = \(includeAllShots)\nlocal TIMELINE_NAME = \(quote(timelineName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "All shots" : timelineName.trimmingCharacters(in: .whitespacesAndNewlines)))\nlocal CREATE_ONLY = \(createOnly)\nlocal RECEIPTS = \(receiptsURL.map { quote($0.path) } ?? "nil")\n"
         let url = Bundle.module.url(forResource: "resolve-project", withExtension: "lua")!
         return lua + (try! String(contentsOf: url, encoding: .utf8))
     }

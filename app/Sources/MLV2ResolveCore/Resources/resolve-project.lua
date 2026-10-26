@@ -53,6 +53,7 @@ local function emptyStartupProject(project,name)
   end)
   return checked and empty==true
 end
+local cleanupPending=nil
 local ok,err=pcall(function()
   for _,shoot in ipairs(SHOOTS) do
     if #shoot.clips==0 then
@@ -84,7 +85,7 @@ local ok,err=pcall(function()
       for _,name in ipairs(pm:GetProjectListInCurrentFolder() or {}) do if name==shoot.name then exists=true end end
       if exists then project=pm:LoadProject(shoot.name); created=false
       else
-        if not pm:ImportProject(PROJECT_TEMPLATE,shoot.name) then error('Could not import bundled project model: ' .. shoot.name) end
+        if not pm:ImportProject(shoot.template,shoot.name) then error('Could not import bundled project model: ' .. shoot.name) end
         project=pm:LoadProject(shoot.name); created=true
       end
     end
@@ -116,6 +117,31 @@ local ok,err=pcall(function()
       end
       return false
     end
+    -- Capture only the temporary objects created by this action. Also runs on setup errors.
+    cleanupPending=function()
+      if rushs then project:SetCurrentTimeline(rushs) end
+      if anchor then
+        if not pool:DeleteTimelines({anchor}) then warn('Could not remove temporary format anchor') end
+        anchor=nil
+      end
+      if gyroTemplate then
+        if not pool:DeleteTimelines({gyroTemplate}) then warn('Could not remove temporary Gyroflow model timeline') end
+        gyroTemplate=nil
+      end
+      -- Resolve can ignore the requested bin. Remove the exact imported media object at root too.
+      if gyroMedia then
+        if not pool:DeleteClips({gyroMedia}) then warn('Could not remove temporary Gyroflow model media') end
+        gyroMedia=nil
+      end
+      if created then
+        for _,folder in ipairs(root:GetSubFolderList() or {}) do
+          if folder:GetName()==modelFolderName then
+            pool:SetCurrentFolder(root)
+            if not pool:DeleteFolders({folder}) then warn('Could not remove temporary Gyroflow model bin') end
+          end
+        end
+      end
+    end
     -- Existing projects receive media only. Never create or modify a timeline on a later run.
     if created then
       -- An existing empty timeline anchors the chosen project cadence during DRT imports.
@@ -133,6 +159,7 @@ local ok,err=pcall(function()
       rushs=pool:ImportTimelineFromFile(TIMELINE_TEMPLATE,{timelineName=TIMELINE_NAME})
       if not rushs or not project:SetCurrentTimeline(rushs) then error('Could not open the bundled project CST timeline. This Resolve version may not support it.') end
       if not pool:DeleteTimelines({anchor}) then error('Could not remove format anchor') end
+      anchor=nil
       if not rushs:SetName(TIMELINE_NAME) then error('Could not name timeline: ' .. TIMELINE_NAME) end
       local graph=rushs:GetNodeGraph()
       if not graph or graph:GetNumNodes()~=2 or not graph:SetNodeEnabled(1,true) or not graph:SetNodeEnabled(2,false) then
@@ -143,7 +170,7 @@ local ok,err=pcall(function()
         {'colorScienceMode','davinciYRGB'}, {'separateColorSpaceAndGamma','1'},
         {'colorSpaceTimeline','DaVinci WG'}, {'colorSpaceTimelineGamma','DaVinci Intermediate'},
         {'colorSpaceOutput','DaVinci WG'}, {'colorSpaceOutputGamma','DaVinci Intermediate'},
-        {'timelineFrameRate',tostring(shoot.fps)}, {'timelinePlaybackFrameRate',tostring(shoot.fps)},
+        {'timelineFrameRate',tostring(shoot.fps)},
         {'timelineInputResMismatchBehavior','scaleToFit'},
         {'timelineResolutionWidth',tostring(studio and shoot.width or math.min(shoot.width,3840))},
         {'timelineResolutionHeight',tostring(studio and shoot.height or math.min(shoot.height,2160))}}
@@ -155,6 +182,9 @@ local ok,err=pcall(function()
           if not project:SetSetting(setting[1],setting[2]) then error(shoot.name .. ': setting refused ' .. setting[1]) end
         end
       end
+      -- Playback rate is read-only in the API and is prepared in the project model.
+      local playback=tonumber(project:GetSetting('timelinePlaybackFrameRate'))
+      if playback and math.abs(playback-shoot.fps)>0.001 then error('Project playback frame rate does not match the prepared model') end
       -- The project owns format, cadence and colour. Imported models must inherit it.
       if not rushs:SetSetting('useCustomSettings','0') then error('Could not inherit project settings') end
     end
@@ -215,19 +245,8 @@ local ok,err=pcall(function()
         if not success then failed=failed+1; warn(c.name .. ': ' .. tostring(reason)) end
       end
     end
-    if gyroTemplate then
-      project:SetCurrentTimeline(rushs)
-      if not pool:DeleteTimelines({gyroTemplate}) then warn('Could not remove temporary Gyroflow model timeline') end
-      -- DRT may ignore importIntoSubFolderName and place the placeholder at root.
-      -- Delete the exact imported object, never a user's media with a matching name.
-      if gyroMedia and not pool:DeleteClips({gyroMedia}) then warn('Could not remove temporary Gyroflow model media') end
-      for _,folder in ipairs(root:GetSubFolderList() or {}) do
-        if folder:GetName()==modelFolderName then
-          pool:SetCurrentFolder(root)
-          if not pool:DeleteFolders({folder}) then warn('Could not remove temporary Gyroflow model bin') end
-        end
-      end
-    end
+    cleanupPending()
+    cleanupPending=nil
     if not pm:SaveProject() then error(shoot.name .. ': project save refused') end
     if CREATE_ONLY then
       local db=pm:GetCurrentDatabase()
@@ -256,5 +275,12 @@ local ok,err=pcall(function()
     dialog(message,false)
   end
 end)
-if not ok then print('ERROR ' .. clean(err)); if MENU then dialog(tostring(err),false) end end
+if not ok then
+  if cleanupPending then
+    local cleaned,reason=pcall(cleanupPending)
+    if not cleaned then warn('Temporary model cleanup failed: ' .. tostring(reason)) end
+  end
+  print('ERROR ' .. clean(err))
+  if MENU then dialog(tostring(err),false) end
+end
 end

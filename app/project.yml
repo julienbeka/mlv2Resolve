@@ -2,6 +2,9 @@ name: mlv2Resolve
 options:
   bundleIdPrefix: net.mlv2Resolve
   developmentLanguage: en
+  fileTypes:
+    icon:
+      file: true
   deploymentTarget:
     macOS: "14.0"
 packages:

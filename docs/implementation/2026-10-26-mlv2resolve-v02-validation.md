@@ -1,6 +1,6 @@
 # mlv2Resolve 0.2 — validation des correctifs
 
-- 262 tests Swift, aucun échec ; 9 tests ignorés faute de rushs/fixtures de référence.
+- 266 tests Swift, aucun échec ; 9 tests ignorés faute de rushs/fixtures de référence.
 - Application Release arm64, macOS 14 minimum, SDK 26.2 ; icône fournie avec coins transparents.
 - Revue indépendante du correctif : aucun défaut matériel confirmé. Les deux vérifications complémentaires demandées ont été effectuées ci-dessous.
 
@@ -48,4 +48,16 @@ Resolve ignore parfois `importIntoSubFolderName` pour le DRT Gyroflow et importe
 
 ## Dock et cadence de lecture
 
-La build 102 utilise `LSUIElement=false` pour être une application standard visible dans le Dock et Commande-Tab ; le menu SwiftUI MenuBarExtra est conservé. Le champ distinct `timelinePlaybackFrameRate` est maintenant réglé explicitement sur la cadence choisie pour le projet. Le test de régression vérifie 29,97 i/s pour timeline et lecture, puis la suite complète passe : 262 tests, 9 ignorés, aucun échec. Resolve n’était plus joignable lors de la tentative de nouveau contrôle réel de ce dernier champ ; aucun projet n’a été modifié par cette tentative.
+L’application utilise `LSUIElement=false` pour être visible dans le Dock et Commande-Tab ; MenuBarExtra reste disponible.
+
+Le SDK Resolve 21.1.1 marque `timelinePlaybackFrameRate` en lecture seule. Le régler via SetSetting interrompt la création : cet appel est supprimé. Le modèle DRP vide est préparé localement avant import pour contenir la cadence de lecture choisie. Le paramètre float32 (champ protobuf 248) a été identifié en comparant deux exports du même projet de diagnostic, avant/après la seule modification manuelle de Playback frame rate. Les autres paramètres sont conservés.
+
+Le modèle utilise un bloc Zstandard brut standard, permettant de modifier ce champ sans codec tiers. La préparation emploie Foundation et les outils macOS ditto/unzip, sans Python requis chez l’utilisateur. Les modèles sont conservés dans `Application Support/mlv2Resolve/Resolve Models`, avec une empreinte du modèle et de la cadence ; les scripts Workspace restent donc utilisables après redémarrage ou nettoyage des fichiers temporaires.
+
+Vérification réelle : import des modèles préparés à 25 et 29,97 i/s, puis imports CST/Gyroflow, avec lecture identique avant et après. Une création complète à 29,97 i/s confirme import de trois plans, cadences de projet et de lecture, CST, Gyroflow et absence de TEST dans le Media Pool. Un refus de réglage volontaire dans un projet distinct confirme également le nettoyage des modèles, médias et timelines temporaires (`FAILURE_CLEANUP_INTEGRATION_OK`). Les autres projets utilisateur restent intacts.
+
+Suite complète : 266 tests, 9 ignorés faute de fixtures, aucun échec. Revue indépendante : un défaut de durée de vie du cache temporaire corrigé en stockant les modèles dans les données de l’application.
+
+## Icône Tahoe
+
+Un fichier Icon Composer natif `AppIcon.icon` utilise le dessin fourni, normalisé en 1024 × 1024, sans la marge additionnelle de 100 pixels et sans nouvelle découpe des coins. La compilation Apple produit les couches natives dans Assets.car ainsi que les variantes pour macOS 14 et 15. Les aperçus par défaut, sombre et de repli conservent le contour multicolore sans plaque grise extérieure. L’app conserve son nom et son identité de bundle pour les préférences existantes.

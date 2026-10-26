@@ -22,7 +22,7 @@ To build from source, see [Building](#building).
 
 ## Usage
 
-1. Click the menu-bar icon (or double-click the app to open the mlv2Resolve window if the icon is hidden behind the notch), then **Choose Folder…**. The folder can be a single shoot or a parent folder containing several shoots.
+1. The main window opens when the app launches. Click the menu-bar icon (or double-click the app to open the mlv2Resolve window if the icon is hidden behind the notch), then **Choose Folder…**. The folder can be a single shoot or a parent folder containing several shoots.
 2. Click a shoot to mount it. The DNGs appear in `~/MLV Mounts/<shoot>` (**Show DNGs in Finder**). Use **Create Project** to prepare the project and import the clips, or import them manually from that folder.
 3. Mounted shoots are remounted automatically at launch and when their disk is plugged back in, always at the same path, so Resolve finds its clips again.
 4. **Dual ISO**: use **Smooth Editing** while editing and **Grading Quality** before grading. The switch is applied live; in Resolve, select the clips and right-click → Refresh.

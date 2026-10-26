@@ -169,9 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private var mainWindow: NSWindow?
-    private static let mainWindowShownKey = "mainWindowShownOnce"
-
-    /// Opens (or brings back) the main window; marks the first-launch display as done.
+    /// Opens (or brings back) the main window on every launch or reopen.
     func showMainWindow() {
         if mainWindow == nil {
             let hosting = NSHostingController(rootView: MainWindowView(state: AppCore.shared.state))
@@ -189,14 +187,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         NSApp.activate(ignoringOtherApps: true)
         mainWindow?.makeKeyAndOrderFront(nil)
-        UserDefaults.standard.set(true, forKey: Self.mainWindowShownKey)
-    }
-
-    /// First launch ever: show the main window (deferred while the onboarding window is up).
-    private func showMainWindowIfFirstLaunch() {
-        guard !UserDefaults.standard.bool(forKey: Self.mainWindowShownKey) else { return }
-        guard window == nil else { return } // onboarding showing: becomeReady() shows it once FUSE-T is ready; closing onboarding alone does not
-        showMainWindow()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -235,7 +225,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         #endif
         guard model.state != .ready else {
             AppCore.shared.start()
-            showMainWindowIfFirstLaunch()
+            showMainWindow()
             return
         }
         // FUSE-T missing: the menu shows the alert icon and « Installer FUSE-T… »; closing the
@@ -289,7 +279,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         AppCore.shared.state.needsFuseT = false
         NSLog("mlv2Resolve: FUSE-T ready, starting")
         AppCore.shared.start()
-        showMainWindowIfFirstLaunch()
+        showMainWindow()
     }
 
     /// Unmount asynchronously (terminateLater) so the main thread is never

@@ -428,14 +428,14 @@ def check_sidecars(mnt, cdir, dngs, src, name, hashes, outside, extra_names):
     # "._<name>" next to the sidecar; that companion is accepted, hidden, and removed with the file
     xsrc = os.path.join(os.path.dirname(src), os.path.basename(src) + "_xattr_src.json")
     write_file(xsrc, b'{"x": 1}')
-    subprocess.run(["xattr", "-w", "com.mlv2dng.test", "1", xsrc], check=True)
+    subprocess.run(["xattr", "-w", "com.mlv2Resolve.test", "1", xsrc], check=True)
     copied = name + "_copied.json"
     r = subprocess.run(["cp", "-p", xsrc, os.path.join(cdir, copied)], capture_output=True, text=True)
     os.unlink(xsrc)
     expect(r.returncode == 0, "cp -p with an xattr into the clip folder (%s)" % (r.stderr.strip() or "rc 0"))
     expect(read_file(os.path.join(src, copied)) == b'{"x": 1}' and copied in listing(cdir), copied + " stored + listed")
     # best effort only: the FUSE-T NFS client caches attributes, so a read-back is informative, not asserted
-    xr = subprocess.run(["xattr", "-p", "com.mlv2dng.test", os.path.join(cdir, copied)], capture_output=True, text=True)
+    xr = subprocess.run(["xattr", "-p", "com.mlv2Resolve.test", os.path.join(cdir, copied)], capture_output=True, text=True)
     print("sidecar: xattr read back through the mount (info): %s" % (xr.stdout.strip() or xr.stderr.strip()))
     expect(not any(n.startswith("._") for n in listing(cdir) | listing(mnt)), "AppleDouble files hidden")
     try_op("create ._ for a DNG", lambda: write_file(os.path.join(cdir, "._" + dngs[0]), b"x"), failures)

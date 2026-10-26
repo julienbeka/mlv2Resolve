@@ -1,5 +1,5 @@
 /*
- * mlv2dng sidecar files: real files written through the mount (e.g. a .gyroflow saved by a gyro
+ * mlv2Resolve sidecar files: real files written through the mount (e.g. a .gyroflow saved by a gyro
  * tool into a clip folder) are stored in the MLV's own folder, next to the .MLV.
  *
  * A clip folder <mount>/<clipdir>/ (clip <base>.MLV) lists, besides its virtual DNGs/WAV, every

@@ -1,18 +1,20 @@
-# mlv2dng
+# mlv2Resolve
+
+<img src="artwork/mlv2Resolve-icon.png" width="128" alt="mlv2Resolve">
 
 *[Version française](README.fr.md)*
 
-Edit Magic Lantern MLV footage directly in DaVinci Resolve: mlv2dng mounts your clips as CinemaDNG sequences on the fly — no conversion, no terminal.
+Edit Magic Lantern MLV footage directly in DaVinci Resolve: mlv2Resolve mounts your clips as CinemaDNG sequences on the fly — no conversion, no terminal.
 
-mlv2dng is a macOS menu-bar app that mounts Magic Lantern (MLV) shoots as virtual CinemaDNG sequences so you can edit them in DaVinci Resolve without converting or copying anything. It drives the MLVFS engine on FUSE-T (FUSE without a kernel extension), on Apple Silicon.
+mlv2Resolve is a macOS menu-bar app that mounts Magic Lantern (MLV) shoots as virtual CinemaDNG sequences so you can edit them in DaVinci Resolve without converting or copying anything. It drives the MLVFS engine on FUSE-T (FUSE without a kernel extension), on Apple Silicon.
 
 The interface follows the macOS language (English by default, French available). You can also pick the language in **Settings… → Language**.
 
 ## Download
 
-Download the latest `mlv2dng-<version>-macos-arm64.zip` from the [Releases](https://github.com/julienbeka/mlv2dng/releases) page (Apple Silicon Mac, macOS 14 or later). Check it against the attached `.sha256` file: `shasum -a 256 -c <file>.sha256`.
+Download the latest `mlv2Resolve-<version>-macos-arm64.zip` from the [Releases](https://github.com/julienbeka/mlv2Resolve/releases) page (Apple Silicon Mac, macOS 14 or later). Check it against the attached `.sha256` file: `shasum -a 256 -c <file>.sha256`.
 
-1. Unzip it and move `mlv2dng.app` to `/Applications`.
+1. Unzip it and move `mlv2Resolve.app` to `/Applications`.
 2. The app is not notarized yet: on first launch, macOS blocks it. Open System Settings > Privacy & Security and click **Open Anyway**.
 3. If FUSE-T is missing, the app offers to download and install it on first launch (your administrator password is asked once), then carries on by itself.
 
@@ -20,45 +22,39 @@ To build from source, see [Building](#building).
 
 ## Usage
 
-1. Click the menu-bar icon (or double-click the app to open the mlv2dng window if the icon is hidden behind the notch), then **Choose Folder…**. The folder can be a single shoot or a parent folder containing several shoots.
-2. Click a shoot to mount it. The DNGs appear in `~/MLV Mounts/<shoot>` (**Show DNGs in Finder**). Use **Open Resolve** to prepare the project and import the clips, or import them manually from that folder.
+1. Click the menu-bar icon (or double-click the app to open the mlv2Resolve window if the icon is hidden behind the notch), then **Choose Folder…**. The folder can be a single shoot or a parent folder containing several shoots.
+2. Click a shoot to mount it. The DNGs appear in `~/MLV Mounts/<shoot>` (**Show DNGs in Finder**). Use **Create Project** to prepare the project and import the clips, or import them manually from that folder.
 3. Mounted shoots are remounted automatically at launch and when their disk is plugged back in, always at the same path, so Resolve finds its clips again.
 4. **Dual ISO**: use **Smooth Editing** while editing and **Grading Quality** before grading. The switch is applied live; in Resolve, select the clips and right-click → Refresh.
-5. Anamorphic footage: **Open Resolve** applies the matching Input Sizing presets when available. **Desqueeze in Resolve** can also apply them to clips already imported. If a preset cannot be installed, the app explains how to save it manually (for 1x3: Color → Sizing → Input Sizing → **Width = 3**, **Height = 1**, with fit adjustments when needed).
+5. Anamorphic footage: **Create Project** applies the matching Input Sizing presets when available. **Desqueeze in Resolve** can also apply them to clips already imported. If a preset cannot be installed, the app explains how to save it manually (for 1x3: Color → Sizing → Input Sizing → **Width = 3**, **Height = 1**, with fit adjustments when needed).
 
-### Prepare a Resolve project with one click
+### Prepare a Resolve project
 
-**Open Resolve** creates or opens a project named after each mounted shoot and imports its CinemaDNG sequences
-with their matching WAV audio, synchronized by timecode. Sidecar files and GIF previews are excluded.
+Four sections organize the window: **Mount**, **Gyro Sync**, **Resolve**, and **Settings & Tips**. Settings opens in a left drawer and includes Dual ISO with explanations of both modes.
 
-- New projects use your saved **mlv2dng** project preset. The most common desqueezed resolution and frame rate
-  determine the project format; tied resolution counts use the larger image. Five 4800 × 2008 clips and two
-  5208 × 2178 clips therefore select **4800 × 2008**.
-- Opening the project again imports only missing clips and preserves its existing settings and timelines.
-- In **Resolve Studio**, preparation runs directly from the app. In the **free edition**, use
-  **Workspace → Scripts → mlv2dng** inside Resolve; a new project gets a UHD **Rushs** timeline with fitted clips.
-- If gyro synchronization is still running, choose **Wait** or **Open Anyway**. Progress appears in the window
-  and menu bar.
-- An empty, unsaved **Untitled Project** at startup is skipped without requiring a save. Switching away from
-  another project still asks for confirmation and saves it first.
+- **Create Project** creates a separate project per mounted shoot, imports CinemaDNG with matching WAV audio, and syncs audio by timecode. **Open Project** opens a linked project without changing media or timelines. **Open Resolve** only launches the app. **Desqueeze in Resolve** stays separate.
+- **Settings → Resolve** offers Automatic (majority desqueezed resolution), UHD or HD. HD/UHD show the entire image, with bars if needed. Frame rate follows the majority of the footage by default; a manual choice overrides it for new timelines.
+- **Add all shots to timeline** is enabled by default. The name **All shots** is editable. Disable the option for an empty timeline with the CST nodes prepared.
+- Working space: **DaVinci Wide Gamut / Intermediate**. Timeline CST 01 is enabled: **P3-D60 / Linear → DWG / Intermediate**. CST 02 is disabled: **DWG / Intermediate → Rec.709 / Rec.709-A**. Enable the second only before a Rec.709 export. The model ships with the app, so other users need no CST setup. Import tested in Resolve **21.1.1**; incompatible versions produce an explicit error.
+- **Clear Project Links** removes cached associations without deleting Resolve projects or footage.
+- **Resolve Studio**: enable **External scripting using: Local** to run actions from the app. **Resolve Free**: choose an action in the app, then run **Workspace → Scripts → mlv2Resolve** in Resolve. New project links are collected when returning to the app.
 
-Anamorphic sizing presets are installed with a backup in the supported default local project library while
-Resolve is closed. Existing custom sizing choices are preserved; other libraries receive manual instructions.
+Switching projects saves existing work after confirmation. Opening a linked project preserves grades and settings. Existing mlv2dng Camera Raw project presets remain recognized; a project preset named mlv2Resolve can store your RAW preferences too.
 
 ### Gyro sync (SenseFlow A1)
 
-mlv2dng syncs the gyro of a SenseFlow A1 with your clips by itself and writes a Gyroflow project for each clip, so
+mlv2Resolve syncs the gyro of a SenseFlow A1 with your clips by itself and writes a Gyroflow project for each clip, so
 Resolve's Gyroflow plugin can stabilize the DNGs. No NiYien Tool and no reference clips are needed.
 
 1. Copy the A1 logs (`*_mix.bin`) anywhere in the folder chosen with **Choose Folder…** (the shoot folder, a
    subfolder, or a parent folder shared by several shoots). Logs and MLV files are never modified.
 2. Declare your lenses once in **Settings… → Lenses**: a name and the real focal length in mm (the one Magic
-   Lantern writes in the MLV is not reliable). mlv2dng computes a distortion-free profile from the focal length.
-3. In the mlv2dng window, each mounted shoot gets a default **Lens** and a **Sensor position** (where the A1 sits
+   Lantern writes in the MLV is not reliable). mlv2Resolve computes a distortion-free profile from the focal length.
+3. In the mlv2Resolve window, each mounted shoot gets a default **Lens** and a **Sensor position** (where the A1 sits
    on the camera; **Top** by default, changeable in **Settings… → Gyro Sync**, which applies to clips synced
    afterwards). Each clip's menu can pick another lens or position for that clip only. Changing a shoot's lens or
-   position rewrites the `.gyroflow` files mlv2dng wrote for its clips that have no lens or position of their own
-   (the previous files are backed up); files mlv2dng did not write are never touched.
+   position rewrites the `.gyroflow` files mlv2Resolve wrote for its clips that have no lens or position of their own
+   (the previous files are backed up); files mlv2Resolve did not write are never touched.
 4. Clips are synced in the background, one at a time per shoot. Each clip shows its state: **Synced (R² 0.78)**
    (R² = how well the clip's motion matches the gyro, 1 = perfect), **No log covers this clip**, **Not enough
    camera motion**, **Uncertain match** (nothing is written rather than a doubtful sync), **Syncing…**,
@@ -67,18 +63,18 @@ Resolve's Gyroflow plugin can stabilize the DNGs. No NiYien Tool and no referenc
    in the clip's folder of the mount. In Resolve: Gyroflow plugin → **Load for current file**.
 
 Short lenses (e.g. 12 mm) have too much distortion for a computed profile: calibrate the lens in Gyroflow, then
-import its `.json` in **Settings… → Lenses → Edit… → Import Calibrated Profile…** (mlv2dng keeps a copy in
-`~/Library/Application Support/mlv2dng/lens-profiles`). A calibrated profile is used for the clips whose format
+import its `.json` in **Settings… → Lenses → Edit… → Import Calibrated Profile…** (mlv2Resolve keeps a copy in
+`~/Library/Application Support/mlv2Resolve/lens-profiles`). A calibrated profile is used for the clips whose format
 matches its dimensions; other clips keep the computed profile. The clip's state says which one was used
 (« calibrated profile » / « computed profile »).
 
-An existing `.gyroflow` that mlv2dng did not write (e.g. made with NiYien Tool) is kept. **Regenerate** on a
+An existing `.gyroflow` that mlv2Resolve did not write (e.g. made with NiYien Tool) is kept. **Regenerate** on a
 clip replaces it, as does changing that clip's lens or position; the replaced file is first copied to
-`~/Library/Application Support/mlv2dng/gyroflow-backups/<shoot>/`.
+`~/Library/Application Support/mlv2Resolve/gyroflow-backups/<shoot>/`.
 
 ### Rolling shutter matched to the EOS M recording mode
 
-For supported **Canon EOS M Crop Mood Slim** modes, mlv2dng derives the sensor readout time from the recorded
+For supported **Canon EOS M Crop Mood Slim** modes, mlv2Resolve derives the sensor readout time from the recorded
 size, frame rate and sensor sampling instead of applying one value to every clip. Both the lens profile and the
 Gyroflow stabilization settings receive the same value: **32.128 ms for 4.8K 4800 × 2008**, for example, and
 **35.3925 ms for 5.2K 5208 × 2178**.
@@ -91,7 +87,7 @@ header disagrees with the majority of clips of the same size. The values come fr
 For an unknown format, a valid readout time from an imported lens profile is kept; otherwise rolling shutter
 correction is disabled. Existing projects are preserved: choose **Regenerate** on a clip to apply the new values
 (with a backup), then **Load for current file** in Resolve's Gyroflow plugin. Add the plugin to a Color node
-manually; mlv2dng prepares its project file.
+manually; mlv2Resolve prepares its project file.
 
 ### Files saved into a clip folder (sidecars)
 
@@ -126,7 +122,7 @@ to the clip folder that created it.
 
 Requirements: Xcode (command-line tools), [XcodeGen](https://github.com/yonaskolb/XcodeGen) and FUSE-T (`brew install macos-fuse-t/homebrew-cask/fuse-t`).
 
-    scripts/build-app.sh       # builds build/mlv2dng.app (engine + app, ad-hoc signed)
+    scripts/build-app.sh       # builds build/mlv2Resolve.app (engine + app, ad-hoc signed)
     cd app && swift test       # core tests
 
 Engine only: `scripts/build-engine.sh` (writes `build/engine/mlvfs`).

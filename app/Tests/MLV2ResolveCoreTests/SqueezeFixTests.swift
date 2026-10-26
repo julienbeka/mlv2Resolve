@@ -1,0 +1,160 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+import XCTest
+@testable import MLV2ResolveCore
+
+final class SqueezeFixTests: XCTestCase {
+    var tmp: URL!
+    override func setUp() {
+        L10n.bundle = L10nTests.bundle("en")
+        tmp = FileManager.default.temporaryDirectory.appendingPathComponent("SqueezeFix-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+    }
+    override func tearDown() {
+        L10n.bundle = L10nTests.bundle("en")
+        try? FileManager.default.removeItem(at: tmp)
+    }
+
+    private func c(_ name: String, _ x: Int, _ y: Int, _ w: Int = 1600, _ h: Int = 2008)
+        -> (name: String, sampling: SqueezeFix.Sampling) { (name, (x, y, w, h)) }
+
+    /// Comparable form of the result (tuples are not Equatable).
+    private func fixes(_ clips: [(name: String, sampling: SqueezeFix.Sampling)]) -> [String: [Int]] {
+        SqueezeFix.corrections(for: clips).mapValues { [$0.x, $0.y] }
+    }
+
+    // MARK: Rule
+
+    func testMajorityCorrectsOddClip() {
+        let clips = [c("A.MLV", 3, 1), c("B.MLV", 3, 1), c("C.MLV", 1, 1), c("D.MLV", 3, 1), c("E.MLV", 3, 1),
+                     c("F.MLV", 3, 1)]
+        XCTAssertEqual(fixes(clips), ["C.MLV": [3, 1]])
+    }
+
+    func testNoMajorityNoFix() {
+        XCTAssertEqual(fixes([c("A.MLV", 3, 1), c("B.MLV", 3, 1), c("C.MLV", 1, 1), c("D.MLV", 1, 1)]), [:])
+        // 2 of 4 is not a strict majority even against two different minorities.
+        XCTAssertEqual(fixes([c("A.MLV", 3, 1), c("B.MLV", 3, 1), c("C.MLV", 1, 1), c("D.MLV", 3, 5)]), [:])
+    }
+
+    func testDifferentSizeNotTouched() {
+        let clips = [c("A.MLV", 3, 1), c("B.MLV", 3, 1), c("C.MLV", 3, 1),
+                     c("D.MLV", 1, 1, 1920, 1080)]  // other size: its own group of one
+        XCTAssertEqual(fixes(clips), [:])
+        // Each size is judged on its own.
+        let mixed = clips + [c("E.MLV", 1, 1), c("F.MLV", 1, 1, 1920, 1080), c("G.MLV", 1, 1, 1920, 1080)]
+        XCTAssertEqual(fixes(mixed), ["E.MLV": [3, 1]])
+    }
+
+    func testSmallGroupNotTouched() {
+        XCTAssertEqual(fixes([c("A.MLV", 3, 1), c("B.MLV", 1, 1)]), [:])
+        XCTAssertEqual(fixes([c("A.MLV", 3, 1)]), [:])
+        XCTAssertEqual(fixes([]), [:])
+    }
+
+    func testThreeClipsTwoAgainstOne() {
+        XCTAssertEqual(fixes([c("A.MLV", 1, 1), c("B.MLV", 3, 1), c("C.MLV", 3, 1)]), ["A.MLV": [3, 1]])
+    }
+
+    // MARK: Headers, engine option, shoot factor, message
+
+    private func writeClip(_ name: String, _ sampling: (UInt8, UInt8, UInt8, UInt8)?, size: (Int, Int)? = (1600, 2008)) throws -> Clip {
+        let url = tmp.appendingPathComponent(name)
+        let d = SyntheticMLV.data(sampling: sampling, size: size)
+        try d.write(to: url)
+        return Clip(name: (name as NSString).deletingPathExtension, files: [url], bytes: Int64(d.count))
+    }
+
+    private func shoot(_ clips: [Clip]) -> Shoot { Shoot(name: "S", folder: tmp, volumeName: "", clips: clips) }
+
+    func testSamplingReadsRAWCAndRAWI() throws {
+        let a = try writeClip("A.MLV", (1, 2, 1, 0))
+        let s = try XCTUnwrap(MLVHeader.sampling(of: a.files[0]))
+        XCTAssertEqual([s.x, s.y, s.width, s.height], [3, 1, 1600, 2008])
+        XCTAssertNil(MLVHeader.sampling(of: try writeClip("B.MLV", nil).files[0]), "no RAWC")
+        XCTAssertNil(MLVHeader.sampling(of: try writeClip("C.MLV", (1, 2, 1, 0), size: nil).files[0]), "no RAWI")
+        XCTAssertNil(MLVHeader.sampling(of: tmp.appendingPathComponent("missing.MLV")))
+    }
+
+    func testAnalyzeFixesEngineArgumentAndShootSqueeze() async throws {
+        // The odd clip comes first: the shoot factor must still be the majority's.
+        let clips = [try writeClip("M25-1745.MLV", (1, 0, 1, 0)), try writeClip("M25-1735.MLV", (1, 2, 1, 0)),
+                     try writeClip("M25-1744.MLV", (3, 0, 1, 0)), try writeClip("M25-1750.MLV", (1, 2, 1, 0)),
+                     try writeClip("M25-1799.MLV", nil)]  // no RAWC: never corrected, counts as 1x1
+        let a = await SqueezeFix.analyzeDetached(shoot(clips))
+        XCTAssertEqual(a.fixes, [SqueezeFix.Fix(name: "M25-1745.MLV", fromX: 1, fromY: 1, toX: 3, toY: 1)])
+        XCTAssertEqual(a.fixes.first?.squeeze, 3)
+        XCTAssertEqual(a.squeeze, 3)
+        XCTAssertEqual(a.squeezeByName, ["M25-1745.MLV": 3])
+        XCTAssertEqual(SqueezeFix.engineArgument(a.fixes), "--sampling-fix=M25-1745.MLV:3x1")
+        XCTAssertNil(SqueezeFix.engineArgument([]))
+        // No majority to correct (2 vs 1 at different sizes would be untouched); two 1x1 against one 1x3 of
+        // another size: the most common squeeze wins, not the first clip.
+        let few = [try writeClip("X1.MLV", (1, 2, 1, 0), size: (1920, 1080)), try writeClip("X2.MLV", (1, 0, 1, 0)),
+                   try writeClip("X3.MLV", (1, 0, 1, 0))]
+        let b = SqueezeFix.analyze(shoot(few))
+        XCTAssertEqual(b.fixes, [])
+        XCTAssertNil(b.squeeze)
+        XCTAssertEqual(SqueezeFix.analyze(shoot([])), .none)
+    }
+
+    func testUnsafeNamesAreNeverCorrected() throws {
+        let clips = [try writeClip("a,b.MLV", (1, 0, 1, 0)), try writeClip("c:d.MLV", (1, 0, 1, 0)),
+                     try writeClip("A.MLV", (1, 2, 1, 0)), try writeClip("B.MLV", (1, 2, 1, 0)),
+                     try writeClip("C.MLV", (1, 2, 1, 0)), try writeClip("D.MLV", (1, 2, 1, 0))]
+        let a = SqueezeFix.analyze(shoot(clips))
+        XCTAssertEqual(a.fixes, [], "excluded from engine arg, message and gyroflow alike")
+        XCTAssertNil(SqueezeFix.message(a.fixes))
+        XCTAssertEqual(a.squeezeByName, [:])
+        XCTAssertEqual(a.squeeze, 3, "they still vote")
+    }
+
+    func testRelativeName() {
+        let folder = URL(fileURLWithPath: "/Volumes/SSD/Day 1", isDirectory: true)
+        XCTAssertEqual(SqueezeFix.relativeName(of: folder.appendingPathComponent("M25-1745.MLV"), in: folder),
+                       "M25-1745.MLV")
+        XCTAssertEqual(SqueezeFix.relativeName(of: URL(fileURLWithPath: "/Volumes/SSD/Day 1/B/M1.MLV"), in: folder),
+                       "B/M1.MLV")
+        XCTAssertEqual(SqueezeFix.relativeName(of: URL(fileURLWithPath: "/Volumes/SSD/Day 10/M1.MLV"), in: folder),
+                       "M1.MLV", "outside the folder: file name")
+        XCTAssertEqual(SqueezeFix.Fix(name: "B/M1.MLV", fromX: 1, fromY: 1, toX: 3, toY: 1).clipName, "M1")
+    }
+
+    func testEngineArgumentSeveralAndUnsafeNames() {
+        let f = [SqueezeFix.Fix(name: "A.MLV", fromX: 1, fromY: 1, toX: 3, toY: 1),
+                 SqueezeFix.Fix(name: "a,b.MLV", fromX: 1, fromY: 1, toX: 3, toY: 1),
+                 SqueezeFix.Fix(name: "B.MLV", fromX: 3, fromY: 1, toX: 1, toY: 1)]
+        XCTAssertEqual(SqueezeFix.engineArgument(f), "--sampling-fix=A.MLV:3x1,B.MLV:1x1")
+    }
+
+    func testMessageEnglishAndFrench() {
+        let one = [SqueezeFix.Fix(name: "M25-1745.MLV", fromX: 1, fromY: 1, toX: 3, toY: 1)]
+        XCTAssertNil(SqueezeFix.message([]))
+        XCTAssertEqual(SqueezeFix.message(one), "M25-1745: header says 1x1, corrected to 1x3 like the other clips")
+        let two = one + [SqueezeFix.Fix(name: "M25-1800.MLV", fromX: 1, fromY: 1, toX: 3, toY: 1)]
+        XCTAssertEqual(SqueezeFix.message(two),
+                       "M25-1745, M25-1800: header says 1x1, corrected to 1x3 like the other clips")
+        L10n.bundle = L10nTests.bundle("fr")
+        XCTAssertEqual(SqueezeFix.message(one), "M25-1745 : l’en-tête indique 1x1, corrigé en 1x3 comme les autres plans")
+    }
+
+    /// Real shoot (read-only): `MLV2Resolve_SHOOT_20261025` = folder with M25-1735/1744/1745/1750/1752/1753.MLV,
+    /// all RAWI 1600x2008, RAWC 3x1 except M25-1745 (1x1). Keys are MLV paths relative to the shoot folder.
+    func testRealShoot20261025() throws {
+        guard let path = ProcessInfo.processInfo.environment["MLV2Resolve_SHOOT_20261025"], !path.isEmpty else {
+            throw XCTSkip("MLV2Resolve_SHOOT_20261025 not set")
+        }
+        let folder = URL(fileURLWithPath: path, isDirectory: true)
+        let names = try FileManager.default.contentsOfDirectory(atPath: folder.path)
+            .filter { $0.uppercased().hasSuffix(".MLV") }.sorted()
+        let clips = names.compactMap { n -> (name: String, sampling: SqueezeFix.Sampling)? in
+            MLVHeader.sampling(of: folder.appendingPathComponent(n)).map { (n, $0) }
+        }
+        XCTAssertEqual(clips.count, names.count, "every clip has RAWC and RAWI")
+        XCTAssertEqual(fixes(clips), ["M25-1745.MLV": [3, 1]])
+        let shoot = Shoot(name: "20261025", folder: folder, volumeName: "",
+                          clips: names.map { Clip(name: $0, files: [folder.appendingPathComponent($0)], bytes: 0) })
+        let a = SqueezeFix.analyze(shoot)
+        XCTAssertEqual(SqueezeFix.engineArgument(a.fixes), "--sampling-fix=M25-1745.MLV:3x1")
+        XCTAssertEqual(a.squeeze, 3)
+    }
+}

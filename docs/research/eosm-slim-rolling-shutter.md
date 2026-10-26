@@ -82,9 +82,9 @@ Le 3×3 3:2 annonce 1160 lignes dans l’interface, alors que Preview_V vaut 115
 - Modes et tailles annoncées : slim_1x1_resolve, slim_crop_expected_res.
 - Accessibilité des variantes : slim_crop_apply_3x3_from_ar, slim_crop_fps_mask.
 - Ne pas généraliser ces valeurs aux modes Canon natifs, à un autre firmware ou à un autre appareil.
-- Le relevé initial ne modifiait aucun réglage. Les valeurs sont désormais intégrées dans mlv2dng (voir ci-dessous).
+- Le relevé initial ne modifiait aucun réglage. Les valeurs sont désormais intégrées dans mlv2Resolve (voir ci-dessous).
 
-## Intégration dans mlv2dng — 0.1.17 (89)
+## Intégration dans mlv2Resolve — 0.1.17 (89)
 
 Les nouveaux projets Gyroflow et les projets explicitement régénérés utilisent ces valeurs automatiquement. La sélection repose sur la taille RAWI, la cadence MLVI et la lecture RAWC (1×1, 3×1, 3×3). Une correction de désqueeze issue de SqueezeFix remplace aussi le rapport RAWC incorrect pour ce calcul.
 

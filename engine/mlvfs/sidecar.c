@@ -1,5 +1,5 @@
 /*
- * mlv2dng sidecar files: name rules, path policy and the per-folder index. See sidecar.h.
+ * mlv2Resolve sidecar files: name rules, path policy and the per-folder index. See sidecar.h.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * This program is free software: you can redistribute it and/or modify it
@@ -457,7 +457,7 @@ char *sidecar_index_serialize(const struct sidecar_index *idx)
 {
     static const char head[] =
         "{\n"
-        "  \"about\": \"mlv2dng: files saved through the mount. files: name -> clip folder showing it (MLV name without extension); created: names created through the mount\",\n"
+        "  \"about\": \"mlv2Resolve: files saved through the mount. files: name -> clip folder showing it (MLV name without extension); created: names created through the mount\",\n"
         "  \"version\": 2,\n"
         "  \"files\": {";
     size_t cap = sizeof(head) + 64;
@@ -537,7 +537,7 @@ static int load_unlocked(const char *dir, struct sidecar_index *idx)
     if (result != 0)
     {
         sidecar_index_free(idx);
-        fprintf(stderr, "mlv2dng: sidecar index in %s is %s; it is kept as is and not updated\n", dir,
+        fprintf(stderr, "mlv2Resolve: sidecar index in %s is %s; it is kept as is and not updated\n", dir,
                 result == -EACCES ? "not a regular file" : "unreadable or malformed");
     }
     return result;

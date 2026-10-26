@@ -41,3 +41,7 @@ La release publique v0.2 n’est pas publiée automatiquement.
 ## Nettoyage du média de modèle
 
 Resolve ignore parfois `importIntoSubFolderName` pour le DRT Gyroflow et importe `TEST_[000000-000002].dng` à la racine. Le script conserve désormais l’objet MediaPool exact retourné par le clip modèle et le supprime après copie du grade et suppression de la timeline temporaire. Aucun nettoyage par nom n’est utilisé. Une vérification récursive réelle de tout le Media Pool a confirmé `MODEL_POOL_CLEANUP_INTEGRATION_OK`. Les messages de cadence affichent maintenant les valeurs source et projet, plutôt que le suffixe ambigu `(fps)`.
+
+## CST — Forward OOTF
+
+À la demande de l’utilisateur, `Apply Forward OOTF` est activé sur le premier CST. Un seul octet du paramètre booléen `doFwdOOTF` a changé dans le grade du modèle, les autres réglages restant identiques. Un import/export réel dans un projet temporaire Resolve confirme la conservation de cette valeur ; le projet temporaire a été supprimé et le projet utilisateur rouvert. Le second CST conserve son état désactivé à la création.

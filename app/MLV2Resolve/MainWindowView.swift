@@ -184,8 +184,12 @@ struct ResolveSection: View {
                 Spacer()
                 if working { ProgressView().controlSize(.small) }
             }
-            TextField("Project name", text: $state.projectName)
-                .textFieldStyle(.roundedBorder).disabled(working)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Title of the project to create")
+                    .font(.caption).foregroundStyle(.secondary)
+                TextField("Title of the project to create", text: $state.projectName, prompt: Text(verbatim: "My Project"))
+                    .textFieldStyle(.roundedBorder).disabled(working)
+            }
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                 Button {
                     projects.reloadReceipts()

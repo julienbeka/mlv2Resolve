@@ -50,12 +50,13 @@ final class ResolveV02Tests: XCTestCase {
         let state = AppState(manager:manager,defaults:defaults,scan:{ _ in [] })
         XCTAssertTrue(state.includeAllShots)
         XCTAssertEqual(state.timelineName,"All shots")
+        XCTAssertEqual(state.projectName,"My Project")
         state.projectName = "  My film  "
         state.includeAllShots = false; state.timelineName = "  My edit  "
         let restored = AppState(manager:manager,defaults:defaults,scan:{ _ in [] })
         XCTAssertEqual(restored.resolvedProjectName,"My film")
         restored.projectName = "   "
-        XCTAssertEqual(restored.resolvedProjectName,"mlv2Resolve")
+        XCTAssertEqual(restored.resolvedProjectName,"My Project")
         XCTAssertFalse(restored.includeAllShots)
         XCTAssertEqual(restored.resolvedTimelineName,"My edit")
         restored.timelineName = "   "

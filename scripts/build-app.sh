@@ -8,7 +8,7 @@ cd "$ROOT"
 "$ROOT/scripts/build-engine.sh"
 
 # Local builds target the next release. CI may supply an explicit release version.
-MARKETING_VERSION="${MARKETING_VERSION:-0.2}"
+MARKETING_VERSION="${MARKETING_VERSION:-0.2.1}"
 PREVIOUS_INFO="$ROOT/build/mlv2Resolve.app/Contents/Info.plist"
 if [[ -z "${BUILD_NUMBER:-}" ]]; then
   PREVIOUS_BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PREVIOUS_INFO" 2>/dev/null || true)"
@@ -23,7 +23,7 @@ xcodegen generate --quiet
 xcodebuild -project "mlv2Resolve.xcodeproj" -scheme "mlv2Resolve" -configuration Release \
   -derivedDataPath "$ROOT/build/DerivedData" \
   CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES \
-  MARKETING_VERSION="${MARKETING_VERSION:-0.2}" CURRENT_PROJECT_VERSION="${BUILD_NUMBER:-1}" \
+  MARKETING_VERSION="$MARKETING_VERSION" CURRENT_PROJECT_VERSION="${BUILD_NUMBER:-1}" \
   build > "$ROOT/build/xcodebuild.log" 2>&1 || { grep -E "error:" "$ROOT/build/xcodebuild.log" | head -30; tail -n 30 "$ROOT/build/xcodebuild.log"; exit 1; }
 tail -n 3 "$ROOT/build/xcodebuild.log"
 

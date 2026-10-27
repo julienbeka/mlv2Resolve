@@ -2856,6 +2856,16 @@
           }
         }
       }
+    },
+    "Title of the project to create": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Titre du projet à créer"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

@@ -68,7 +68,7 @@ public final class AppState: ObservableObject {
     }
     public var resolvedProjectName: String {
         let name = projectName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return name.isEmpty ? "mlv2Resolve" : name
+        return name.isEmpty ? "My Project" : name
     }
     @Published public var timelineName: String {
         didSet { defaults.set(timelineName, forKey: "resolveTimelineName"); refreshProjectMenuScript() }
@@ -137,7 +137,7 @@ public final class AppState: ObservableObject {
         let savedFPS = defaults.double(forKey: "resolveTimelineFrameRate")
         self.timelineFrameRate = Self.timelineFrameRates.contains(savedFPS) ? savedFPS : nil
         self.includeAllShots = defaults.object(forKey: "resolveIncludeAllShots") == nil || defaults.bool(forKey: "resolveIncludeAllShots")
-        self.projectName = defaults.string(forKey: "resolveProjectName") ?? "mlv2Resolve"
+        self.projectName = defaults.string(forKey: "resolveProjectName") ?? "My Project"
         self.timelineName = defaults.string(forKey: "resolveTimelineName") ?? "All shots"
         self.timelineSize = ResolveTimelineSize(rawValue: defaults.string(forKey: "resolveTimelineSize") ?? "") ?? .automatic
         self.manager = manager

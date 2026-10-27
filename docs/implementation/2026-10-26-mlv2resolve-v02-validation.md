@@ -44,7 +44,7 @@ Resolve ignore parfois `importIntoSubFolderName` pour le DRT Gyroflow et importe
 
 ## CST — Forward OOTF
 
-À la demande de l’utilisateur, `Apply Forward OOTF` est activé sur le premier CST. Un seul octet du paramètre booléen `doFwdOOTF` a changé dans le grade du modèle, les autres réglages restant identiques. Un import/export réel dans un projet temporaire Resolve confirme la conservation de cette valeur ; le projet temporaire a été supprimé et le projet utilisateur rouvert. Le second CST conserve son état désactivé à la création.
+Validation initiale du 26 octobre (remplacée par la correction du 27 octobre) : `Apply Forward OOTF` était activé sur le premier CST. Un seul octet du paramètre booléen `doFwdOOTF` a changé dans le grade du modèle, les autres réglages restant identiques. Un import/export réel dans un projet temporaire Resolve confirme la conservation de cette valeur ; le projet temporaire a été supprimé et le projet utilisateur rouvert. Le second CST conserve son état désactivé à la création.
 
 ## Dock et cadence de lecture
 
@@ -61,3 +61,11 @@ Suite complète : 266 tests, 9 ignorés faute de fixtures, aucun échec. Revue i
 ## Icône Tahoe
 
 Un fichier Icon Composer natif `AppIcon.icon` utilise le dessin fourni, normalisé en 1024 × 1024, sans la marge additionnelle de 100 pixels et sans nouvelle découpe des coins. La compilation Apple produit les couches natives dans Assets.car ainsi que les variantes pour macOS 14 et 15. Les aperçus par défaut, sombre et de repli conservent le contour multicolore sans plaque grise extérieure. L’app conserve son nom et son identité de bundle pour les préférences existantes.
+
+## Correction du 27 octobre — CinemaDNG et titre du projet
+
+- CST 01 : `doFwdOOTF` désactivé, correction de la consigne précédente. Le grade décompressé ne change que d'un octet ; le CST 02 conserve ses paramètres et le script le désactive toujours à la création.
+- Camera Raw : les trois modèles embarqués (projet DRP, timeline CST et timeline Gyroflow) portent désormais le décodage CinemaDNG `Project`, `P3 D60`, `Linear`. Les valeurs ont été capturées après réglage manuel dans Resolve : `DNGSettingsSource=2`, `DNGColorSpace=1`, `DNGGamma=6`. Seules ces trois entrées ont été reportées dans les paramètres Camera Raw ; les autres paramètres et les identifiants du modèle restent conservés, sans chemins personnels.
+- Vérification réelle : import du DRP dans un nouveau projet temporaire, cadence à 25 i/s, timeline d'ancrage, import Gyroflow puis CST, nettoyage ciblé du média et des timelines provisoires, application des espaces de travail/sortie. Les exports DRP/DRT obtenus conservent les trois paramètres DNG et le premier Forward OOTF désactivé. L'interface Camera Raw de ce nouveau projet affiche bien `Project`, `P3 D60`, `Linear`.
+- Interface : libellé permanent « Titre du projet à créer » / « Title of the project to create ». Valeur initiale et repli d'un titre vide : `My Project`. Les titres personnalisés enregistrés restent conservés.
+- Tests : le test des préférences échouait initialement sur les deux anciennes valeurs `mlv2Resolve`, puis passe avec `My Project`. Suite finale : 266 tests, 9 ignorés, aucun échec. Application Release reconstruite : version 0.2, build 100.

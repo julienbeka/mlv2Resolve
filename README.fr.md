@@ -8,7 +8,7 @@ Montez vos **rushs Magic Lantern MLV directement dans DaVinci Resolve**, sans co
 
 ## Téléchargement et installation
 
-**[Télécharger mlv2Resolve 0.2 pour Apple Silicon](https://github.com/julienbeka/mlv2Resolve/releases/download/v0.2/mlv2Resolve-0.2-macos-arm64.zip)** · [Notes de version et empreinte SHA-256](https://github.com/julienbeka/mlv2Resolve/releases/tag/v0.2)
+**[Télécharger mlv2Resolve 0.2.1 pour Apple Silicon](https://github.com/julienbeka/mlv2Resolve/releases/download/v0.2.1/mlv2Resolve-0.2.1-macos-arm64.zip)** · [Notes de version et empreinte SHA-256](https://github.com/julienbeka/mlv2Resolve/releases/tag/v0.2.1)
 
 - **Mac :** Apple Silicon, macOS 14 ou ultérieur. L’interface intègre les icônes et l’apparence natives de macOS Tahoe.
 - **Resolve :** testé avec DaVinci Resolve Studio 21.1.1. Studio permet les actions directes depuis l’app ; l’édition gratuite utilise le script Workspace décrit plus bas.
@@ -19,7 +19,7 @@ Montez vos **rushs Magic Lantern MLV directement dans DaVinci Resolve**, sans co
 2. L’app n’est pas notarisée : si macOS bloque le premier lancement, utilisez **Réglages Système → Confidentialité et sécurité → Ouvrir quand même**.
 3. Ouvrez l’app et terminez l’installation de FUSE-T si elle est proposée. La fenêtre principale s’affiche au lancement ; l’app apparaît aussi dans le Dock et dans **⌘ Tab**. Son icône d’appareil photo **ML** dans la barre des menus donne un accès rapide au workflow.
 
-Pour vérifier le téléchargement, placez le ZIP et son fichier `.sha256` dans le même dossier, puis lancez `shasum -a 256 -c mlv2Resolve-0.2-macos-arm64.zip.sha256`.
+Pour vérifier le téléchargement, placez le ZIP et son fichier `.sha256` dans le même dossier, puis lancez `shasum -a 256 -c mlv2Resolve-0.2.1-macos-arm64.zip.sha256`.
 
 Le français et l’anglais sont inclus. L’interface suit macOS ; choisissez une autre langue dans **Réglages → Langue**.
 
@@ -31,7 +31,7 @@ La fenêtre comporte quatre sections :
 | --- | --- |
 | **Rushs** | Choisissez un dossier de tournage ou un dossier parent contenant plusieurs tournages. Montez chaque dossier avec son interrupteur ; **Tout démonter** se trouve ici. |
 | **Synchro gyro** | Si vous utilisez un SenseFlow A1, choisissez un objectif et une position du capteur, puis attendez la synchronisation. Les vignettes désanamorphosées et les aperçus agrandis facilitent l’identification des plans. |
-| **Montage** | Saisissez un nom de projet puis cliquez sur **Créer projet**. Tous les dossiers montés sont réunis dans **un seul** projet Resolve. |
+| **Montage** | Saisissez un titre de projet (**My Project** par défaut), puis cliquez sur **Créer projet**. Tous les dossiers montés sont réunis dans **un seul** projet Resolve. |
 | **Réglages** | Ouvrez le tiroir gauche pour régler les objectifs, le Dual ISO, la taille du projet, la cadence et la timeline All shots facultative. |
 
 Les séquences DNG apparaissent dans `~/MLV Mounts/<tournage>`. Gardez les dossiers montés pendant le montage. Ils sont remontés au lancement de l’app et à la reconnexion de leur disque, avec les mêmes chemins pour que Resolve retrouve les plans.
@@ -62,10 +62,10 @@ L’espace de travail et de sortie du projet est **DaVinci Wide Gamut / DaVinci 
 
 | Nœud de timeline | Conversion | État initial |
 | --- | --- | --- |
-| **CST 01** | P3-D60 / Linear → DWG / Intermediate ; **Apply Forward OOTF** coché | Activé |
+| **CST 01** | P3-D60 / Linear → DWG / Intermediate ; **Apply Forward OOTF** décoché | Activé |
 | **CST 02** | DWG / Intermediate → Rec.709 / Rec.709-A | Désactivé |
 
-**Activez le CST 02 uniquement avant un export Rec.709.** Les modèles portables sont inclus dans l’app : les autres utilisateurs n’ont aucun CST ni préréglage de projet à préparer. Adaptez les préférences Camera Raw dans le projet créé si besoin. Ces valeurs s’appliquent aux nouvelles créations ; ouvrir un projet lié conserve ses réglages existants.
+**Activez le CST 02 uniquement avant un export Rec.709.** Les modèles portables sont inclus dans l’app : les autres utilisateurs n’ont aucun CST ni préréglage de projet à préparer. Le décodage Camera Raw CinemaDNG utilise par défaut Project, P3 D60 / Linear. Ces valeurs s’appliquent aux nouvelles créations ; ouvrir un projet lié conserve ses réglages existants.
 
 ### Rushs anamorphiques et Dual ISO
 

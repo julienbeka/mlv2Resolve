@@ -8,7 +8,7 @@ Edit Magic Lantern **MLV footage directly in DaVinci Resolve**, without converti
 
 ## Download and install
 
-**[Download mlv2Resolve 0.2 for Apple Silicon](https://github.com/julienbeka/mlv2Resolve/releases/download/v0.2/mlv2Resolve-0.2-macos-arm64.zip)** · [Release notes and SHA-256](https://github.com/julienbeka/mlv2Resolve/releases/tag/v0.2)
+**[Download mlv2Resolve 0.2.1 for Apple Silicon](https://github.com/julienbeka/mlv2Resolve/releases/download/v0.2.1/mlv2Resolve-0.2.1-macos-arm64.zip)** · [Release notes and SHA-256](https://github.com/julienbeka/mlv2Resolve/releases/tag/v0.2.1)
 
 - **Mac:** Apple Silicon, macOS 14 or later. The interface includes native macOS Tahoe icons and styling.
 - **Resolve:** tested with DaVinci Resolve Studio 21.1.1. Studio supports direct actions from the app; the free edition uses the Workspace script described below.
@@ -19,7 +19,7 @@ Edit Magic Lantern **MLV footage directly in DaVinci Resolve**, without converti
 2. The app is not notarized: if macOS blocks the first launch, use **System Settings → Privacy & Security → Open Anyway**.
 3. Open the app and complete FUSE-T installation if prompted. The main window opens at launch; the app also appears in the Dock and **Command-Tab**. Its menu-bar camera **ML** icon gives quick access to the workflow.
 
-To verify the download, place the ZIP and its `.sha256` file in the same folder and run `shasum -a 256 -c mlv2Resolve-0.2-macos-arm64.zip.sha256`.
+To verify the download, place the ZIP and its `.sha256` file in the same folder and run `shasum -a 256 -c mlv2Resolve-0.2.1-macos-arm64.zip.sha256`.
 
 English and French are included. The interface follows macOS; choose a different language in **Settings → Language**.
 
@@ -31,7 +31,7 @@ The window has four sections:
 | --- | --- |
 | **Footage** | Choose a shoot folder or a parent folder containing several shoots. Mount each folder with its switch; **Unmount All** is available here. |
 | **Gyro Sync** | If using a SenseFlow A1, choose a lens and sensor position, then wait for synchronization. Desqueezed thumbnails and enlarged previews help identify each shot. |
-| **Editing** | Enter a project name and click **Create Project**. All mounted folders are combined into **one** Resolve project. |
+| **Editing** | Enter a project title (default: **My Project**) and click **Create Project**. All mounted folders are combined into **one** Resolve project. |
 | **Settings** | Open the left drawer to configure lenses, Dual ISO, project size, cadence and the optional All shots timeline. |
 
 DNG sequences appear in `~/MLV Mounts/<shoot>`. Keep the folders mounted while editing. Mounts are restored when the app launches or their disk is reconnected, using the same paths so Resolve can find the footage.
@@ -62,10 +62,10 @@ Project working and output color are **DaVinci Wide Gamut / DaVinci Intermediate
 
 | Timeline node | Conversion | Default state |
 | --- | --- | --- |
-| **CST 01** | P3-D60 / Linear → DWG / Intermediate; **Apply Forward OOTF** checked | Enabled |
+| **CST 01** | P3-D60 / Linear → DWG / Intermediate; **Apply Forward OOTF** unchecked | Enabled |
 | **CST 02** | DWG / Intermediate → Rec.709 / Rec.709-A | Disabled |
 
-**Enable CST 02 only before a Rec.709 export.** The portable models ship with the app; other users do not need to prepare their own CSTs or project preset. Adjust Camera Raw preferences in the resulting project as needed. Creating a new project applies these defaults; opening a linked project preserves its existing settings.
+**Enable CST 02 only before a Rec.709 export.** The portable models ship with the app; other users do not need to prepare their own CSTs or project preset. CinemaDNG Camera Raw defaults to Project decoding, P3 D60 / Linear. Creating a new project applies these defaults; opening a linked project preserves its existing settings.
 
 ### Anamorphic footage and Dual ISO
 

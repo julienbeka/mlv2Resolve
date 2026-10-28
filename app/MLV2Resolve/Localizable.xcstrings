@@ -2866,6 +2866,56 @@
           }
         }
       }
+    },
+    "Color Management": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gestion des couleurs"
+          }
+        }
+      }
+    },
+    "Rec709-A Conversion": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conversion Rec709-A"
+          }
+        }
+      }
+    },
+    "New projects use DaVinci WG/Intermediate for the timeline and Rec.709-A for output. CinemaDNG decoding stays P3 D60 / Linear.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les nouveaux projets utilisent DaVinci WG/Intermediate pour la timeline et Rec.709-A en sortie. Le décodage CinemaDNG reste en P3 D60 / Linear."
+          }
+        }
+      }
+    },
+    "One active timeline CST: P3-D60 / Linear → DaVinci Wide Gamut / Rec.709-A.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un CST actif sur la timeline : P3-D60 / Linear → DaVinci Wide Gamut / Rec.709-A."
+          }
+        }
+      }
+    },
+    "Two active timeline nodes: CST P3-D60 / Linear → Rec.709 / Cineon Film Log, then Resolve’s Rec709 Kodak 2383 D60 LUT.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deux nœuds actifs sur la timeline : CST P3-D60 / Linear → Rec.709 / Cineon Film Log, puis la LUT Rec709 Kodak 2383 D60 de Resolve."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

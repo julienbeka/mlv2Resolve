@@ -56,6 +56,9 @@ public final class AppState: ObservableObject {
     @Published public var timelineSize: ResolveTimelineSize {
         didSet { defaults.set(timelineSize.rawValue, forKey: "resolveTimelineSize"); refreshProjectMenuScript() }
     }
+    @Published public var colorManagement: ResolveColorManagement {
+        didSet { defaults.set(colorManagement.rawValue, forKey: "resolveColorManagement"); refreshProjectMenuScript() }
+    }
     public static let timelineFrameRates: [Double] = [16,18,23.976,24,25,29.97,30,47.952,48,50,59.94,60,72,90,95.904,96,100,119.88,120]
     @Published public var timelineFrameRate: Double? {
         didSet { defaults.set(timelineFrameRate, forKey: "resolveTimelineFrameRate"); refreshProjectMenuScript() }
@@ -136,6 +139,7 @@ public final class AppState: ObservableObject {
         self.projects = ResolveProjectStore(defaults: defaults, receiptsURL: projectReceiptsURL)
         let savedFPS = defaults.double(forKey: "resolveTimelineFrameRate")
         self.timelineFrameRate = Self.timelineFrameRates.contains(savedFPS) ? savedFPS : nil
+        self.colorManagement = ResolveColorManagement(rawValue: defaults.string(forKey: "resolveColorManagement") ?? "") ?? .conversionRec709A
         self.includeAllShots = defaults.object(forKey: "resolveIncludeAllShots") == nil || defaults.bool(forKey: "resolveIncludeAllShots")
         self.projectName = defaults.string(forKey: "resolveProjectName") ?? "My Project"
         self.timelineName = defaults.string(forKey: "resolveTimelineName") ?? "All shots"
@@ -279,7 +283,7 @@ public final class AppState: ObservableObject {
         let preparation = prepareProjectPresets?(presets) ?? prepareResolvePresets?(factors)
         projectMenuTask?.cancel()
         do {
-            if let dir = resolveScriptsDir { try ResolveProject.installMenuScript(shoots: media, in: dir, timelineSize: timelineSize, createOnly: createOnly, receiptsURL: projectReceiptsURL, includeAllShots: includeAllShots, timelineName: resolvedTimelineName, frameRate: timelineFrameRate) }
+            if let dir = resolveScriptsDir { try ResolveProject.installMenuScript(shoots: media, in: dir, timelineSize: timelineSize, createOnly: createOnly, receiptsURL: projectReceiptsURL, includeAllShots: includeAllShots, timelineName: resolvedTimelineName, frameRate: timelineFrameRate, colorManagement: colorManagement) }
             try await launch()
         } catch { return (error.localizedDescription, true) }
         guard !media.isEmpty, media.contains(where: { !$0.media.isEmpty }) else {
@@ -292,7 +296,7 @@ public final class AppState: ObservableObject {
         }
         let outcome = await ResolveProject.execute(shoots: media, runner: projectRunner, confirmSwitch: confirmSwitch,
                                                    connectionAttempts: projectProbeRunner == nil ? 30 : 1,
-                                                   timelineSize: timelineSize, createOnly: createOnly, onReceipt: { self.projects.ingest($0) }, includeAllShots: includeAllShots, timelineName: resolvedTimelineName, frameRate: timelineFrameRate)
+                                                   timelineSize: timelineSize, createOnly: createOnly, onReceipt: { self.projects.ingest($0) }, includeAllShots: includeAllShots, timelineName: resolvedTimelineName, frameRate: timelineFrameRate, colorManagement: colorManagement)
         var result = ResolveProject.message(outcome)
         if case .report = outcome {
             if !defaults.bool(forKey: "resolveProjectGuideShown") {
@@ -356,7 +360,7 @@ public final class AppState: ObservableObject {
             let discovered = await self.resolveProjectMedia()
             let media = ResolveProject.combined(discovered, name: self.resolvedProjectName)
             guard !Task.isCancelled, case .create = self.projectMenuAction else { return }
-            do { try ResolveProject.installMenuScript(shoots: media, in: dir, timelineSize: self.timelineSize, createOnly: true, receiptsURL: self.projectReceiptsURL, includeAllShots: self.includeAllShots, timelineName: self.resolvedTimelineName, frameRate: self.timelineFrameRate) }
+            do { try ResolveProject.installMenuScript(shoots: media, in: dir, timelineSize: self.timelineSize, createOnly: true, receiptsURL: self.projectReceiptsURL, includeAllShots: self.includeAllShots, timelineName: self.resolvedTimelineName, frameRate: self.timelineFrameRate, colorManagement: self.colorManagement) }
             catch { self.alert = error.localizedDescription }
         }
     }

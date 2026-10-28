@@ -150,8 +150,19 @@ struct ResolveSettingsSection: View {
             TextField("Timeline Name", text: $state.timelineName, prompt: Text(verbatim: "All shots"))
             Text("Enabled: add all imported shots to the new timeline. Disabled: prepare an empty timeline with the color nodes. A blank name uses All shots.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Text("Project working and output color: DaVinci Wide Gamut / Intermediate. CST 01 converts P3-D60 / Linear to the working space. CST 02 converts to Rec.709 / Rec.709-A and starts disabled. Enable it only before a Rec.709 export.")
+            Picker("Color Management", selection: $state.colorManagement) {
+                Text("Rec709-A Conversion").tag(ResolveColorManagement.conversionRec709A)
+                Text(verbatim: "Kodak 2383").tag(ResolveColorManagement.kodak2383)
+            }
+            Text("New projects use DaVinci WG/Intermediate for the timeline and Rec.709-A for output. CinemaDNG decoding stays P3 D60 / Linear.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if state.colorManagement == .conversionRec709A {
+                Text("One active timeline CST: P3-D60 / Linear → DaVinci Wide Gamut / Rec.709-A.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("Two active timeline nodes: CST P3-D60 / Linear → Rec.709 / Cineon Film Log, then Resolve’s Rec709 Kodak 2383 D60 LUT.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             ForEach(projects.links) { link in
                 HStack {
                     VStack(alignment: .leading) {

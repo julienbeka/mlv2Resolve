@@ -8,7 +8,7 @@ Edit Magic Lantern **MLV footage directly in DaVinci Resolve**, without converti
 
 ## Download and install
 
-**[Download mlv2Resolve 0.2.1 for Apple Silicon](https://github.com/julienbeka/mlv2Resolve/releases/download/v0.2.1/mlv2Resolve-0.2.1-macos-arm64.zip)** · [Release notes and SHA-256](https://github.com/julienbeka/mlv2Resolve/releases/tag/v0.2.1)
+**[Download mlv2Resolve 0.2.2 for Apple Silicon](https://github.com/julienbeka/mlv2Resolve/releases/download/v0.2.2/mlv2Resolve-0.2.2-macos-arm64.zip)** · [Release notes and SHA-256](https://github.com/julienbeka/mlv2Resolve/releases/tag/v0.2.2)
 
 - **Mac:** Apple Silicon, macOS 14 or later. The interface includes native macOS Tahoe icons and styling.
 - **Resolve:** tested with DaVinci Resolve Studio 21.1.1. Studio supports direct actions from the app; the free edition uses the Workspace script described below.
@@ -19,7 +19,7 @@ Edit Magic Lantern **MLV footage directly in DaVinci Resolve**, without converti
 2. The app is not notarized: if macOS blocks the first launch, use **System Settings → Privacy & Security → Open Anyway**.
 3. Open the app and complete FUSE-T installation if prompted. The main window opens at launch; the app also appears in the Dock and **Command-Tab**. Its menu-bar camera **ML** icon gives quick access to the workflow.
 
-To verify the download, place the ZIP and its `.sha256` file in the same folder and run `shasum -a 256 -c mlv2Resolve-0.2.1-macos-arm64.zip.sha256`.
+To verify the download, place the ZIP and its `.sha256` file in the same folder and run `shasum -a 256 -c mlv2Resolve-0.2.2-macos-arm64.zip.sha256`.
 
 English and French are included. The interface follows macOS; choose a different language in **Settings → Language**.
 
@@ -58,14 +58,14 @@ New populated timelines receive a **Gyroflow(NiYien)** Color node on each clip w
 
 ### Color management
 
-Project working and output color are **DaVinci Wide Gamut / DaVinci Intermediate**. The prepared timeline inherits project settings and contains these two CSTs:
+Choose **Color Management** in Resolve settings. Both modes use **DaVinci WG/Intermediate** for the timeline, **Rec.709-A** for project output, and CinemaDNG decoding **Project / P3 D60 / Linear**.
 
-| Timeline node | Conversion | Default state |
-| --- | --- | --- |
-| **CST 01** | P3-D60 / Linear → DWG / Intermediate; **Apply Forward OOTF** unchecked | Enabled |
-| **CST 02** | DWG / Intermediate → Rec.709 / Rec.709-A | Disabled |
+| Mode | Active timeline nodes |
+| --- | --- |
+| **Rec709-A Conversion** (default) | One CST: P3-D60 / Linear → DaVinci Wide Gamut / Rec.709-A |
+| **Kodak 2383** | One CST: P3-D60 / Linear → Rec.709 / Cineon Film Log, followed by Resolve’s built-in **Film Looks / Rec709 Kodak 2383 D60** LUT |
 
-**Enable CST 02 only before a Rec.709 export.** The portable models ship with the app; other users do not need to prepare their own CSTs or project preset. CinemaDNG Camera Raw defaults to Project decoding, P3 D60 / Linear. Creating a new project applies these defaults; opening a linked project preserves its existing settings.
+The CSTs use None for Tone Mapping and Gamut Mapping, with Apply Forward OOTF disabled. All selected mode nodes are active on creation. The choice is remembered and applies only to new projects; existing projects retain their settings. The Kodak LUT is resolved from the local Resolve installation; a clear error is reported if it is unavailable.
 
 ### Anamorphic footage and Dual ISO
 

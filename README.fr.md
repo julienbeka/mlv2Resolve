@@ -8,7 +8,7 @@ Montez vos **rushs Magic Lantern MLV directement dans DaVinci Resolve**, sans co
 
 ## Téléchargement et installation
 
-**[Télécharger mlv2Resolve 0.2.1 pour Apple Silicon](https://github.com/julienbeka/mlv2Resolve/releases/download/v0.2.1/mlv2Resolve-0.2.1-macos-arm64.zip)** · [Notes de version et empreinte SHA-256](https://github.com/julienbeka/mlv2Resolve/releases/tag/v0.2.1)
+**[Télécharger mlv2Resolve 0.2.2 pour Apple Silicon](https://github.com/julienbeka/mlv2Resolve/releases/download/v0.2.2/mlv2Resolve-0.2.2-macos-arm64.zip)** · [Notes de version et empreinte SHA-256](https://github.com/julienbeka/mlv2Resolve/releases/tag/v0.2.2)
 
 - **Mac :** Apple Silicon, macOS 14 ou ultérieur. L’interface intègre les icônes et l’apparence natives de macOS Tahoe.
 - **Resolve :** testé avec DaVinci Resolve Studio 21.1.1. Studio permet les actions directes depuis l’app ; l’édition gratuite utilise le script Workspace décrit plus bas.
@@ -19,7 +19,7 @@ Montez vos **rushs Magic Lantern MLV directement dans DaVinci Resolve**, sans co
 2. L’app n’est pas notarisée : si macOS bloque le premier lancement, utilisez **Réglages Système → Confidentialité et sécurité → Ouvrir quand même**.
 3. Ouvrez l’app et terminez l’installation de FUSE-T si elle est proposée. La fenêtre principale s’affiche au lancement ; l’app apparaît aussi dans le Dock et dans **⌘ Tab**. Son icône d’appareil photo **ML** dans la barre des menus donne un accès rapide au workflow.
 
-Pour vérifier le téléchargement, placez le ZIP et son fichier `.sha256` dans le même dossier, puis lancez `shasum -a 256 -c mlv2Resolve-0.2.1-macos-arm64.zip.sha256`.
+Pour vérifier le téléchargement, placez le ZIP et son fichier `.sha256` dans le même dossier, puis lancez `shasum -a 256 -c mlv2Resolve-0.2.2-macos-arm64.zip.sha256`.
 
 Le français et l’anglais sont inclus. L’interface suit macOS ; choisissez une autre langue dans **Réglages → Langue**.
 
@@ -58,14 +58,14 @@ Les nouvelles timelines remplies reçoivent un nœud Color **Gyroflow(NiYien)** 
 
 ### Gestion des couleurs
 
-L’espace de travail et de sortie du projet est **DaVinci Wide Gamut / DaVinci Intermediate**. La timeline préparée hérite des réglages du projet et comporte deux CST :
+Choisissez la **Gestion des couleurs** dans les réglages Resolve. Les deux modes utilisent **DaVinci WG/Intermediate** pour la timeline, **Rec.709-A** en sortie du projet, et le décodage CinemaDNG **Project / P3 D60 / Linear**.
 
-| Nœud de timeline | Conversion | État initial |
-| --- | --- | --- |
-| **CST 01** | P3-D60 / Linear → DWG / Intermediate ; **Apply Forward OOTF** décoché | Activé |
-| **CST 02** | DWG / Intermediate → Rec.709 / Rec.709-A | Désactivé |
+| Mode | Nœuds actifs sur la timeline |
+| --- | --- |
+| **Conversion Rec709-A** (par défaut) | Un CST : P3-D60 / Linear → DaVinci Wide Gamut / Rec.709-A |
+| **Kodak 2383** | Un CST : P3-D60 / Linear → Rec.709 / Cineon Film Log, suivi de la LUT **Film Looks / Rec709 Kodak 2383 D60** intégrée à Resolve |
 
-**Activez le CST 02 uniquement avant un export Rec.709.** Les modèles portables sont inclus dans l’app : les autres utilisateurs n’ont aucun CST ni préréglage de projet à préparer. Le décodage Camera Raw CinemaDNG utilise par défaut Project, P3 D60 / Linear. Ces valeurs s’appliquent aux nouvelles créations ; ouvrir un projet lié conserve ses réglages existants.
+Les CST utilisent Tone Mapping et Gamut Mapping sur None, avec Apply Forward OOTF désactivé. Tous les nœuds du mode choisi sont actifs dès la création. Le choix est mémorisé et s’applique uniquement aux nouveaux projets ; les projets existants conservent leurs réglages. La LUT Kodak est résolue dans l’installation locale de Resolve ; une erreur explicite est affichée si elle est indisponible.
 
 ### Rushs anamorphiques et Dual ISO
 

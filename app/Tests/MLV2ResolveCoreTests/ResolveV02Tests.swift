@@ -48,12 +48,15 @@ final class ResolveV02Tests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suite) }
         let manager = MountManager(mlvfs: URL(fileURLWithPath:"/missing"), fpmDir: URL(fileURLWithPath:"/tmp"), indexDir: URL(fileURLWithPath:"/tmp"), paths: MountPaths(root: URL(fileURLWithPath:"/tmp")), launcher: FakeLauncher(unmounter: FakeUnmounter()), unmounter: FakeUnmounter())
         let state = AppState(manager:manager,defaults:defaults,scan:{ _ in [] })
+        XCTAssertEqual(state.colorManagement,.conversionRec709A)
+        state.colorManagement = .kodak2383
         XCTAssertTrue(state.includeAllShots)
         XCTAssertEqual(state.timelineName,"All shots")
         XCTAssertEqual(state.projectName,"My Project")
         state.projectName = "  My film  "
         state.includeAllShots = false; state.timelineName = "  My edit  "
         let restored = AppState(manager:manager,defaults:defaults,scan:{ _ in [] })
+        XCTAssertEqual(restored.colorManagement,.kodak2383)
         XCTAssertEqual(restored.resolvedProjectName,"My film")
         restored.projectName = "   "
         XCTAssertEqual(restored.resolvedProjectName,"My Project")

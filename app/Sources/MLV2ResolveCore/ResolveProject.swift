@@ -53,7 +53,7 @@ public enum ResolveProject {
     public static let menuScriptName = "mlv2Resolve.lua"
     public static var projectTemplateURL: URL { Bundle.module.url(forResource: "resolve-project-cst", withExtension: "drp")! }
     public static var gyroTemplateURL: URL { Bundle.module.url(forResource: "resolve-clip-gyro", withExtension: "drt")! }
-    public static var timelineTemplateURL: URL { Bundle.module.url(forResource: "resolve-timeline-cst", withExtension: "drt")! }
+    public static var timelineTemplateURL: URL { ResolveColorManagement.conversionRec709A.timelineTemplateURL }
 
     /// The most frequent desqueezed resolution wins; tied counts use the largest resolution.
     /// Cadence is rounded to 0.001 fps to absorb header noise.
@@ -141,7 +141,7 @@ public enum ResolveProject {
         return ShootMedia(name: shoot.name, media: media, warnings: warnings, source: shoot.folder.standardizedFileURL.path)
     }
 
-    public static func script(shoots: [ShootMedia], approvedCurrent: String? = nil, menu: Bool = false, timelineSize: ResolveTimelineSize = .automatic, createOnly: Bool = false, receiptsURL: URL? = nil, includeAllShots: Bool = true, timelineName: String = "All shots", frameRate: Double? = nil) -> String {
+    public static func script(shoots: [ShootMedia], approvedCurrent: String? = nil, menu: Bool = false, timelineSize: ResolveTimelineSize = .automatic, createOnly: Bool = false, receiptsURL: URL? = nil, includeAllShots: Bool = true, timelineName: String = "All shots", frameRate: Double? = nil, colorManagement: ResolveColorManagement = .conversionRec709A) -> String {
         let quote = ResolveDesqueeze.luaString
         var lua = "local SHOOTS = {\n"
         for shoot in shoots {
@@ -162,7 +162,8 @@ public enum ResolveProject {
         }
         lua += "}\nlocal APPROVED = \(approvedCurrent.map(quote) ?? "nil")\nlocal MENU = \(menu)\n"
         lua += "local TEXT = {switch=\(quote(text("Switch Resolve project?", "Changer de projet Resolve ?"))),cancel=\(quote(text("Cancel", "Annuler"))),open=\(quote(text("Open", "Ouvrir"))),guide=\(quote(guide)),done=\(quote(text("Project preparation finished. See the console for details.", "Préparation terminée. Consultez la console pour le détail.")))}\n"
-        lua += "local TIMELINE_TEMPLATE = \(quote(timelineTemplateURL.path))\nlocal GYRO_TEMPLATE = \(quote(gyroTemplateURL.path))\nlocal INCLUDE_ALL_SHOTS = \(includeAllShots)\nlocal TIMELINE_NAME = \(quote(timelineName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "All shots" : timelineName.trimmingCharacters(in: .whitespacesAndNewlines)))\nlocal CREATE_ONLY = \(createOnly)\nlocal RECEIPTS = \(receiptsURL.map { quote($0.path) } ?? "nil")\n"
+        lua += "local TIMELINE_TEMPLATE = \(quote(colorManagement.timelineTemplateURL.path))\nlocal GYRO_TEMPLATE = \(quote(gyroTemplateURL.path))\nlocal INCLUDE_ALL_SHOTS = \(includeAllShots)\nlocal TIMELINE_NAME = \(quote(timelineName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "All shots" : timelineName.trimmingCharacters(in: .whitespacesAndNewlines)))\nlocal CREATE_ONLY = \(createOnly)\nlocal RECEIPTS = \(receiptsURL.map { quote($0.path) } ?? "nil")\n"
+        lua += "local COLOR_NODE_COUNT = \(colorManagement.nodeCount)\nlocal COLOR_LUT = \(colorManagement.lutPath.map(quote) ?? "nil")\n"
         let url = Bundle.module.url(forResource: "resolve-project", withExtension: "lua")!
         return lua + (try! String(contentsOf: url, encoding: .utf8))
     }
@@ -259,7 +260,7 @@ public enum ResolveProject {
                                confirmSwitch: (String, String) async -> Bool,
                                connectionAttempts: Int = 30, retryDelay: Duration = .seconds(2),
                                timelineSize: ResolveTimelineSize = .automatic, createOnly: Bool = false,
-                               onReceipt: (String) -> Void = { _ in }, includeAllShots: Bool = true, timelineName: String = "All shots", frameRate: Double? = nil) async -> Outcome {
+                               onReceipt: (String) -> Void = { _ in }, includeAllShots: Bool = true, timelineName: String = "All shots", frameRate: Double? = nil, colorManagement: ResolveColorManagement = .conversionRec709A) async -> Outcome {
         var imported = 0, already = 0, failed = 0, missing = 0
         var studio = true, warnings: [String] = []
         for shoot in shoots {
@@ -275,7 +276,7 @@ public enum ResolveProject {
                 if Task.isCancelled { return .cancelled }
                 let outcome: Outcome
                 do {
-                    let output = try await runner(script(shoots: [shoot], approvedCurrent: approved, timelineSize: timelineSize, createOnly: createOnly, includeAllShots: includeAllShots, timelineName: timelineName, frameRate: frameRate))
+                    let output = try await runner(script(shoots: [shoot], approvedCurrent: approved, timelineSize: timelineSize, createOnly: createOnly, includeAllShots: includeAllShots, timelineName: timelineName, frameRate: frameRate, colorManagement: colorManagement))
                     onReceipt(output)
                     outcome = parse(output)
                 }
@@ -316,9 +317,9 @@ public enum ResolveProject {
         }
     }
 
-    public static func installMenuScript(shoots: [ShootMedia], in directory: URL, timelineSize: ResolveTimelineSize = .automatic, createOnly: Bool = false, receiptsURL: URL? = nil, includeAllShots: Bool = true, timelineName: String = "All shots", frameRate: Double? = nil) throws {
+    public static func installMenuScript(shoots: [ShootMedia], in directory: URL, timelineSize: ResolveTimelineSize = .automatic, createOnly: Bool = false, receiptsURL: URL? = nil, includeAllShots: Bool = true, timelineName: String = "All shots", frameRate: Double? = nil, colorManagement: ResolveColorManagement = .conversionRec709A) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try script(shoots: shoots, menu: true, timelineSize: timelineSize, createOnly: createOnly, receiptsURL: receiptsURL, includeAllShots: includeAllShots, timelineName: timelineName, frameRate: frameRate).write(to: directory.appendingPathComponent(menuScriptName), atomically: true, encoding: .utf8)
+        try script(shoots: shoots, menu: true, timelineSize: timelineSize, createOnly: createOnly, receiptsURL: receiptsURL, includeAllShots: includeAllShots, timelineName: timelineName, frameRate: frameRate, colorManagement: colorManagement).write(to: directory.appendingPathComponent(menuScriptName), atomically: true, encoding: .utf8)
     }
 
     static func text(_ en: String, _ fr: String) -> String {

@@ -162,21 +162,28 @@ local ok,err=pcall(function()
       anchor=nil
       if not rushs:SetName(TIMELINE_NAME) then error('Could not name timeline: ' .. TIMELINE_NAME) end
       local graph=rushs:GetNodeGraph()
-      if not graph or graph:GetNumNodes()~=2 or not graph:SetNodeEnabled(1,true) or not graph:SetNodeEnabled(2,false) then
-        error('Could not prepare timeline CST states; Rec.709 export node must remain disabled')
+      if not graph or graph:GetNumNodes()~=COLOR_NODE_COUNT then
+        error('Could not prepare the selected timeline color management')
+      end
+      for n=1,COLOR_NODE_COUNT do
+        if not graph:SetNodeEnabled(n,true) then error('Could not enable timeline color node ' .. n) end
+      end
+      -- Resolve resolves its built-in LUT by relative path on the current machine.
+      if COLOR_LUT then
+        if not graph:SetLUT(2,COLOR_LUT) or graph:GetLUT(2)~=COLOR_LUT then
+          error('Required Resolve LUT unavailable: ' .. COLOR_LUT)
+        end
       end
       -- DRT imports reset project format. Apply project settings AFTER both model imports.
       local settings={
-        {'colorScienceMode','davinciYRGB'}, {'separateColorSpaceAndGamma','1'},
-        {'colorSpaceTimeline','DaVinci WG'}, {'colorSpaceTimelineGamma','DaVinci Intermediate'},
-        {'colorSpaceOutput','DaVinci WG'}, {'colorSpaceOutputGamma','DaVinci Intermediate'},
+        {'colorScienceMode','davinciYRGB'}, {'separateColorSpaceAndGamma','0'},
+        {'colorSpaceTimeline','DaVinci WG/Intermediate'}, {'colorSpaceOutput','Rec.709-A'},
         {'timelineFrameRate',tostring(shoot.fps)},
         {'timelineInputResMismatchBehavior','scaleToFit'},
         {'timelineResolutionWidth',tostring(studio and shoot.width or math.min(shoot.width,3840))},
         {'timelineResolutionHeight',tostring(studio and shoot.height or math.min(shoot.height,2160))}}
       for _,setting in ipairs(settings) do
-        -- Resolve 21 exposes the output gamma for reading but rejects Intermediate in its setter.
-        -- The bundled DRP carries it; retain an already matching value.
+        -- Combined color-space names match the Color Management panel with separate gamma disabled.
         local readable,current=pcall(function() return project:GetSetting(setting[1]) end)
         if not readable or tostring(current)~=setting[2] then
           if not project:SetSetting(setting[1],setting[2]) then error(shoot.name .. ': setting refused ' .. setting[1]) end

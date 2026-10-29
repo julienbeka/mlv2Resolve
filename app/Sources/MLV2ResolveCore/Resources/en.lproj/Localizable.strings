@@ -50,3 +50,5 @@
 
 "1 clip desqueezed in Resolve." = "1 clip desqueezed in Resolve.";
 "%@ clips desqueezed in Resolve." = "%@ clips desqueezed in Resolve.";
+
+"Couldn't optimize the gyro log: %@" = "Couldn't optimize the gyro log: %@";

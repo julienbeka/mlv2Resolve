@@ -102,6 +102,9 @@ int hdr_convert_data(struct frame_headers * frame_headers, uint16_t * image_data
     }
     else
     {
+        /* Rejected frames own the same histograms as successfully detected frames. */
+        for(int i = 0; i < 4; i++)
+            hist_destroy(hist[i]);
         err_printf("Could not detect dual ISO interlaced lines\n");
         return 0;
     }

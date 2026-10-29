@@ -87,4 +87,20 @@ $(CACHE_TEST_ASAN_BIN): $(CACHE_TEST_SRCS) $(HDRS)
 	$(CC) $(CFLAGS) -O1 -g -fsanitize=address,undefined $(CACHE_TEST_SRCS) -pthread -o $@
 
 clean:
-	rm -f mlvfs-bin mlvmotion-bin $(OBJS) $(TEST_BIN) $(RESOLVE_TEST_BIN) $(SIDECAR_TEST_BIN) $(CACHE_TEST_BIN) $(CACHE_TEST_ASAN_BIN)
+	rm -f mlvfs-bin mlvmotion-bin $(OBJS) $(TEST_BIN) $(RESOLVE_TEST_BIN) $(SIDECAR_TEST_BIN) $(CACHE_TEST_BIN) $(CACHE_TEST_ASAN_BIN) ../build/engine/dual_iso_preview_test ../build/engine/frame_benchmark
+
+# Preview rejection must release its per-frame histograms.
+.PHONY: dual-iso-preview-test
+dual-iso-preview-test: ../build/engine/dual_iso_preview_test
+	$(TIMEOUT) $<
+
+../build/engine/dual_iso_preview_test: tests/dual_iso_preview_test.c $(SRC)/hdr.c $(SRC)/histogram.c $(HDRS)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -O1 -g -ffunction-sections -fdata-sections -Wl,-dead_strip tests/dual_iso_preview_test.c $(SRC)/histogram.c -o $@
+
+# Diagnostic benchmark: actual DNG processing, independent of Resolve and FUSE transport.
+.PHONY: frame-benchmark
+frame-benchmark: ../build/engine/frame_benchmark
+../build/engine/frame_benchmark: tests/frame_benchmark.c $(SRC)/main.c $(OBJS) $(HDRS)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) tests/frame_benchmark.c $(OBJS) $(LIBS) -o $@

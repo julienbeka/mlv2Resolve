@@ -34,8 +34,9 @@ public enum LensProfileKind: String, Sendable {
 /// Background gyro sync: for every mounted shoot, finds the SenseFlow A1 logs of the chosen folder, syncs each
 /// MLV clip and writes its `.gyroflow` next to the MLV (the running MLVFS mount then lists it in the clip folder).
 ///
-/// Never writes, renames or deletes MLV files or logs. Never overwrites a `.gyroflow` unless asked (regenerate,
-/// lens or position change on that clip); the replaced file is first copied to
+/// Never changes MLV files or original gyro logs. Writes clip-sized log excerpts next to the MLV.
+/// Owned legacy `.gyroflow` files are optimized on mount; other replacements require regeneration,
+/// a lens or position change. The replaced file is first copied to
 /// `<backupsRoot>/<shoot name>/<name>-<yyyyMMdd-HHmmss>.gyroflow`.
 ///
 /// Persisted in `defaults` (paths are standardized, see `AppState.key`):
@@ -350,7 +351,18 @@ public final class GyroSyncCoordinator: ObservableObject {
         let exists = FileManager.default.fileExists(atPath: dest.path)
         if !exists && written.contains(clip) { unrecordWritten(clip) }  // our file is gone: forget it
         if exists && !force {
-            if written.contains(clip), let m = meta(clip) { states[clip] = m } else { states[clip] = .existing }
+            guard written.contains(clip) else { states[clip] = .existing; return }
+            states[clip] = .running
+            let backup = backupsRoot.appendingPathComponent(MountPaths.sanitize(ctx.shoot.name), isDirectory: true)
+            let migration = Task.detached { try GyroLogExcerpt.migrate(at: dest, backupDirectory: backup) }
+            let result = await withTaskCancellationHandler(operation: { await migration.result },
+                                                          onCancel: { migration.cancel() })
+            guard !Task.isCancelled, contexts[AppState.key(ctx.shoot.folder)] != nil else { return }
+            switch result {
+            case .success: states[clip] = meta(clip) ?? .existing
+            case .failure(let error):
+                states[clip] = .failed(String(localized: "Couldn't optimize the gyro log: \(error.localizedDescription)", bundle: L10n.bundle))
+            }
             return
         }
         guard let lens = lens(forClip: clip) else {
@@ -624,11 +636,13 @@ private struct Job: Sendable {
             catch { return fail(String(localized: "Couldn't build the lens profile: \(String(describing: error))", bundle: L10n.bundle)) }
         }
         let offsetMs = Double(-best.result.lagMs)
-        let data: Data
+        let prepared: GyroLogExcerpt.Prepared
         do {
-            data = try GyroflowProject.make(clipDir: clipDir, timing: timing, log: best.log.url, offsetMs: offsetMs,
-                                            calibration: calibration, position: position)
+            let data = try GyroflowProject.make(clipDir: clipDir, timing: timing, log: best.log.url, offsetMs: offsetMs,
+                                              calibration: calibration, position: position)
+            prepared = try GyroLogExcerpt.prepare(data, destination: dest)
         } catch {
+            if Task.isCancelled || error is CancellationError { return Outcome(state: .pending) }
             return fail(String(localized: "Couldn't write the Gyroflow project: \(String(describing: error))", bundle: L10n.bundle))
         }
         if Task.isCancelled { return Outcome(state: .pending) }
@@ -638,7 +652,12 @@ private struct Job: Sendable {
             return fail(String(localized: "Couldn't back up the existing Gyroflow project: \(error.localizedDescription)", bundle: L10n.bundle))
         }
         if Task.isCancelled { return Outcome(state: .pending) }
-        do { try GyroflowProject.write(data, to: dest) } catch {
+        do {
+            try prepared.persistLog()
+            try Task.checkCancellation()
+            try GyroflowProject.write(prepared.projectData, to: dest)
+        } catch {
+            if Task.isCancelled || error is CancellationError { return Outcome(state: .pending) }
             return fail(String(localized: "Couldn't write the Gyroflow project: \(error.localizedDescription)", bundle: L10n.bundle))
         }
         let light = A1Log(url: best.log.url, start: best.log.start, rateHz: best.log.rateHz, gyro: [])
@@ -648,19 +667,7 @@ private struct Job: Sendable {
 
     /// Copies the file about to be replaced to `<backupDir>/<name>-<yyyyMMdd-HHmmss>.gyroflow`.
     private func backupIfNeeded() throws {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: dest.path) else { return }
-        try fm.createDirectory(at: backupDir, withIntermediateDirectories: true)
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyyMMdd-HHmmss"
-        let base = "\(dest.deletingPathExtension().lastPathComponent)-\(f.string(from: Date()))"
-        var target = backupDir.appendingPathComponent(base + ".gyroflow")
-        var n = 1
-        while fm.fileExists(atPath: target.path) {
-            target = backupDir.appendingPathComponent("\(base)-\(n).gyroflow"); n += 1
-        }
-        try fm.copyItem(at: dest, to: target)
+        try GyroflowProject.backup(dest, to: backupDir)
     }
 }
 

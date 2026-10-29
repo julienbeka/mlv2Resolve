@@ -8,7 +8,7 @@ Montez vos **rushs Magic Lantern MLV directement dans DaVinci Resolve**, sans co
 
 ## Téléchargement et installation
 
-**[Télécharger mlv2Resolve 0.2.2 pour Apple Silicon](https://github.com/julienbeka/mlv2Resolve/releases/download/v0.2.2/mlv2Resolve-0.2.2-macos-arm64.zip)** · [Notes de version et empreinte SHA-256](https://github.com/julienbeka/mlv2Resolve/releases/tag/v0.2.2)
+**[Télécharger mlv2Resolve 0.2.4 pour Apple Silicon](https://github.com/julienbeka/mlv2Resolve/releases/download/v0.2.4/mlv2Resolve-0.2.4-macos-arm64.zip)** · [Notes de version et empreinte SHA-256](https://github.com/julienbeka/mlv2Resolve/releases/tag/v0.2.4)
 
 - **Mac :** Apple Silicon, macOS 14 ou ultérieur. L’interface intègre les icônes et l’apparence natives de macOS Tahoe.
 - **Resolve :** testé avec DaVinci Resolve Studio 21.1.1. Studio permet les actions directes depuis l’app ; l’édition gratuite utilise le script Workspace décrit plus bas.
@@ -19,7 +19,7 @@ Montez vos **rushs Magic Lantern MLV directement dans DaVinci Resolve**, sans co
 2. L’app n’est pas notarisée : si macOS bloque le premier lancement, utilisez **Réglages Système → Confidentialité et sécurité → Ouvrir quand même**.
 3. Ouvrez l’app et terminez l’installation de FUSE-T si elle est proposée. La fenêtre principale s’affiche au lancement ; l’app apparaît aussi dans le Dock et dans **⌘ Tab**. Son icône d’appareil photo **ML** dans la barre des menus donne un accès rapide au workflow.
 
-Pour vérifier le téléchargement, placez le ZIP et son fichier `.sha256` dans le même dossier, puis lancez `shasum -a 256 -c mlv2Resolve-0.2.2-macos-arm64.zip.sha256`.
+Pour vérifier le téléchargement, placez le ZIP et son fichier `.sha256` dans le même dossier, puis lancez `shasum -a 256 -c mlv2Resolve-0.2.4-macos-arm64.zip.sha256`.
 
 Le français et l’anglais sont inclus. L’interface suit macOS ; choisissez une autre langue dans **Réglages → Langue**.
 
@@ -107,6 +107,16 @@ indique lequel a été utilisé (« profil calibré » / « profil calculé »).
 Un `.gyroflow` existant que mlv2Resolve n'a pas écrit (p. ex. fait avec NiYien Tool) est conservé. **Régénérer** sur
 un plan le remplace, tout comme changer l'objectif ou la position de ce plan ; le fichier remplacé est d'abord
 copié dans `~/Library/Application Support/mlv2Resolve/gyroflow-backups/<tournage>/`.
+
+Depuis la **0.2.4**, chaque plan reçoit un extrait de son journal SenseFlow avec dix secondes de marge avant
+et après. Les mesures restent à leur fréquence d’origine et les points de synchronisation sont recalés.
+Cela évite de charger le journal de toute une séance pour chaque nœud Gyroflow. Les extraits sont conservés
+dans le dossier caché `.mlv2resolve-gyro` à côté des rushs : gardez ce dossier avec le tournage.
+
+Au remontage, les anciens `.gyroflow` écrits par mlv2Resolve sont optimisés automatiquement, avec sauvegarde
+dans le même dossier `gyroflow-backups` que ci-dessus. Les fichiers d’autres applications sont conservés.
+Après cette migration, redémarrez Resolve s’il avait déjà chargé les anciens journaux. Les formats non pris
+en charge ou les synchronisations hors du journal sont signalés sans remplacer le fichier existant.
 
 ### Rolling shutter adapté au mode d’enregistrement de l’EOS M
 

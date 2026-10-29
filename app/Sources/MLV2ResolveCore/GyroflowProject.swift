@@ -131,6 +131,23 @@ public enum GyroflowProject {
         }
     }
 
+    /// Keep the exact project replaced by migration or explicit regeneration.
+    static func backup(_ source: URL, to directory: URL) throws {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: source.path) else { return }
+        try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let base = "\(source.deletingPathExtension().lastPathComponent)-\(formatter.string(from: Date()))"
+        var target = directory.appendingPathComponent(base + ".gyroflow")
+        var n = 1
+        while fm.fileExists(atPath: target.path) {
+            target = directory.appendingPathComponent("\(base)-\(n).gyroflow"); n += 1
+        }
+        try fm.copyItem(at: source, to: target)
+    }
+
     // NiYien's scheme: "file:///" + absolute path (so "file:////Users/…"), every byte but unreserved and "/"
     // percent-encoded (so "%06d" -> "%2506d", space -> "%20").
     static func fileURL(_ path: String) -> String {

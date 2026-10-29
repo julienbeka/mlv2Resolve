@@ -2,10 +2,10 @@
 
 ### Changes in @VERSION@
 
-- **Color Management choice:** Resolve settings now offer Rec709-A Conversion (default) and Kodak 2383. The choice is remembered for new projects and works with both direct creation and Workspace scripts.
-- **Rec709-A Conversion:** one active timeline CST, P3-D60 / Linear → DaVinci Wide Gamut / Rec.709-A.
-- **Kodak 2383:** two active timeline nodes: CST P3-D60 / Linear → Rec.709 / Cineon Film Log, then Resolve’s built-in Rec709 Kodak 2383 D60 LUT. An explicit error is shown if the LUT is unavailable.
-- **Project color settings:** both modes use DaVinci WG/Intermediate for the timeline and Rec.709-A for output. CinemaDNG decoding remains Project / P3 D60 / Linear, with Forward OOTF disabled on the CST. Existing projects keep their settings.
+
+- **Dual ISO preview memory fix:** Smooth Editing now releases its temporary histograms when Dual ISO detection fails, preventing memory accumulation during repeated frame reads.
+- **Gyroflow playback:** each clip now uses a lossless SenseFlow log excerpt with ten-second handles instead of loading the full session log in every node.
+- **Existing shoots:** app-generated Gyroflow files are optimized automatically on remount, with backups; foreign projects and original logs are preserved. Keep the hidden `.mlv2resolve-gyro` folder with the footage. Restart Resolve after migration to release old gyro caches.
 
 **Requirements:** Apple Silicon Mac, macOS 14 or later; Resolve 21.1.1 tested for the timeline model. Resolve Studio supports direct scripting; Resolve Free uses Workspace → Scripts → mlv2Resolve after choosing the action in the app. FUSE-T is offered on first launch if missing.
 
@@ -19,10 +19,10 @@ Source (GPL-3.0-or-later): https://github.com/@REPO@/tree/@TAG@
 
 ### Nouveautés de @VERSION@
 
-- **Choix de gestion des couleurs :** les réglages Resolve proposent Conversion Rec709-A (par défaut) et Kodak 2383. Le choix est mémorisé pour les nouveaux projets et transmis aux créations directes comme aux scripts Workspace.
-- **Conversion Rec709-A :** un CST actif sur la timeline, P3-D60 / Linear → DaVinci Wide Gamut / Rec.709-A.
-- **Kodak 2383 :** deux nœuds actifs sur la timeline : CST P3-D60 / Linear → Rec.709 / Cineon Film Log, puis LUT Rec709 Kodak 2383 D60 intégrée à Resolve. Une erreur explicite est affichée si la LUT est indisponible.
-- **Réglages couleur du projet :** les deux modes utilisent DaVinci WG/Intermediate pour la timeline et Rec.709-A en sortie. Le décodage CinemaDNG reste Project / P3 D60 / Linear, avec Forward OOTF désactivé sur le CST. Les projets existants conservent leurs réglages.
+
+- **Correction mémoire de la prévisualisation Dual ISO :** Smooth Editing libère désormais ses histogrammes temporaires lorsque la détection Dual ISO échoue, évitant une accumulation mémoire lors des lectures répétées.
+- **Lecture Gyroflow :** chaque plan utilise un extrait SenseFlow sans perte, avec dix secondes de marge, au lieu de charger le journal de toute la séance dans chaque nœud.
+- **Tournages existants :** les fichiers Gyroflow générés par l’app sont optimisés automatiquement au remontage, avec sauvegarde ; les fichiers externes et les journaux originaux sont conservés. Gardez le dossier caché `.mlv2resolve-gyro` avec les rushs. Redémarrez Resolve après migration pour libérer ses anciens caches gyro.
 
 **Prérequis :** Mac Apple Silicon, macOS 14 ou ultérieur ; modèle de timeline testé avec Resolve 21.1.1. Scripting direct avec Resolve Studio ; avec Resolve gratuit, lancez Workspace → Scripts → mlv2Resolve après avoir choisi l’action dans l’app. FUSE-T est proposé au premier lancement s’il manque.
 

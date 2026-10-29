@@ -86,8 +86,10 @@ final class GyroSyncCoordinatorTests: XCTestCase {
         let t = day.hour! * 3600 + s
         h.replaceSubrange(0x40..<0x46, with: [UInt8(day.year! - 2000), UInt8(day.month!), UInt8(day.day!),
                                               UInt8(t / 3600), UInt8(t / 60 % 60), UInt8(t % 60)])
+        h.replaceSubrange(92..<96, with: le(1000, 4))
         var rec = Data([0xAA, 0x55, 0x03]) + Data(count: 13)
         rec[9] = 10
+        rec[15] = 10
         var body = Data(); body.reserveCapacity(seconds * 1000 * 16)
         for _ in 0..<(seconds * 1000) { body += rec }
         let url = tmp.appendingPathComponent("rushes/A1/\(name)_mix.bin")
@@ -141,7 +143,9 @@ final class GyroSyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(c.states[key], .synced(r2: 0.9, log: "t1_mix.bin", offsetMs: -10_000))
         let p = try json(gyroflow(dir))
         let src = try XCTUnwrap(p["gyro_source"] as? [String: Any])
-        XCTAssertTrue((src["filepath"] as? String ?? "").hasSuffix("t1_mix.bin"))
+        let excerptURL = try XCTUnwrap(URL(string: try XCTUnwrap(src["filepath"] as? String)))
+        XCTAssertTrue(excerptURL.path.contains("/.mlv2resolve-gyro/"))
+        XCTAssertEqual(try A1Log.read(excerptURL).gyro.count, 30_000)
         XCTAssertTrue((p["videofile"] as? String ?? "").contains("mounts/Day1/\(dir)/"))
         XCTAssertEqual(defaults.stringArray(forKey: "gyroWritten"), [key])
 
@@ -153,6 +157,35 @@ final class GyroSyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(c2.states[key], .synced(r2: 0.9, log: "t1_mix.bin", offsetMs: -10_000))
         let calls = await gate.calls
         XCTAssertEqual(calls, 0)
+    }
+
+    func testMigratesOwnedLegacyProjectWithoutMotionAnalysis() async throws {
+        let (clip, key, dir) = try makeClip("A001", atSecond: 30)
+        let log = try makeLog("t1", atSecond: 0)
+        let timing = try XCTUnwrap(MLVHeader.timing(of: clip.files[0]))
+        let old = try GyroflowProject.make(clipDir: mountPoint.appendingPathComponent(dir), timing: timing,
+                                           log: log, offsetMs: -30_000, calibration: [:], position: .top)
+        try old.write(to: gyroflow(dir))
+        defaults.set([key], forKey: "gyroWritten")
+        defaults.set([key: ["r2": 0.8, "log": "t1_mix.bin", "offsetMs": -30_000.0, "profile": "computed"]], forKey: "gyroWrittenMeta")
+        let gate = MotionGate()
+        let c = coordinator(gate: gate)
+        await c.shootMounted(shoot([clip]), mountPoint: mountPoint, chosenFolder: chosen)
+        XCTAssertEqual(c.states[key], .synced(r2: 0.8, log: "t1_mix.bin", offsetMs: -30_000))
+        let updated = try Data(contentsOf: gyroflow(dir))
+        XCTAssertNotEqual(updated, old)
+        let source = try XCTUnwrap(try json(gyroflow(dir))["gyro_source"] as? [String: Any])
+        XCTAssertTrue((source["filepath"] as? String ?? "").contains(".mlv2resolve-gyro"))
+        XCTAssertEqual(try json(gyroflow(dir))["offsets"] as? [String: Double], ["11500000": -10_000, "15000000": -10_000, "18500000": -10_000])
+        let calls = await gate.calls
+        XCTAssertEqual(calls, 0)
+        let copies = try FileManager.default.contentsOfDirectory(at: backups.appendingPathComponent("Day1"), includingPropertiesForKeys: nil)
+        XCTAssertEqual(copies.count, 1)
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(copies.first)), old)
+        c.shootUnmounted(shoot([clip]))
+        await c.shootMounted(shoot([clip]), mountPoint: mountPoint, chosenFolder: chosen)
+        XCTAssertEqual(try Data(contentsOf: gyroflow(dir)), updated)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: backups.appendingPathComponent("Day1").path).count, 1)
     }
 
     /// A clip whose header says 1x1 among 1x3 clips of the same size gets the 1x3 Gyroflow project.

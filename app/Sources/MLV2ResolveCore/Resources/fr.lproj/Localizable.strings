@@ -50,3 +50,5 @@
 
 "1 clip desqueezed in Resolve." = "1 plan désanamorphosé dans Resolve.";
 "%@ clips desqueezed in Resolve." = "%@ plans désanamorphosés dans Resolve.";
+
+"Couldn't optimize the gyro log: %@" = "Impossible d’optimiser le journal gyro : %@";

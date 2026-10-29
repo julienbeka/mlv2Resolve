@@ -8,7 +8,7 @@ Edit Magic Lantern **MLV footage directly in DaVinci Resolve**, without converti
 
 ## Download and install
 
-**[Download mlv2Resolve 0.2.2 for Apple Silicon](https://github.com/julienbeka/mlv2Resolve/releases/download/v0.2.2/mlv2Resolve-0.2.2-macos-arm64.zip)** · [Release notes and SHA-256](https://github.com/julienbeka/mlv2Resolve/releases/tag/v0.2.2)
+**[Download mlv2Resolve 0.2.4 for Apple Silicon](https://github.com/julienbeka/mlv2Resolve/releases/download/v0.2.4/mlv2Resolve-0.2.4-macos-arm64.zip)** · [Release notes and SHA-256](https://github.com/julienbeka/mlv2Resolve/releases/tag/v0.2.4)
 
 - **Mac:** Apple Silicon, macOS 14 or later. The interface includes native macOS Tahoe icons and styling.
 - **Resolve:** tested with DaVinci Resolve Studio 21.1.1. Studio supports direct actions from the app; the free edition uses the Workspace script described below.
@@ -19,7 +19,7 @@ Edit Magic Lantern **MLV footage directly in DaVinci Resolve**, without converti
 2. The app is not notarized: if macOS blocks the first launch, use **System Settings → Privacy & Security → Open Anyway**.
 3. Open the app and complete FUSE-T installation if prompted. The main window opens at launch; the app also appears in the Dock and **Command-Tab**. Its menu-bar camera **ML** icon gives quick access to the workflow.
 
-To verify the download, place the ZIP and its `.sha256` file in the same folder and run `shasum -a 256 -c mlv2Resolve-0.2.2-macos-arm64.zip.sha256`.
+To verify the download, place the ZIP and its `.sha256` file in the same folder and run `shasum -a 256 -c mlv2Resolve-0.2.4-macos-arm64.zip.sha256`.
 
 English and French are included. The interface follows macOS; choose a different language in **Settings → Language**.
 
@@ -103,6 +103,16 @@ matches its dimensions; other clips keep the computed profile. The clip's state 
 An existing `.gyroflow` that mlv2Resolve did not write (e.g. made with NiYien Tool) is kept. **Regenerate** on a
 clip replaces it, as does changing that clip's lens or position; the replaced file is first copied to
 `~/Library/Application Support/mlv2Resolve/gyroflow-backups/<shoot>/`.
+
+Since **0.2.4**, each clip uses an excerpt of its SenseFlow log with ten-second handles on either side.
+Sensor samples keep their original rate and synchronization points are shifted consistently. This avoids
+loading a full-session log for every Gyroflow node. Excerpts live in the hidden `.mlv2resolve-gyro` folder
+beside the footage: keep this folder with the shoot.
+
+On remount, legacy `.gyroflow` files written by mlv2Resolve are optimized automatically, with backups in the
+same `gyroflow-backups` folder described above. Files made by other applications are kept. Restart Resolve
+after migration if it had already loaded the old logs. Unsupported formats and clips outside their log
+are reported without replacing the existing project file.
 
 ### Rolling shutter matched to the EOS M recording mode
 

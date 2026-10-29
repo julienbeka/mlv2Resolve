@@ -50,6 +50,8 @@ protected-entry part on the real folder. Every run uses `--index-dir` (a new tem
 is ever written next to a clip.
 
 Unit tests (no FUSE needed):
+- `make -C engine -f Makefile.arm64 dual-iso-preview-test`: 128 frames without a Dual ISO pattern;
+  verifies preview rejection releases all four histogram allocations per frame and preserves raw pixels.
 - `make -C engine -f Makefile.arm64 sidecar-test`: sidecar name rules (protected MLV family/.IDX/.MLD/index in any
   case, hidden Finder metadata, virtual names, clip prefix rule, extension allowlist, NFC/NFD equality), the path
   policy used by the engine before any write (`m24-1546.mlv`, `X.gyroflow.MLV`, `._X.MLV`, `._._x`, `a/../X.MLV`,
@@ -65,3 +67,12 @@ Unit tests (no FUSE needed):
 Live switch on a mount: `kill -USR2 <mlvfs pid>` (high quality) / `kill -USR1 <pid>` (preview). The DNG
 mtime/ctime shift by the switch generation (in microseconds) so the FUSE-T NFS client refetches frames it had
 cached; it does so once its attribute cache expires (a few seconds).
+
+Performance diagnostics (not playback guarantees):
+- `make -C engine -f Makefile.arm64 frame-benchmark` builds a direct frame-processing probe.
+  Run `build/engine/frame_benchmark SOURCE MODE BAD_PIX FOCUS_PIX CLIPS FRAMES INDEX_DIR FPM_DIR`;
+  mode 0/1/2 = raw/preview/grading; supply a temporary index directory so source clips stay untouched.
+- `python3 engine/tests/mounted_benchmark.py SOURCE` compares sequential reads with round-robin reads
+  across the shoot through a temporary FUSE-T mount. `MLV_BENCH_BAD=0` disables only bad pixel correction.
+  Logs and indexes stay in its temporary diagnostics directory. It unmounts its own volume on exit.
+  Warm filesystem caches and NFS read-ahead affect results; these probes do not include Resolve GPU/effect processing.

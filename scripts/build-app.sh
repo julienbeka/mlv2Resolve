@@ -8,7 +8,7 @@ cd "$ROOT"
 "$ROOT/scripts/build-engine.sh"
 
 # Local builds target the next release. CI may supply an explicit release version.
-MARKETING_VERSION="${MARKETING_VERSION:-0.2.4}"
+MARKETING_VERSION="${MARKETING_VERSION:-0.2.5}"
 PREVIOUS_INFO="$ROOT/build/mlv2Resolve.app/Contents/Info.plist"
 if [[ -z "${BUILD_NUMBER:-}" ]]; then
   PREVIOUS_BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PREVIOUS_INFO" 2>/dev/null || true)"

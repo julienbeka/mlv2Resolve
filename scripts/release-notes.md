@@ -2,6 +2,7 @@
 
 ### Changes in @VERSION@
 
+- **Group color pipeline:** all timeline clips share the All group, with input CST in Group Pre Clip and Rec709-A or three-node Kodak output in Group Post Clip. The Timeline graph stays empty. This applies to new projects; existing grades are preserved.
 
 - **Dual ISO preview memory fix:** Smooth Editing now releases its temporary histograms when Dual ISO detection fails, preventing memory accumulation during repeated frame reads.
 - **Gyroflow playback:** each clip now uses a lossless SenseFlow log excerpt with ten-second handles instead of loading the full session log in every node.
@@ -19,6 +20,7 @@ Source (GPL-3.0-or-later): https://github.com/@REPO@/tree/@TAG@
 
 ### Nouveautés de @VERSION@
 
+- **Couleurs par groupe :** tous les plans de la timeline rejoignent All, avec CST d’entrée en Group Pre Clip et sortie Rec709-A ou Kodak à trois nœuds en Group Post Clip. Le graphe Timeline reste vide. Ce changement concerne les nouveaux projets ; les étalonnages existants sont conservés.
 
 - **Correction mémoire de la prévisualisation Dual ISO :** Smooth Editing libère désormais ses histogrammes temporaires lorsque la détection Dual ISO échoue, évitant une accumulation mémoire lors des lectures répétées.
 - **Lecture Gyroflow :** chaque plan utilise un extrait SenseFlow sans perte, avec dix secondes de marge, au lieu de charger le journal de toute la séance dans chaque nœud.

@@ -8,7 +8,7 @@ Montez vos **rushs Magic Lantern MLV directement dans DaVinci Resolve**, sans co
 
 ## Téléchargement et installation
 
-**[Télécharger mlv2Resolve 0.2.4 pour Apple Silicon](https://github.com/julienbeka/mlv2Resolve/releases/download/v0.2.4/mlv2Resolve-0.2.4-macos-arm64.zip)** · [Notes de version et empreinte SHA-256](https://github.com/julienbeka/mlv2Resolve/releases/tag/v0.2.4)
+**[Télécharger mlv2Resolve 0.2.5 pour Apple Silicon](https://github.com/julienbeka/mlv2Resolve/releases/download/v0.2.5/mlv2Resolve-0.2.5-macos-arm64.zip)** · [Notes de version et empreinte SHA-256](https://github.com/julienbeka/mlv2Resolve/releases/tag/v0.2.5)
 
 - **Mac :** Apple Silicon, macOS 14 ou ultérieur. L’interface intègre les icônes et l’apparence natives de macOS Tahoe.
 - **Resolve :** testé avec DaVinci Resolve Studio 21.1.1. Studio permet les actions directes depuis l’app ; l’édition gratuite utilise le script Workspace décrit plus bas.
@@ -19,7 +19,7 @@ Montez vos **rushs Magic Lantern MLV directement dans DaVinci Resolve**, sans co
 2. L’app n’est pas notarisée : si macOS bloque le premier lancement, utilisez **Réglages Système → Confidentialité et sécurité → Ouvrir quand même**.
 3. Ouvrez l’app et terminez l’installation de FUSE-T si elle est proposée. La fenêtre principale s’affiche au lancement ; l’app apparaît aussi dans le Dock et dans **⌘ Tab**. Son icône d’appareil photo **ML** dans la barre des menus donne un accès rapide au workflow.
 
-Pour vérifier le téléchargement, placez le ZIP et son fichier `.sha256` dans le même dossier, puis lancez `shasum -a 256 -c mlv2Resolve-0.2.4-macos-arm64.zip.sha256`.
+Pour vérifier le téléchargement, placez le ZIP et son fichier `.sha256` dans le même dossier, puis lancez `shasum -a 256 -c mlv2Resolve-0.2.5-macos-arm64.zip.sha256`.
 
 Le français et l’anglais sont inclus. L’interface suit macOS ; choisissez une autre langue dans **Réglages → Langue**.
 
@@ -51,7 +51,7 @@ Dans **Réglages → Resolve** :
 
 - **Taille du projet :** Automatique utilise la résolution désanamorphosée majoritaire des rushs montés ; UHD ou HD adapte le zoom pour montrer l’image entière, avec des bandes si nécessaire.
 - **Cadence :** utilisez la cadence majoritaire des rushs ou choisissez une valeur manuelle. La cadence de timeline du projet et sa cadence de lecture sont préparées à la même valeur.
-- **All shots :** ajoutez facultativement tous les plans importés à une timeline. L’option est activée par défaut ; son nom est modifiable et vaut **All shots** par défaut. Désactivez-la pour préparer une timeline vide avec ses CST.
+- **All shots :** ajoutez facultativement tous les plans importés à une timeline. L’option est activée par défaut ; son nom est modifiable et vaut **All shots** par défaut. Désactivez-la pour préparer une timeline vide avec les grades de groupe préparés.
 - **Liens de projets :** effacez les associations mémorisées par l’app sans supprimer les projets Resolve ni les rushs.
 
 Les nouvelles timelines remplies reçoivent un nœud Color **Gyroflow(NiYien)** sur chaque plan si le plugin est installé. Dans le plugin, utilisez **Load for current file** pour charger les données `.gyroflow` de ce plan. L’absence du plugin est signalée.
@@ -60,12 +60,19 @@ Les nouvelles timelines remplies reçoivent un nœud Color **Gyroflow(NiYien)** 
 
 Choisissez la **Gestion des couleurs** dans les réglages Resolve. Les deux modes utilisent **DaVinci WG/Intermediate** pour la timeline, **Rec.709-A** en sortie du projet, et le décodage CinemaDNG **Project / P3 D60 / Linear**.
 
-| Mode | Nœuds actifs sur la timeline |
-| --- | --- |
-| **Conversion Rec709-A** (par défaut) | Un CST : P3-D60 / Linear → DaVinci Wide Gamut / Rec.709-A |
-| **Kodak 2383** | Un CST : P3-D60 / Linear → Rec.709 / Cineon Film Log, suivi de la LUT **Film Looks / Rec709 Kodak 2383 D60** intégrée à Resolve |
+Tous les plans vidéo de la timeline appartiennent au groupe **All**. **Group Pre Clip** contient un CST :
+**P3-D60 / Linear → DaVinci Wide Gamut / DaVinci Intermediate**, avec Tone Mapping et Gamut Mapping sur None.
 
-Les CST utilisent Tone Mapping et Gamut Mapping sur None, avec Apply Forward OOTF désactivé. Tous les nœuds du mode choisi sont actifs dès la création. Le choix est mémorisé et s’applique uniquement aux nouveaux projets ; les projets existants conservent leurs réglages. La LUT Kodak est résolue dans l’installation locale de Resolve ; une erreur explicite est affichée si elle est indisponible.
+| Mode | Group Post Clip |
+|---|---|
+| **Conversion Rec709-A** (par défaut) | CST : DWG / Intermediate → Rec.709 / Rec.709-A |
+| **Kodak 2383** | CST : DWG / Intermediate → Rec.709 / Cineon Film Log → LUT **Film Looks / Rec709 Kodak 2383 D60** → CST : Rec.709 / Rec.709 → Rec.709 / Rec.709-A |
+
+Le CST final Rec.709-A utilise Tone Mapping DaVinci (Adaptation 9) et Gamut Mapping None. Le CST qui précède
+la LUT Kodak utilise Tone Mapping et Gamut Mapping None. **Le graphe Timeline ne contient aucun nœud.**
+Gyroflow reste sur chaque plan. Le choix est mémorisé et s’applique uniquement aux nouveaux projets ;
+les projets existants conservent leur étalonnage. La LUT Kodak est résolue dans l’installation locale de
+Resolve ; une erreur explicite est affichée si elle est indisponible.
 
 ### Rushs anamorphiques et Dual ISO
 

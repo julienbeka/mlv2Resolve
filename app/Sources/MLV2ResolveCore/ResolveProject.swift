@@ -162,8 +162,8 @@ public enum ResolveProject {
         }
         lua += "}\nlocal APPROVED = \(approvedCurrent.map(quote) ?? "nil")\nlocal MENU = \(menu)\n"
         lua += "local TEXT = {switch=\(quote(text("Switch Resolve project?", "Changer de projet Resolve ?"))),cancel=\(quote(text("Cancel", "Annuler"))),open=\(quote(text("Open", "Ouvrir"))),guide=\(quote(guide)),done=\(quote(text("Project preparation finished. See the console for details.", "Préparation terminée. Consultez la console pour le détail.")))}\n"
-        lua += "local TIMELINE_TEMPLATE = \(quote(colorManagement.timelineTemplateURL.path))\nlocal GYRO_TEMPLATE = \(quote(gyroTemplateURL.path))\nlocal INCLUDE_ALL_SHOTS = \(includeAllShots)\nlocal TIMELINE_NAME = \(quote(timelineName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "All shots" : timelineName.trimmingCharacters(in: .whitespacesAndNewlines)))\nlocal CREATE_ONLY = \(createOnly)\nlocal RECEIPTS = \(receiptsURL.map { quote($0.path) } ?? "nil")\n"
-        lua += "local COLOR_NODE_COUNT = \(colorManagement.nodeCount)\nlocal COLOR_LUT = \(colorManagement.lutPath.map(quote) ?? "nil")\n"
+        lua += "local TIMELINE_TEMPLATE = \(quote(colorManagement.timelineTemplateURL.path))\nlocal COLOR_TEMPLATE = \(quote(colorManagement.colorTemplateURL.path))\nlocal INCLUDE_ALL_SHOTS = \(includeAllShots)\nlocal TIMELINE_NAME = \(quote(timelineName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "All shots" : timelineName.trimmingCharacters(in: .whitespacesAndNewlines)))\nlocal CREATE_ONLY = \(createOnly)\nlocal RECEIPTS = \(receiptsURL.map { quote($0.path) } ?? "nil")\n"
+        lua += "local COLOR_POST_NODE_COUNT = \(colorManagement.nodeCount)\nlocal COLOR_LUT = \(colorManagement.lutPath.map(quote) ?? "nil")\n"
         let url = Bundle.module.url(forResource: "resolve-project", withExtension: "lua")!
         return lua + (try! String(contentsOf: url, encoding: .utf8))
     }
@@ -326,7 +326,7 @@ public enum ResolveProject {
         L10n.bundle.preferredLocalizations.first?.hasPrefix("fr") == true ? fr : en
     }
     public static var guide: String {
-        text("Wait for gyro sync to finish. With Resolve Studio, enable Preferences → System → General → External scripting using: Local. With the free version, click the desired action in mlv2Resolve, then run Workspace → Scripts → mlv2Resolve in Resolve. The menu script performs that action.\n\nAll mounted folders are combined in one named project. Size and frame rate are project settings. The portable colour model prepares DWG/Intermediate and the timeline CST nodes.",
-             "Attendez la fin de la synchro gyro. Avec Resolve Studio, activez Preferences → System → General → External scripting using: Local. Avec la version gratuite, cliquez sur l’action souhaitée dans mlv2Resolve, puis lancez Workspace → Scripts → mlv2Resolve dans Resolve. Le script exécute cette action.\n\nTous les dossiers montés sont réunis dans un projet nommé. La taille et la cadence sont réglées au niveau du projet. Le modèle couleur portable prépare DWG/Intermediate et les CST de timeline.")
+        text("Wait for gyro sync to finish. With Resolve Studio, enable Preferences → System → General → External scripting using: Local. With the free version, click the desired action in mlv2Resolve, then run Workspace → Scripts → mlv2Resolve in Resolve. The menu script performs that action.\n\nAll mounted folders are combined in one named project. Size and frame rate are project settings. The portable colour model prepares DWG/Intermediate and the All group pre-clip and post-clip CST nodes.",
+             "Attendez la fin de la synchro gyro. Avec Resolve Studio, activez Preferences → System → General → External scripting using: Local. Avec la version gratuite, cliquez sur l’action souhaitée dans mlv2Resolve, puis lancez Workspace → Scripts → mlv2Resolve dans Resolve. Le script exécute cette action.\n\nTous les dossiers montés sont réunis dans un projet nommé. La taille et la cadence sont réglées au niveau du projet. Le modèle couleur portable prépare DWG/Intermediate et les CST de pré-groupe et post-groupe All.")
     }
 }

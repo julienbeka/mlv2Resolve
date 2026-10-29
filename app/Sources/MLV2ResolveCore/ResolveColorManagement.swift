@@ -7,10 +7,14 @@ public enum ResolveColorManagement: String, CaseIterable, Sendable {
     case kodak2383
 
     public var timelineTemplateURL: URL {
-        let name = self == .conversionRec709A ? "resolve-timeline-rec709-a" : "resolve-timeline-kodak2383"
+        Bundle.module.url(forResource: "resolve-timeline-empty", withExtension: "drt")!
+    }
+    /// Contains a temporary member clip so Resolve initializes both color-group graphs on import.
+    public var colorTemplateURL: URL {
+        let name = self == .conversionRec709A ? "resolve-color-rec709-a" : "resolve-color-kodak2383"
         return Bundle.module.url(forResource: name, withExtension: "drt")!
     }
-    public var nodeCount: Int { self == .conversionRec709A ? 1 : 2 }
+    public var nodeCount: Int { self == .conversionRec709A ? 1 : 3 }
     public var lutPath: String? {
         self == .kodak2383 ? "Film Looks/Rec709 Kodak 2383 D60.cube" : nil
     }

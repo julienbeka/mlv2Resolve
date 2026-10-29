@@ -8,7 +8,7 @@ Edit Magic Lantern **MLV footage directly in DaVinci Resolve**, without converti
 
 ## Download and install
 
-**[Download mlv2Resolve 0.2.4 for Apple Silicon](https://github.com/julienbeka/mlv2Resolve/releases/download/v0.2.4/mlv2Resolve-0.2.4-macos-arm64.zip)** · [Release notes and SHA-256](https://github.com/julienbeka/mlv2Resolve/releases/tag/v0.2.4)
+**[Download mlv2Resolve 0.2.5 for Apple Silicon](https://github.com/julienbeka/mlv2Resolve/releases/download/v0.2.5/mlv2Resolve-0.2.5-macos-arm64.zip)** · [Release notes and SHA-256](https://github.com/julienbeka/mlv2Resolve/releases/tag/v0.2.5)
 
 - **Mac:** Apple Silicon, macOS 14 or later. The interface includes native macOS Tahoe icons and styling.
 - **Resolve:** tested with DaVinci Resolve Studio 21.1.1. Studio supports direct actions from the app; the free edition uses the Workspace script described below.
@@ -19,7 +19,7 @@ Edit Magic Lantern **MLV footage directly in DaVinci Resolve**, without converti
 2. The app is not notarized: if macOS blocks the first launch, use **System Settings → Privacy & Security → Open Anyway**.
 3. Open the app and complete FUSE-T installation if prompted. The main window opens at launch; the app also appears in the Dock and **Command-Tab**. Its menu-bar camera **ML** icon gives quick access to the workflow.
 
-To verify the download, place the ZIP and its `.sha256` file in the same folder and run `shasum -a 256 -c mlv2Resolve-0.2.4-macos-arm64.zip.sha256`.
+To verify the download, place the ZIP and its `.sha256` file in the same folder and run `shasum -a 256 -c mlv2Resolve-0.2.5-macos-arm64.zip.sha256`.
 
 English and French are included. The interface follows macOS; choose a different language in **Settings → Language**.
 
@@ -51,7 +51,7 @@ In **Settings → Resolve**:
 
 - **Project size:** Automatic uses the majority desqueezed resolution across mounted footage; UHD or HD fits the complete image, with bars where needed.
 - **Cadence:** use the majority footage frame rate or choose a manual value. Both project timeline cadence and playback cadence are prepared to match.
-- **All shots:** optionally add every imported shot to a timeline. It is enabled by default; the name is editable and defaults to **All shots**. Disable it to prepare an empty timeline with its CSTs.
+- **All shots:** optionally add every imported shot to a timeline. It is enabled by default; the name is editable and defaults to **All shots**. Disable it to prepare an empty timeline with the prepared group grades.
 - **Project links:** clear the app's saved associations without deleting Resolve projects or footage.
 
 New populated timelines receive a **Gyroflow(NiYien)** Color node on each clip when the plugin is installed. In the plugin, use **Load for current file** to load that clip's `.gyroflow` data. Missing plugin installation is reported.
@@ -60,12 +60,18 @@ New populated timelines receive a **Gyroflow(NiYien)** Color node on each clip w
 
 Choose **Color Management** in Resolve settings. Both modes use **DaVinci WG/Intermediate** for the timeline, **Rec.709-A** for project output, and CinemaDNG decoding **Project / P3 D60 / Linear**.
 
-| Mode | Active timeline nodes |
-| --- | --- |
-| **Rec709-A Conversion** (default) | One CST: P3-D60 / Linear → DaVinci Wide Gamut / Rec.709-A |
-| **Kodak 2383** | One CST: P3-D60 / Linear → Rec.709 / Cineon Film Log, followed by Resolve’s built-in **Film Looks / Rec709 Kodak 2383 D60** LUT |
+All timeline video clips belong to color group **All**. **Group Pre Clip** contains one CST:
+**P3-D60 / Linear → DaVinci Wide Gamut / DaVinci Intermediate**, with Tone Mapping and Gamut Mapping set to None.
 
-The CSTs use None for Tone Mapping and Gamut Mapping, with Apply Forward OOTF disabled. All selected mode nodes are active on creation. The choice is remembered and applies only to new projects; existing projects retain their settings. The Kodak LUT is resolved from the local Resolve installation; a clear error is reported if it is unavailable.
+| Mode | Group Post Clip |
+|---|---|
+| **Rec709-A Conversion** (default) | CST: DWG / Intermediate → Rec.709 / Rec.709-A |
+| **Kodak 2383** | CST: DWG / Intermediate → Rec.709 / Cineon Film Log → **Film Looks / Rec709 Kodak 2383 D60** LUT → CST: Rec.709 / Rec.709 → Rec.709 / Rec.709-A |
+
+The final Rec.709-A CST uses DaVinci Tone Mapping (Adaptation 9) and no Gamut Mapping. The CST feeding the
+Kodak LUT uses no tone or gamut mapping. **The Timeline graph has no nodes.** Gyroflow remains on each clip.
+The choice is remembered and applies only to new projects; existing projects retain their grading.
+The Kodak LUT is resolved from the local Resolve installation; a clear error is reported if unavailable.
 
 ### Anamorphic footage and Dual ISO
 

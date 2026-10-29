@@ -1,5 +1,7 @@
 # Choix de gestion des couleurs — 28 octobre 2026
 
+> Structure remplacée par la [correction des grades de groupe du 29 octobre](2026-10-29-group-color-management.md).
+
 ## Comportement
 
 Le sélecteur Resolve « Gestion des couleurs » propose Conversion Rec709-A (valeur initiale) et Kodak 2383. La préférence `resolveColorManagement` est mémorisée, propagée à la création directe et aux scripts Workspace, y compris lors de leur régénération automatique. Un choix absent ou inconnu utilise Conversion Rec709-A.

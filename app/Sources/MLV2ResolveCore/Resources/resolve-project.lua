@@ -105,7 +105,7 @@ local ok,err=pcall(function()
     local root=pool:GetRootFolder()
     local seen={}; visit(root,seen)
     pool:SetCurrentFolder(root)
-    local rushs,gyroTemplate,gyroSource,gyroMedia,anchor=nil,nil,nil,nil,nil
+    local rushs,gyroTemplate,gyroSource,gyroMedia,anchor,colorGroup=nil,nil,nil,nil,nil,nil
     local modelFolderName='__mlv2Resolve_gyro_model'
     local function hasGyro(item)
       local graph=item:GetNodeGraph()
@@ -147,11 +147,16 @@ local ok,err=pcall(function()
       -- An existing empty timeline anchors the chosen project cadence during DRT imports.
       anchor=pool:CreateEmptyTimeline('__mlv2Resolve_format_anchor')
       if not anchor then error('Could not initialize project format') end
+      -- The model's temporary clip keeps All's pre/post graphs initialized during import.
+      gyroTemplate=pool:ImportTimelineFromFile(COLOR_TEMPLATE,{importIntoSubFolderName=modelFolderName})
+      local modelClip=gyroTemplate and (gyroTemplate:GetItemListInTrack('video',1) or {})[1]
+      if not modelClip then error('Could not import the color group model') end
+      gyroMedia=modelClip:GetMediaPoolItem()
+      colorGroup=modelClip:GetColorGroup()
+      if not colorGroup or colorGroup:GetName()~='All' then error('Could not prepare color group All') end
       if INCLUDE_ALL_SHOTS then
-        gyroTemplate=pool:ImportTimelineFromFile(GYRO_TEMPLATE,{importIntoSubFolderName=modelFolderName})
-        if gyroTemplate then gyroSource=(gyroTemplate:GetItemListInTrack('video',1) or {})[1] end
-        if gyroSource then gyroMedia=gyroSource:GetMediaPoolItem() end
-        if not gyroSource or not hasGyro(gyroSource) then
+        gyroSource=modelClip
+        if not hasGyro(gyroSource) then
           gyroSource=nil
           warn('Gyroflow(NiYien) plugin unavailable: install it before creating the project')
         end
@@ -162,15 +167,18 @@ local ok,err=pcall(function()
       anchor=nil
       if not rushs:SetName(TIMELINE_NAME) then error('Could not name timeline: ' .. TIMELINE_NAME) end
       local graph=rushs:GetNodeGraph()
-      if not graph or graph:GetNumNodes()~=COLOR_NODE_COUNT then
-        error('Could not prepare the selected timeline color management')
+      if not graph or graph:GetNumNodes()~=0 then error('The timeline color graph must be empty') end
+      local pre,post=colorGroup:GetPreClipNodeGraph(),colorGroup:GetPostClipNodeGraph()
+      if not pre or not post or pre:GetNumNodes()~=1 or post:GetNumNodes()~=COLOR_POST_NODE_COUNT then
+        error('Could not prepare the selected group color management')
       end
-      for n=1,COLOR_NODE_COUNT do
-        if not graph:SetNodeEnabled(n,true) then error('Could not enable timeline color node ' .. n) end
+      if not pre:SetNodeEnabled(1,true) then error('Could not enable group input CST') end
+      for n=1,COLOR_POST_NODE_COUNT do
+        if not post:SetNodeEnabled(n,true) then error('Could not enable group output node ' .. n) end
       end
-      -- Resolve resolves its built-in LUT by relative path on the current machine.
+      -- Bind the installed built-in LUT; no LUT data is redistributed with the model.
       if COLOR_LUT then
-        if not graph:SetLUT(2,COLOR_LUT) or graph:GetLUT(2)~=COLOR_LUT then
+        if not post:SetLUT(2,COLOR_LUT) or post:GetLUT(2)~=COLOR_LUT then
           error('Required Resolve LUT unavailable: ' .. COLOR_LUT)
         end
       end
@@ -235,6 +243,7 @@ local ok,err=pcall(function()
             local timelineItems=pool:AppendToTimeline({video}) or {}
             if #timelineItems==0 then warn(c.name .. ': timeline append refused') end
             for _,item in ipairs(timelineItems) do
+              if not item:AssignToColorGroup(colorGroup) then error(c.name .. ': color group assignment refused') end
               if gyroSource and (not gyroSource:CopyGrades({item}) or not hasGyro(item)) then
                 warn(c.name .. ': Gyroflow(NiYien) node could not be applied')
               end
@@ -250,6 +259,14 @@ local ok,err=pcall(function()
           end
         end)
         if not success then failed=failed+1; warn(c.name .. ': ' .. tostring(reason)) end
+      end
+    end
+    if created and rushs then
+      for track=1,rushs:GetTrackCount('video') do
+        for _,item in ipairs(rushs:GetItemListInTrack('video',track) or {}) do
+          local group=item:GetColorGroup()
+          if not group or group:GetName()~='All' then error('A timeline clip is missing from color group All') end
+        end
       end
     end
     cleanupPending()

@@ -284,6 +284,12 @@ final class ResolveProjectTests: XCTestCase {
     existing=false; studio=true; currentName=nil; imports=0; syncs=0; settings=0; presets=0; rushs=0; zoom=0
     local items={}
     local modelMedia={}
+    local timelineClips={}
+    colorPostCount=1
+    colorGroupFixture={GetName=function() return 'All' end,
+      GetPreClipNodeGraph=function() return {GetNumNodes=function() return 1 end,SetNodeEnabled=function(self,n,on) assert(n==1 and on); return true end} end,
+      GetPostClipNodeGraph=function() return {GetNumNodes=function() return colorPostCount end,SetNodeEnabled=function(self,n,on) assert(on); return true end,
+        SetLUT=function(self,n,path) assert(n==2); selectedLUT=path; return true end,GetLUT=function() return selectedLUT end} end}
     local function item(path)
       return {GetClipProperty=function(self,k) if k=='File Path' then return path else return '' end end,
               SetClipProperty=function(self,k,v) assert(k=='Input Sizing Preset' and v=='mlv2Resolve 1x3'); return true end}
@@ -299,29 +305,35 @@ final class ResolveProjectTests: XCTestCase {
       end,
       AutoSyncAudio=function(self,pair,opts) assert(#pair==2 and opts[1]==0 and opts[2]==true); syncs=syncs+1; return true end,
       ImportTimelineFromFile=function(self,path,options)
-        if path:match('resolve%-clip%-gyro.drt$') then
+        if path:match('resolve%-color%-') then
+          colorPostCount=path:find('kodak2383',1,true) and 3 or 1
           return {GetItemListInTrack=function() return {{
             GetMediaPoolItem=function() return modelMedia end,
+            GetColorGroup=function() return colorGroupFixture end,
             GetNodeGraph=function() return {GetNumNodes=function() return 1 end,GetToolsInNode=function() return {'OFX: Gyroflow(Niyien)'} end} end,
             CopyGrades=function(self,targets) gyroCopied=(gyroCopied or 0)+#targets; for _,t in ipairs(targets) do t.gyro=true end; return true end
           }} end}
         end
-        assert(path:match('resolve%-timeline%-rec709%-a.drt$') and options.timelineName=='All shots'); rushs=rushs+1
+        assert(path:match('resolve%-timeline%-empty.drt$') and options.timelineName=='All shots'); rushs=rushs+1
         return {SetName=function() return true end, SetSetting=function() return true end, GetNodeGraph=function() return {
-          GetNumNodes=function() return 1 end, SetNodeEnabled=function() return true end} end}
+          GetNumNodes=function() return 0 end} end,GetTrackCount=function() return 1 end,GetItemListInTrack=function() return timelineClips end}
       end,
       CreateEmptyTimeline=function(self,name) assert(name=='__mlv2Resolve_format_anchor'); return {} end,
       DeleteTimelines=function() modelRemoved=true; return true end,
       DeleteClips=function(self,clips) assert(#clips==1 and clips[1]==modelMedia); modelMediaRemoved=true; return true end,
-      AppendToTimeline=function(self,clips) return {{
-        GetNodeGraph=function(self) return {GetNumNodes=function() return 1 end,GetToolsInNode=function() return self.gyro and {'OFX: Gyroflow(Niyien)'} or {} end} end,
-        SetProperty=function(self,k,v) zoom=v; return true end}} end}
+      AppendToTimeline=function(self,clips)
+        local x={GetNodeGraph=function(self) return {GetNumNodes=function() return 1 end,GetToolsInNode=function() return self.gyro and {'OFX: Gyroflow(Niyien)'} or {} end} end,
+          AssignToColorGroup=function(self,g) assert(g==colorGroupFixture); self.group=g; return true end,
+          GetColorGroup=function(self) return self.group end,
+          SetProperty=function(self,k,v) zoom=v; return true end}
+        table.insert(timelineClips,x); return {x}
+      end}
     local project={GetSetting=function() return nil end,GetName=function() return currentName end, SetPreset=function(self,n) assert(not existing and n=='mlv2Resolve'); presets=presets+1; return true end,
       SetSetting=function(self,k,v) assert(not existing); settings=settings+1; return true end,
       GetTimelineByIndex=function(self,i)
         assert(i==1); rushs=rushs+1
         return {SetName=function() return true end, SetSetting=function() return true end, GetNodeGraph=function() return {
-          GetNumNodes=function() return 1 end, SetNodeEnabled=function() return true end} end}
+          GetNumNodes=function() return 0 end} end,GetTrackCount=function() return 1 end,GetItemListInTrack=function() return timelineClips end}
       end,
       GetMediaPool=function() return pool end, SetCurrentTimeline=function() return true end}
     local pm={GetCurrentProject=function() if currentName then return project end end,
@@ -374,7 +386,7 @@ extension ResolveProjectTests {
           return out
         end
         pool.AppendToTimeline=function(self,clips)
-          return {{GetNodeGraph=function() return {GetNumNodes=function() return 1 end,GetToolsInNode=function() return {'OFX: Gyroflow(Niyien)'} end} end, SetProperty=function(self,k,v)
+          return {{AssignToColorGroup=function() return true end,GetNodeGraph=function() return {GetNumNodes=function() return 1 end,GetToolsInNode=function() return {'OFX: Gyroflow(Niyien)'} end} end, SetProperty=function(self,k,v)
             if k=='ZoomGang' then assert(v==false); unganged=true
             elseif k=='ZoomX' then zx=v elseif k=='ZoomY' then zy=v end
             return true
@@ -395,7 +407,7 @@ extension ResolveProjectTests {
         local pool=p:GetMediaPool(); local original=pool.ImportTimelineFromFile
         pool.ImportTimelineFromFile=function(self,path,opts)
           local t=original(self,path,opts)
-          if path:match('resolve%-clip%-gyro.drt$') then return t end
+          if path:match('resolve%-color%-') then return t end
           t.SetSetting=function(self,k,v) assert(k=='useCustomSettings' and v=='0'); inherited=true; return true end
           return t
         end
@@ -403,22 +415,24 @@ extension ResolveProjectTests {
         let out = try await ResolveDesqueeze.fuscriptRunner()(fixture + "\n" + setup + "\n" + RP.script(shoots:[.init(name:"20261025",media:[clip("a")])], timelineSize:.hd, frameRate:29.97) + "\nassert(inherited and projectSettings.separateColorSpaceAndGamma=='0' and projectSettings.colorSpaceTimeline=='DaVinci WG/Intermediate' and projectSettings.colorSpaceOutput=='Rec.709-A' and projectSettings.timelineFrameRate=='29.97' and playbackRead and projectSettings.timelinePlaybackFrameRate==nil and projectSettings.timelineResolutionWidth=='1920'); print('PROJECT_SETTINGS_VERIFIED')")
         XCTAssertTrue(out.contains("PROJECT_SETTINGS_VERIFIED"),out)
     }
-    func testPortableTimelineTemplateReceivesFormatAndNodeStates() async throws {
+    func testPortableTimelineIsEmptyAndReceivesFormat() async throws {
         try XCTSkipUnless(ResolveDesqueeze.fuscriptURL() != nil)
         let setup = """
         local p=resolve:GetProjectManager():CreateProject('20261025')
         currentName=nil
         local pool=p:GetMediaPool()
+        local original=pool.ImportTimelineFromFile
         pool.ImportTimelineFromFile=function(self,path,options)
-          assert(path:match('resolve%-timeline%-rec709%-a.drt$') and options.timelineName=='My edit' and projectModelImported)
+          if path:match('resolve%-color%-') then return original(self,path,options) end
+          assert(path:match('resolve%-timeline%-empty.drt$') and options.timelineName=='My edit' and projectModelImported)
           modelImported=true
           return {SetName=function(self,name) assert(name=='My edit'); renamed=true; return true end, SetSetting=function(self,k,v) return true end,
-            GetNodeGraph=function() return {GetNumNodes=function() return 1 end,
-              SetNodeEnabled=function(self,i,on) assert(i==1 and on); statesSet=(statesSet or 0)+1; return true end} end}
+            GetTrackCount=function() return 0 end,GetNodeGraph=function() return {GetNumNodes=function() return 0 end,
+              SetNodeEnabled=function() error('Timeline nodes must stay empty') end} end}
         end
         pool.CreateEmptyTimeline=function(self,name) assert(name=='__mlv2Resolve_format_anchor'); return {} end
         """
-        let out = try await ResolveDesqueeze.fuscriptRunner()(fixture + "\n" + setup + "\n" + RP.script(shoots:[.init(name:"20261025",media:[clip("a",width:1920,height:1080,factor:1)])], timelineSize:.hd, includeAllShots:false, timelineName:"My edit") + "\nassert(modelImported and renamed and statesSet==1 and zoom==0); print('TEMPLATE_VERIFIED')")
+        let out = try await ResolveDesqueeze.fuscriptRunner()(fixture + "\n" + setup + "\n" + RP.script(shoots:[.init(name:"20261025",media:[clip("a",width:1920,height:1080,factor:1)])], timelineSize:.hd, includeAllShots:false, timelineName:"My edit") + "\nassert(modelImported and renamed and statesSet==nil and zoom==0); print('TEMPLATE_VERIFIED')")
         XCTAssertFalse(out.contains("ERROR"),out)
         XCTAssertTrue(out.contains("imported=1"),out)
         XCTAssertTrue(out.contains("TEMPLATE_VERIFIED"),out)
@@ -426,25 +440,19 @@ extension ResolveProjectTests {
 }
 
 extension ResolveProjectTests {
-    func testKodakCreationEnablesBothNodesAndBindsResolveLUTOrReportsFailure() async throws {
+    func testKodakCreationEnablesThreeGroupPostNodesAndBindsLUTOrReportsFailure() async throws {
         try XCTSkipUnless(ResolveDesqueeze.fuscriptURL() != nil)
         for available in [true, false] {
             let setup = """
             local p=resolve:GetProjectManager():CreateProject('20261025')
             currentName=nil
             local pool=p:GetMediaPool()
-            local original=pool.ImportTimelineFromFile
-            pool.ImportTimelineFromFile=function(self,path,opts)
-              if path:match('resolve%-clip%-gyro.drt$') then return original(self,path,opts) end
-              assert(path:match('resolve%-timeline%-kodak2383.drt$'))
-              return {SetName=function() return true end,SetSetting=function() return true end,
-                GetNodeGraph=function() return {GetNumNodes=function() return 2 end,
-                  SetNodeEnabled=function(self,n,on) assert(on and (n==1 or n==2)); enabled=(enabled or 0)+1; return true end,
-                  SetLUT=function(self,n,path) assert(n==2 and path=='Film Looks/Rec709 Kodak 2383 D60.cube'); selectedLUT=path; return \(available) end,
-                  GetLUT=function() return selectedLUT end} end}
-            end
+            colorGroupFixture.GetPostClipNodeGraph=function() return {GetNumNodes=function() return 3 end,
+              SetNodeEnabled=function(self,n,on) assert(on and n>=1 and n<=3); enabled=(enabled or 0)+1; return true end,
+              SetLUT=function(self,n,path) assert(n==2 and path=='Film Looks/Rec709 Kodak 2383 D60.cube'); selectedLUT=path; return \(available) end,
+              GetLUT=function() return selectedLUT end} end
             """
-            let out = try await ResolveDesqueeze.fuscriptRunner()(fixture + "\n" + setup + "\n" + RP.script(shoots:[.init(name:"20261025",media:[clip("a")])], includeAllShots:false, colorManagement:.kodak2383) + "\nassert(enabled==2); print('KODAK_NODES_ENABLED')")
+            let out = try await ResolveDesqueeze.fuscriptRunner()(fixture + "\n" + setup + "\n" + RP.script(shoots:[.init(name:"20261025",media:[clip("a")])], includeAllShots:false, colorManagement:.kodak2383) + "\nassert(enabled==3); print('KODAK_NODES_ENABLED')")
             XCTAssertTrue(out.contains("KODAK_NODES_ENABLED"), out)
             if available {
                 XCTAssertFalse(out.contains("ERROR"),out)

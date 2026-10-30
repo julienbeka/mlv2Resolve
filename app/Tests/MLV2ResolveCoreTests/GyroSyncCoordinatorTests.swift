@@ -107,6 +107,7 @@ final class GyroSyncCoordinatorTests: XCTestCase {
     private func gyroflow(_ dir: String) -> URL { shootDir.appendingPathComponent("\(dir)_000000.gyroflow") }
 
     private func coordinator(gate: MotionGate = MotionGate(),
+                             fullMotionRunner: GyroSyncCoordinator.MotionRunner? = nil,
                              solver: @escaping GyroSyncCoordinator.Solver = { _, _, _, _ in
                                  SyncResult(lagMs: 10_000, r2: 0.9, secondPeak: 0.1, map: [[1, 0, 0], [0, 1, 0], [0, 0, 1]])
                              },
@@ -117,7 +118,8 @@ final class GyroSyncCoordinatorTests: XCTestCase {
                 return [MotionSample(frame: 1, dx: 1, dy: 0, peak: 1)]
             },
             defaults: defaults, backupsRoot: backups, solver: solver,
-            clipDirResolver: GyroSyncCoordinator.clipDir(mountPoint:mlv:), logReader: logReader)
+            clipDirResolver: GyroSyncCoordinator.clipDir(mountPoint:mlv:), logReader: logReader,
+            fullMotionRunner: fullMotionRunner)
     }
 
     private func withLens(_ c: GyroSyncCoordinator, _ name: String = "Helios", focal: Double = 25) -> Lens {
@@ -132,6 +134,77 @@ final class GyroSyncCoordinatorTests: XCTestCase {
     }
 
     // MARK: Tests
+
+    func testUncertainSampleRetriesFullAnalysisBeforeWriting() async throws {
+        let (clip, key, dir) = try makeClip("A001", atSecond: 10)
+        try makeLog("t1", atSecond: 0)
+        let c = coordinator(fullMotionRunner: { _ in
+            [MotionSample(frame: 1, dx: 1, dy: 0, peak: 1),
+             MotionSample(frame: 2, dx: 2, dy: 1, peak: 1)]
+        }, solver: { motion, _, _, _ in
+            guard motion.count > 1 else { throw SyncRefusal.ambiguous(r2: 0.6, second: 0.5) }
+            return SyncResult(lagMs: 10_000, r2: 0.9, secondPeak: 0.1, map: [])
+        })
+        _ = withLens(c)
+        await c.shootMounted(shoot([clip]), mountPoint: mountPoint, chosenFolder: chosen)
+        XCTAssertEqual(c.states[key], .synced(r2: 0.9, log: "t1_mix.bin", offsetMs: -10_000))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: gyroflow(dir).path))
+    }
+
+    func testConfidentSampleDoesNotRunFullAnalysis() async throws {
+        let (clip, key, _) = try makeClip("A001", atSecond: 10)
+        try makeLog("t1", atSecond: 0)
+        let full = MotionGate()
+        let c = coordinator(fullMotionRunner: { _ in await full.pass(); return [] })
+        _ = withLens(c)
+        await c.shootMounted(shoot([clip]), mountPoint: mountPoint, chosenFolder: chosen)
+        XCTAssertEqual(c.states[key], .synced(r2: 0.9, log: "t1_mix.bin", offsetMs: -10_000))
+        let calls = await full.calls
+        XCTAssertEqual(calls, 0)
+    }
+
+    func testFullAnalysisRefusalDoesNotWriteSampleResult() async throws {
+        let (clip, key, dir) = try makeClip("A001", atSecond: 10)
+        try makeLog("t1", atSecond: 0)
+        let full = MotionGate()
+        let c = coordinator(fullMotionRunner: { _ in await full.pass(); return [] },
+                            solver: { _, _, _, _ in throw SyncRefusal.notEnoughMotion })
+        _ = withLens(c)
+        await c.shootMounted(shoot([clip]), mountPoint: mountPoint, chosenFolder: chosen)
+        XCTAssertEqual(c.states[key], .notEnoughMotion)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: gyroflow(dir).path))
+        let calls = await full.calls
+        XCTAssertEqual(calls, 1)
+    }
+
+    func testCancelledFullAnalysisDoesNotWriteProject() async throws {
+        let (clip, key, dir) = try makeClip("A001", atSecond: 10)
+        try makeLog("t1", atSecond: 0)
+        let c = coordinator(fullMotionRunner: { _ in throw CancellationError() },
+                            solver: { _, _, _, _ in throw SyncRefusal.notEnoughMotion })
+        _ = withLens(c)
+        await c.shootMounted(shoot([clip]), mountPoint: mountPoint, chosenFolder: chosen)
+        XCTAssertEqual(c.states[key], .pending)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: gyroflow(dir).path))
+    }
+
+    func testCompleteFirstPassIsNotRepeatedWhenRefused() async throws {
+        let (clip, key, dir) = try makeClip("A001", atSecond: 10, frames: 40)
+        try makeLog("t1", atSecond: 0)
+        let full = MotionGate()
+        let c = GyroSyncCoordinator(
+            motionRunner: { _ in (1..<40).map { MotionSample(frame: $0, dx: 1, dy: 0, peak: 1) } },
+            defaults: defaults, backupsRoot: backups,
+            solver: { _, _, _, _ in throw SyncRefusal.notEnoughMotion },
+            clipDirResolver: GyroSyncCoordinator.clipDir(mountPoint:mlv:),
+            fullMotionRunner: { _ in await full.pass(); return [] })
+        _ = withLens(c)
+        await c.shootMounted(shoot([clip]), mountPoint: mountPoint, chosenFolder: chosen)
+        XCTAssertEqual(c.states[key], .notEnoughMotion)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: gyroflow(dir).path))
+        let calls = await full.calls
+        XCTAssertEqual(calls, 0)
+    }
 
     func testWritesGyroflowNextToMLV() async throws {
         let (clip, key, dir) = try makeClip("A001", atSecond: 10)

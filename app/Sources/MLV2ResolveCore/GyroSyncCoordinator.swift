@@ -85,6 +85,7 @@ public final class GyroSyncCoordinator: ObservableObject {
     }
 
     private let motionRunner: MotionRunner
+    private let fullMotionRunner: MotionRunner?
     private let solver: Solver
     private let clipDirResolver: ClipDirResolver
     private let defaults: UserDefaults
@@ -110,19 +111,22 @@ public final class GyroSyncCoordinator: ObservableObject {
     /// Test hook: every (log, searchMs) handed to the solver.
     var onSolve: (@MainActor (URL, ClosedRange<Int>) -> Void)?
 
-    public convenience init(motionRunner: @escaping MotionRunner, defaults: UserDefaults, backupsRoot: URL) {
+    public convenience init(motionRunner: @escaping MotionRunner, defaults: UserDefaults, backupsRoot: URL,
+                            fullMotionRunner: MotionRunner? = nil) {
         self.init(motionRunner: motionRunner, defaults: defaults, backupsRoot: backupsRoot,
                   solver: { try GyroSync.solve(motion: $0, fps: $1, gyro: $2.gyro, rateHz: $2.rateHz, searchMs: $3) },
-                  clipDirResolver: GyroSyncCoordinator.clipDir(mountPoint:mlv:))
+                  clipDirResolver: GyroSyncCoordinator.clipDir(mountPoint:mlv:), fullMotionRunner: fullMotionRunner)
     }
 
     /// - Parameter logReader: decodes a full log (production: `A1Log.read`); only candidate logs are decoded,
     ///   the last two are kept.
     init(motionRunner: @escaping MotionRunner, defaults: UserDefaults, backupsRoot: URL,
          solver: @escaping Solver, clipDirResolver: @escaping ClipDirResolver,
-         logReader: @escaping @Sendable (URL) throws -> A1Log = A1Log.read) {
+         logReader: @escaping @Sendable (URL) throws -> A1Log = A1Log.read,
+         fullMotionRunner: MotionRunner? = nil) {
         decodedLogs = DecodedLogCache(capacity: 2, reader: logReader)
         self.motionRunner = motionRunner
+        self.fullMotionRunner = fullMotionRunner
         self.defaults = defaults
         self.backupsRoot = backupsRoot
         self.solver = solver
@@ -376,7 +380,7 @@ public final class GyroSyncCoordinator: ObservableObject {
         let job = Job(mlv: mlv, squeezeFix: squeezeFix, clipDir: clipDir, dest: dest, force: force, lens: lens, position: position,
                       logs: logs, decodedLogs: decodedLogs, skew: skews[folderKey],
                       backupDir: backupsRoot.appendingPathComponent(MountPaths.sanitize(ctx.shoot.name), isDirectory: true),
-                      motionRunner: motionRunner, solver: solver)
+                      motionRunner: motionRunner, fullMotionRunner: fullMotionRunner, solver: solver)
         let hook = onSolve
         var observer: (@Sendable (URL, ClosedRange<Int>) async -> Void)?
         if let hook { observer = { url, r in await hook(url, r) } }
@@ -488,8 +492,8 @@ public final class GyroSyncCoordinator: ObservableObject {
 
     /// Runs `binary <clip.MLV>` and parses its `frame,dx,dy,peak` CSV. Throws on a non-zero exit (message = last
     /// stderr line); terminates the process when the task is cancelled.
-    public nonisolated static func mlvmotionRunner(binary: URL) -> MotionRunner {
-        { mlv in try await runMotion(binary: binary, mlv: mlv) }
+    public nonisolated static func mlvmotionRunner(binary: URL, sampled: Bool = false) -> MotionRunner {
+        { mlv in try await runMotion(binary: binary, mlv: mlv, sampled: sampled) }
     }
 
     struct MotionError: Error, LocalizedError {
@@ -514,7 +518,7 @@ public final class GyroSyncCoordinator: ObservableObject {
         }
     }
 
-    nonisolated static func runMotion(binary: URL, mlv: URL) async throws -> [MotionSample] {
+    nonisolated static func runMotion(binary: URL, mlv: URL, sampled: Bool = false) async throws -> [MotionSample] {
         let fm = FileManager.default
         guard fm.isExecutableFile(atPath: binary.path) else {
             throw MotionError(message: String(localized: "The motion analyzer (mlvmotion) is missing from the app. Reinstall mlv2Resolve.", bundle: L10n.bundle))
@@ -531,7 +535,7 @@ public final class GyroSyncCoordinator: ObservableObject {
         let box = ProcessBox()
         let p = box.process
         p.executableURL = binary
-        p.arguments = [mlv.path]
+        p.arguments = [mlv.path] + (sampled ? ["--sampled"] : [])
         p.standardOutput = out
         p.standardError = err
         p.standardInput = FileHandle.nullDevice
@@ -578,6 +582,7 @@ private struct Job: Sendable {
     let skew: TimeInterval?
     let backupDir: URL
     let motionRunner: GyroSyncCoordinator.MotionRunner
+    let fullMotionRunner: GyroSyncCoordinator.MotionRunner?
     let solver: GyroSyncCoordinator.Solver
 
     struct Outcome: Sendable {
@@ -598,29 +603,37 @@ private struct Job: Sendable {
         let narrowed = skew.map { LogMatcher.candidates(for: timing, logs: logs, skew: $0) }
         if Task.isCancelled { return Outcome(state: .pending) }
 
-        let motion: [MotionSample]
-        do { motion = try await motionRunner(mlv) } catch {
-            if Task.isCancelled || error is CancellationError { return Outcome(state: .pending) }
-            return fail(String(localized: "Motion analysis failed: \(error.localizedDescription)", bundle: L10n.bundle))
-        }
-
         var best: (log: A1Log, result: SyncResult)?
         var sawAmbiguous = false, sawMotion = false
-        for pass in [narrowed, full].compactMap({ $0 }) where best == nil {
-            for c in pass {
-                if Task.isCancelled { return Outcome(state: .pending) }
-                guard let log = try? await decodedLogs.log(c.log.url) else { continue }
-                await onSolve?(c.log.url, c.searchMs)
-                do {
-                    let r = try solver(motion, timing.fps, log, c.searchMs)
-                    if best.map({ r.r2 > $0.result.r2 }) ?? true { best = (log, r) }
-                } catch SyncRefusal.ambiguous {
-                    sawAmbiguous = true
-                } catch SyncRefusal.noOverlap {
-                } catch {
-                    sawMotion = true
+        // Fast windows first. An uncertain result is never written: retry every candidate
+        // with the full clip, using the same confidence and ambiguity thresholds.
+        for runner in [motionRunner, fullMotionRunner].compactMap({ $0 }) {
+            if Task.isCancelled { return Outcome(state: .pending) }
+            let motion: [MotionSample]
+            do { motion = try await runner(mlv) } catch {
+                if Task.isCancelled || error is CancellationError { return Outcome(state: .pending) }
+                return fail(String(localized: "Motion analysis failed: \(error.localizedDescription)", bundle: L10n.bundle))
+            }
+            sawAmbiguous = false; sawMotion = false
+            for pass in [narrowed, full].compactMap({ $0 }) where best == nil {
+                for c in pass {
+                    if Task.isCancelled { return Outcome(state: .pending) }
+                    guard let log = try? await decodedLogs.log(c.log.url) else { continue }
+                    await onSolve?(c.log.url, c.searchMs)
+                    do {
+                        let r = try solver(motion, timing.fps, log, c.searchMs)
+                        if best.map({ r.r2 > $0.result.r2 }) ?? true { best = (log, r) }
+                    } catch SyncRefusal.ambiguous {
+                        sawAmbiguous = true
+                    } catch SyncRefusal.noOverlap {
+                    } catch {
+                        sawMotion = true
+                    }
                 }
             }
+            // The sampled engine already analyses short/high-fps clips in full.
+            // Retrying identical complete evidence cannot improve a refused result.
+            if best != nil || motion.count >= timing.frames - 1 { break }
         }
         guard let best else {
             return Outcome(state: sawAmbiguous ? .ambiguous : sawMotion ? .notEnoughMotion : .noLog)

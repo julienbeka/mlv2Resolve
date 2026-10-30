@@ -4,14 +4,14 @@ import XCTest
 
 /// Shared helper for the gated tests that run on real clips (MLV2Resolve_GYRO_DIR).
 enum RealGyroFixture {
-    static func motion(base: URL, clip: String = "M24-1845.MLV") throws -> [MotionSample] {
+    static func motion(base: URL, clip: String = "M24-1845.MLV", sampled: Bool = false) throws -> [MotionSample] {
         let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
         let tool = repo.appendingPathComponent("build/engine/mlvmotion")
         guard FileManager.default.isExecutableFile(atPath: tool.path) else { throw XCTSkip("mlvmotion not built") }
         let p = Process()
         p.executableURL = tool
-        p.arguments = [base.appendingPathComponent(clip).path]
+        p.arguments = [base.appendingPathComponent(clip).path] + (sampled ? ["--sampled"] : [])
         let pipe = Pipe()
         p.standardOutput = pipe
         try p.run()

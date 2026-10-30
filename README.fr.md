@@ -105,6 +105,11 @@ que le plugin Gyroflow de Resolve stabilise les DNG. Plus besoin de NiYien Tool 
    `<dossier du plan>_000000.gyroflow`) et apparaît dans le dossier du plan du montage. Dans Resolve : plugin
    Gyroflow → **Load for current file**.
 
+L’analyse du mouvement commence par trois passages au début, au milieu et à la fin des plans longs (192
+paires d’images jusqu’à 32 i/s, davantage aux cadences supérieures). Les plans courts sont analysés en entier. Si ces passages ne donnent pas une
+correspondance suffisamment fiable, l’application reprend automatiquement l’analyse complète avec les mêmes
+seuils de confiance. Le repérage temporel original des images est conservé.
+
 Les objectifs courts (p. ex. 12 mm) ont trop de distorsion pour un profil calculé : calibrez l'objectif dans
 Gyroflow, puis importez son `.json` dans **Réglages… → Objectifs → Modifier… → Importer un profil calibré…**
 (mlv2Resolve en garde une copie dans `~/Library/Application Support/mlv2Resolve/lens-profiles`). Un profil calibré sert

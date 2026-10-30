@@ -66,15 +66,28 @@ final class ResolveGroupModelTests: XCTestCase {
                 let nodes = try g.filter { $0.n == 7 }.map { try fields($0.data) }
                 XCTAssertEqual(nodes.count, kind == "pre" ? 1 : mode.nodeCount)
                 let ids = try Set(nodes.map { try get($0, 1).number })
+                var endpoints: [UInt64] = []
+                var connectionIDs: Set<UInt64> = []
                 for n in [9,10] {
                     let edge = try fields(get(g,n).data)
                     let descriptor = try fields(get(edge,3).data)
                     XCTAssertTrue(ids.contains(try get(descriptor,4).number), "dangling graph endpoint")
+                    XCTAssertTrue(connectionIDs.insert(try get(descriptor,1).number).inserted,
+                                  "graph connections must have distinct IDs")
+                    endpoints.append(try get(descriptor,4).number)
                 }
+                var links: [UInt64: UInt64] = [:]
                 for link in g where link.n == 8 {
                     let f = try fields(link.data)
                     XCTAssertTrue(ids.contains(try get(f,1).number)); XCTAssertTrue(ids.contains(try get(f,3).number))
+                    links[try get(f,1).number] = try get(f,3).number
+                    XCTAssertTrue(connectionIDs.insert(try get(f,7).number).inserted,
+                                  "serial links must not reuse connection IDs")
                 }
+                var path: Set<UInt64> = [], cursor = endpoints[0]
+                while path.insert(cursor).inserted, let next = links[cursor] { cursor = next }
+                XCTAssertEqual(cursor, endpoints[1], "serial chain must reach the output")
+                XCTAssertEqual(path, ids, "every processing node must be on the input/output path")
                 let p = try XCTUnwrap(parameters(get(nodes[0],10).data))
                 if kind == "pre" {
                     XCTAssertEqual(p["inputColorSpace"], "P3D60_COLORSPACE"); XCTAssertEqual(p["inputGamma"], "LINEAR_GAMMA")

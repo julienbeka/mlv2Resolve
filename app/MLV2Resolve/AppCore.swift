@@ -53,8 +53,9 @@ final class AppCore {
         let backups = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("mlv2Resolve", isDirectory: true)
             .appendingPathComponent("gyroflow-backups", isDirectory: true)
-        let gyro = GyroSyncCoordinator(motionRunner: GyroSyncCoordinator.mlvmotionRunner(binary: mlvmotion),
-                                       defaults: .standard, backupsRoot: backups)
+        let gyro = GyroSyncCoordinator(motionRunner: GyroSyncCoordinator.mlvmotionRunner(binary: mlvmotion, sampled: true),
+                                       defaults: .standard, backupsRoot: backups,
+                                       fullMotionRunner: GyroSyncCoordinator.mlvmotionRunner(binary: mlvmotion))
         state = AppState(manager: manager, defaults: .standard, scan: ShootScanner.scan,
                          resolveRunner: ResolveDesqueeze.fuscriptRunner(),
                          resolveScriptsDir: ResolveDesqueeze.menuScriptsDirectory,

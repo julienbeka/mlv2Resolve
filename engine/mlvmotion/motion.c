@@ -43,6 +43,7 @@ static int scan_file(mm_clip *c, int file_idx, int *cap, uint64_t *seq, char *er
             fclose(f); seterr(err, errlen, "clip is not LJ92-compressed raw video"); return 2;
         }
         c->file_count = fh.fileCount ? fh.fileCount : 1;
+        c->fps = fh.sourceFpsDenom ? (double)fh.sourceFpsNom / fh.sourceFpsDenom : 0;
     }
     uint64_t pos = fh.blockSize;
     while (pos + 16 <= fsize) {
@@ -214,7 +215,7 @@ static mm_shift phase_shift(FFTSetup setup, const mm_img *a, const mm_img *b, in
     return (mm_shift){ dx, dy, best };
 }
 
-int mm_extract(const mm_clip *c, double squeeze, FILE *out, char *err, size_t errlen)
+static int extract(const mm_clip *c, double squeeze, FILE *out, int header, char *err, size_t errlen)
 {
     if (!(squeeze > 0) || !isfinite(squeeze)) squeeze = c->auto_squeeze;
     int *fds = malloc(sizeof(int) * c->path_count);
@@ -232,7 +233,7 @@ int mm_extract(const mm_clip *c, double squeeze, FILE *out, char *err, size_t er
         if (fds[i] < 0) reason = "cannot open clip"; else nopen++;
     }
     const int *cfds = fds;
-    if (!reason) fputs("frame,dx,dy,peak\n", out);
+    if (!reason && header) fputs("frame,dx,dy,peak\n", out);
     for (int base = 0; !reason && base < c->count; base += CHUNK) {
         int n = c->count - base < CHUNK ? c->count - base : CHUNK;
         dispatch_apply(n, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^(size_t k) {
@@ -267,4 +268,28 @@ int mm_extract(const mm_clip *c, double squeeze, FILE *out, char *err, size_t er
     free(imgs); free(res); free(fds);
     if (reason) seterr(err, errlen, reason);
     return reason ? 2 : 0;
+}
+
+int mm_extract(const mm_clip *c, double squeeze, FILE *out, char *err, size_t errlen)
+{
+    return extract(c, squeeze, out, 1, err, errlen);
+}
+
+int mm_extract_sampled(const mm_clip *c, double squeeze, FILE *out, char *err, size_t errlen)
+{
+    enum { WINDOWS = 3 };
+    // At least six seconds of evidence even at high frame rates, comfortably
+    // above the solver's three-second coverage floor. Invalid rates use full analysis.
+    if (!(c->fps > 0) || c->fps > (double)c->count / 6)
+        return mm_extract(c, squeeze, out, err, errlen);
+    int window = 1 + (int)fmax(64, ceil(2 * c->fps)); /* predecessor + adjacent pairs */
+    if (c->count <= (int64_t)window * WINDOWS) return mm_extract(c, squeeze, out, err, errlen);
+    for (int w = 0; w < WINDOWS; w++) {
+        mm_clip part = *c;  /* borrowed frame slice; never mm_close this copy */
+        part.frames = c->frames + (int)((int64_t)w * (c->count - window) / (WINDOWS - 1));
+        part.count = window;
+        int rc = extract(&part, squeeze, out, w == 0, err, errlen);
+        if (rc) return rc;
+    }
+    return 0;
 }

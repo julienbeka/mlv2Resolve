@@ -5,7 +5,7 @@ Error-path and synthetic checks always run. Real-clip checks need MLV2Resolve_GY
 skips (exit 0) when either is unset. The reference writes its CSV next to the clip, so the clip is
 symlinked into a temp dir first (the original folder is never written to).
 """
-import math, os, struct, shutil, statistics, subprocess, sys, tempfile, time
+import ctypes, math, os, struct, shutil, statistics, subprocess, sys, tempfile, time
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 BIN = os.path.join(REPO, "build", "engine", "mlvmotion")
@@ -83,6 +83,63 @@ def blocks(path, max_vidf):
     return head, out_other, out_v
 
 
+def sampled_checks(tmp):
+    """Real decoder/FFT on a tiny generated clip; no camera files or Python packages needed."""
+    libpath = os.path.join(tmp, "lj92.dylib")
+    subprocess.run(["clang", "-O2", "-dynamiclib", os.path.join(REPO, "engine/mlvfs/lj92.c"),
+                    "-o", libpath], check=True, capture_output=True)
+    lib = ctypes.CDLL(libpath)
+    pixels = (ctypes.c_uint16 * 1024)(*((i * i * 17 + i * 73) % 4096 for i in range(1024)))
+    encoded = ctypes.POINTER(ctypes.c_uint8)()
+    length = ctypes.c_int()
+    assert lib.lj92_encode(pixels, 32, 32, 12, 1024, 0, None, 0,
+                           ctypes.byref(encoded), ctypes.byref(length)) == 0
+    payload = ctypes.string_at(encoded, length.value)
+    libc = ctypes.CDLL(None)
+    libc.free.argtypes = [ctypes.c_void_p]
+    libc.free(encoded)
+    head = bytearray(52)
+    head[:4] = b"MLVI"; struct.pack_into("<I", head, 4, 52)
+    struct.pack_into("<H", head, 26, 1); struct.pack_into("<H", head, 32, 0x21)
+    struct.pack_into("<II", head, 44, 25, 1)
+    def write_clip(name, count, corrupt=None, fps=25):
+        path = os.path.join(tmp, name + ".MLV")
+        with open(path, "wb") as f:
+            clip_head = bytearray(head)
+            struct.pack_into("<II", clip_head, 44, fps, 1)
+            f.write(clip_head)
+            for i in range(count):
+                data = payload if i != corrupt else bytes(len(payload))
+                h = bytearray(32); h[:4] = b"VIDF"
+                struct.pack_into("<I", h, 4, 32 + len(data)); struct.pack_into("<I", h, 16, i)
+                f.write(h); f.write(data)
+        return path
+    short = write_clip("short", 40)
+    full, sampled = run(short), run(short, "--sampled")
+    assert full.returncode == sampled.returncode == 0, (full.stderr, sampled.stderr)
+    assert sampled.stdout == full.stdout, "short clips must keep the full analysis"
+    long = write_clip("long", 1000)
+    full, sampled = run(long), run(long, "--sampled")
+    assert full.returncode == sampled.returncode == 0, (full.stderr, sampled.stderr)
+    all_rows, selected = rows(full.stdout), rows(sampled.stdout)
+    assert len(selected) == 192, len(selected)
+    assert selected == [all_rows[r[0] - 1] for r in selected], "changed frame timing or motion"
+    assert selected[0][0] == 1 and selected[-1][0] == 999
+    assert any(450 <= r[0] <= 550 for r in selected), "missing middle window"
+    # An unselected corrupt image must not be decoded by the fast pass.
+    corrupt = write_clip("unselected-corrupt", 1000, corrupt=200)
+    assert run(corrupt, "--sampled").returncode == 0
+    expect_fail([corrupt], "full analysis still detects corruption")
+    selected_corrupt = write_clip("selected-corrupt", 1000, corrupt=1)
+    expect_fail([selected_corrupt, "--sampled"], "selected corrupt frame")
+    high_fps = write_clip("high-fps", 1000, fps=120)
+    high = run(high_fps, "--sampled")
+    assert high.returncode == 0 and len(rows(high.stdout)) == 720, high.stderr
+    too_short = write_clip("high-fps-short", 400, fps=120)
+    assert run(too_short, "--sampled").stdout == run(too_short).stdout
+    print("sampled windows, original frame numbers, skipped decoding, short clips OK")
+
+
 def chunk_test(clip, tmp):
     head, other, vid = blocks(clip, 40)
     assert len(vid) == 40
@@ -114,6 +171,7 @@ def main():
         assert os.path.exists(BIN), "build/engine/mlvmotion missing (run scripts/build-engine.sh)"
         error_paths(tmp)
         print("error paths OK")
+        sampled_checks(tmp)
     d, py = os.environ.get("MLV2Resolve_GYRO_DIR"), os.environ.get("MLV2Resolve_PY")
     if not d or not py:
         print("SKIP real-clip checks: MLV2Resolve_GYRO_DIR / MLV2Resolve_PY not set")

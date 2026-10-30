@@ -100,6 +100,10 @@ Resolve's Gyroflow plugin can stabilize the DNGs. No NiYien Tool and no referenc
 5. The `.gyroflow` is saved next to the `.MLV` (named like NiYien's, `<clip folder>_000000.gyroflow`) and appears
    in the clip's folder of the mount. In Resolve: Gyroflow plugin → **Load for current file**.
 
+Motion analysis starts with three passages at the beginning, middle and end of each long clip (192 image
+pairs at up to 32 fps; more at higher frame rates). Short clips are analysed in full. If these passages do not give a confident match, the app
+automatically retries the complete clip with the same confidence thresholds. Original image timing is kept.
+
 Short lenses (e.g. 12 mm) have too much distortion for a computed profile: calibrate the lens in Gyroflow, then
 import its `.json` in **Settings… → Lenses → Edit… → Import Calibrated Profile…** (mlv2Resolve keeps a copy in
 `~/Library/Application Support/mlv2Resolve/lens-profiles`). A calibrated profile is used for the clips whose format

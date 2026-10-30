@@ -15,6 +15,7 @@ typedef struct {
     mm_frame *frames;      /* sorted by frame number */
     int count;
     double auto_squeeze;   /* horizontal squeeze from RAWC, 1.0 if unknown */
+    double fps;            /* source frame rate, used for the sampled analysis budget */
 } mm_clip;
 
 /* 0 on success; otherwise a non-zero code and a one-line reason in err. */
@@ -26,4 +27,8 @@ void mm_close(mm_clip *c);
  * discard the output on a non-zero return (main buffers it and prints only on success). */
 /* Writes the CSV (header + one row per frame >= 1). squeeze <= 0 means use auto. */
 int mm_extract(const mm_clip *c, double squeeze, FILE *out, char *err, size_t errlen);
+/* Three windows (start, middle, end), each at least 64 pairs and two seconds,
+ * with original frame numbers.
+ * Short clips are analysed in full. No pairs are formed across window boundaries. */
+int mm_extract_sampled(const mm_clip *c, double squeeze, FILE *out, char *err, size_t errlen);
 #endif

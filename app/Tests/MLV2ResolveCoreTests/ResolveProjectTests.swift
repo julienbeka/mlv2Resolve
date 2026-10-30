@@ -343,7 +343,7 @@ final class ResolveProjectTests: XCTestCase {
       AutoSyncAudio=function(self,pair,opts) assert(#pair==2 and opts[1]==0 and opts[2]==true); syncs=syncs+1; return true end,
       ImportTimelineFromFile=function(self,path,options)
         if path:match('resolve%-color%-') then
-          colorPostCount=path:find('kodak2383',1,true) and 3 or 1
+          colorPostCount=path:find('kodak2383',1,true) and 2 or 1
           return {GetItemListInTrack=function() return {{
             GetMediaPoolItem=function() return modelMedia end,
             GetColorGroup=function() return colorGroupFixture end,
@@ -477,19 +477,19 @@ extension ResolveProjectTests {
 }
 
 extension ResolveProjectTests {
-    func testKodakCreationEnablesThreeGroupPostNodesAndBindsLUTOrReportsFailure() async throws {
+    func testKodakCreationEnablesTwoGroupPostNodesAndBindsLUTOrReportsFailure() async throws {
         try XCTSkipUnless(ResolveDesqueeze.fuscriptURL() != nil)
         for available in [true, false] {
             let setup = """
             local p=resolve:GetProjectManager():CreateProject('20261025')
             currentName=nil
             local pool=p:GetMediaPool()
-            colorGroupFixture.GetPostClipNodeGraph=function() return {GetNumNodes=function() return 3 end,
-              SetNodeEnabled=function(self,n,on) assert(on and n>=1 and n<=3); enabled=(enabled or 0)+1; return true end,
+            colorGroupFixture.GetPostClipNodeGraph=function() return {GetNumNodes=function() return 2 end,
+              SetNodeEnabled=function(self,n,on) assert(on and n>=1 and n<=2); enabled=(enabled or 0)+1; return true end,
               SetLUT=function(self,n,path) assert(n==2 and path=='Film Looks/Rec709 Kodak 2383 D60.cube'); selectedLUT=path; return \(available) end,
               GetLUT=function() return selectedLUT end} end
             """
-            let out = try await ResolveDesqueeze.fuscriptRunner()(fixture + "\n" + setup + "\n" + RP.script(shoots:[.init(name:"20261025",media:[clip("a")])], includeAllShots:false, colorManagement:.kodak2383) + "\nassert(enabled==3); print('KODAK_NODES_ENABLED')")
+            let out = try await ResolveDesqueeze.fuscriptRunner()(fixture + "\n" + setup + "\n" + RP.script(shoots:[.init(name:"20261025",media:[clip("a")])], includeAllShots:false, colorManagement:.kodak2383) + "\nassert(enabled==2); print('KODAK_NODES_ENABLED')")
             XCTAssertTrue(out.contains("KODAK_NODES_ENABLED"), out)
             if available {
                 XCTAssertFalse(out.contains("ERROR"),out)

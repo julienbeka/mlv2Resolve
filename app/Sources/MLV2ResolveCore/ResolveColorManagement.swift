@@ -14,7 +14,7 @@ public enum ResolveColorManagement: String, CaseIterable, Sendable {
         let name = self == .conversionRec709A ? "resolve-color-rec709-a" : "resolve-color-kodak2383"
         return Bundle.module.url(forResource: name, withExtension: "drt")!
     }
-    public var nodeCount: Int { self == .conversionRec709A ? 1 : 3 }
+    public var nodeCount: Int { self == .conversionRec709A ? 1 : 2 }
     public var lutPath: String? {
         self == .kodak2383 ? "Film Looks/Rec709 Kodak 2383 D60.cube" : nil
     }

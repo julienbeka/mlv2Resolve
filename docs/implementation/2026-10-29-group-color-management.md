@@ -7,7 +7,7 @@ Tous les plans vidéo de la timeline créée appartiennent au groupe **All**. Le
 | Niveau | Conversion Rec709-A | Kodak 2383 |
 |---|---|---|
 | Group Pre Clip | P3-D60 / Linear → DaVinci Wide Gamut / DaVinci Intermediate | Identique |
-| Group Post Clip | DWG / Intermediate → Rec.709 / Rec.709-A | DWG / Intermediate → Rec.709 / Cineon Film Log ; LUT Film Looks / Rec709 Kodak 2383 D60 ; Rec.709 / Rec.709 → Rec.709 / Rec.709-A |
+| Group Post Clip | DWG / Intermediate → Rec.709 / Rec.709-A | DWG / Intermediate → Rec.709 / Cineon Film Log ; LUT Film Looks / Rec709 Kodak 2383 D60 |
 
 Les CST d'entrée et de préparation Kodak utilisent Tone Mapping None, Gamut Mapping None et aucun OOTF. Le CST de sortie utilise Tone Mapping DaVinci, Adaptation 9 et Gamut Mapping None. La LUT native est liée par `SetLUT(2, ...)` et vérifiée par `GetLUT` ; aucune donnée de LUT n'est redistribuée.
 
@@ -29,3 +29,7 @@ Les réglages du projet restent DaVinci YRGB, DaVinci WG/Intermediate, sortie Re
 - Version de livraison : **0.2.5**, build local **108**, après validation initiale en 0.2.4 (107). Archive : `build/releases/mlv2Resolve-0.2.5-macos-arm64.zip`. Le build GitHub Actions reçoit un numéro supérieur à 1000.
 
 L'application installée et la session de montage en cours ne sont pas remplacées automatiquement.
+
+## Mise à jour du 30 octobre — Kodak à deux nœuds
+
+Le Group Post Clip Kodak conserve uniquement le CST DWG/Intermediate → Rec.709/Cineon Film Log et la LUT Kodak 2383 D60. Le troisième nœud de conversion Rec.709 → Rec.709-A est supprimé ; la sortie du graphe est reliée directement à la LUT. Sur le CST Kodak, Forward OOTF et Inverse OOTF sont désactivés ; White Point Adaptation conserve sa valeur par défaut activée. Tone Mapping et Gamut Mapping restent à None. Cette modification du preset s’applique aux nouveaux projets ; les projets existants ne sont pas réécrits.

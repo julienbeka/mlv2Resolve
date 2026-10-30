@@ -36,6 +36,9 @@ final class ResolveGroupModelTests: XCTestCase {
                 guard let tuple = try? fields(f.data), let name = tuple.first(where: { $0.n == 1 }),
                       let value = tuple.first(where: { $0.n == 2 }), let valueFields = try? fields(value.data) else { continue }
                 if let text = valueFields.first(where: { $0.n == 5 }) { p[String(bytes: name.data, encoding: .utf8)!] = String(bytes: text.data, encoding: .utf8)! }
+                if let boolean = valueFields.first(where: { $0.n == 3 && $0.wire == 0 }) {
+                    p[String(bytes: name.data, encoding: .utf8)!] = String(boolean.number)
+                }
             }
             return p
         }
@@ -99,10 +102,9 @@ final class ResolveGroupModelTests: XCTestCase {
                     XCTAssertEqual(p["outputGamma"], mode == .kodak2383 ? "CINEON_GAMMA" : "REC709_APPLE_GAMMA")
                     XCTAssertEqual(p["tmType"], mode == .kodak2383 ? "TM_NONE" : "TM_DRT_V2")
                     if mode == .kodak2383 {
-                        let last = try XCTUnwrap(parameters(get(nodes[2],10).data))
-                        XCTAssertEqual(last["inputColorSpace"], "REC709_COLORSPACE"); XCTAssertEqual(last["inputGamma"], "REC709_GAMMA")
-                        XCTAssertEqual(last["outputColorSpace"], "REC709_COLORSPACE"); XCTAssertEqual(last["outputGamma"], "REC709_APPLE_GAMMA")
-                        XCTAssertEqual(last["tmType"], "TM_DRT_V2")
+                        XCTAssertEqual(nodes.count, 2)
+                        XCTAssertEqual(p["doFwdOOTF"], "0")
+                        XCTAssertEqual(p["doInvOOTF"], "0")
                     }
                 }
             }

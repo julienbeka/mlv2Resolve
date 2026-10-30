@@ -20,13 +20,13 @@ final class ResolveColorManagementTests: XCTestCase {
         for menu in [false, true] {
             let script = ResolveProject.script(shoots: [], menu: menu, colorManagement: .kodak2383)
             XCTAssertTrue(script.contains("resolve-color-kodak2383.drt"))
-            XCTAssertTrue(script.contains("local COLOR_POST_NODE_COUNT = 3"))
+            XCTAssertTrue(script.contains("local COLOR_POST_NODE_COUNT = 2"))
             XCTAssertTrue(script.contains("Film Looks/Rec709 Kodak 2383 D60.cube"))
         }
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         try ResolveProject.installMenuScript(shoots: [], in: root, colorManagement: .kodak2383)
         let installed = try String(contentsOf: root.appendingPathComponent(ResolveProject.menuScriptName), encoding: .utf8)
-        XCTAssertTrue(installed.contains("local COLOR_POST_NODE_COUNT = 3"))
+        XCTAssertTrue(installed.contains("local COLOR_POST_NODE_COUNT = 2"))
     }
 }

@@ -213,6 +213,31 @@ final class ResolveDesqueezeTests: XCTestCase {
         }
     }
 
+    func testProgressKeepsLongImportAliveButSilenceTimesOut() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let fake = dir.appendingPathComponent("fuscript")
+        try "#!/bin/sh\nfor i in 1 2 3 4 5 6; do echo PROGRESS; sleep 0.2; done\nif /usr/bin/grep -q STALL \"$3\"; then exec sleep 10; fi\necho DONE\n"
+            .write(to: fake, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fake.path)
+        let lines = Locked<[String]>([])
+        let runner = RD.fuscriptRunner(timeout: 0.8, resetTimeoutOnOutput: true, onOutput: { line in
+            lines.mutate { $0.append(line) }
+        }, locate: { fake })
+        let output = try await runner("normal")
+        XCTAssertTrue(output.contains("DONE"))
+        XCTAssertEqual(lines.get().filter { $0 == "PROGRESS" }.count, 6)
+        XCTAssertEqual(lines.get().last, "DONE")
+        do {
+            _ = try await runner("STALL")
+            XCTFail("Silence should still time out")
+        } catch {
+            XCTAssertEqual(error as? RD.RunError, .timedOut)
+            XCTAssertFalse(error.localizedDescription.contains("error 1"))
+        }
+    }
+
     func testFuscriptLocation() {
         XCTAssertEqual(RD.fuscriptURL(fileExists: { $0.hasPrefix("/Applications/DaVinci Resolve/") })?.path,
                        "/Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries/Fusion/fuscript")

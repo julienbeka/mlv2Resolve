@@ -2,6 +2,8 @@
 
 ### Changes in @VERSION@
 
+- **Large Resolve projects:** preparation now continues while progress is reported, saves every 25 clips, and isolates individual clip failures. A live task label, clip counter and percentage accompany the spinner. Five minutes without progress produces an explicit timeout message.
+
 - **Group color pipeline:** all timeline clips share the All group, with input CST in Group Pre Clip and Rec709-A or three-node Kodak output in Group Post Clip. The Timeline graph stays empty. This applies to new projects; existing grades are preserved.
 
 - **Dual ISO preview memory fix:** Smooth Editing now releases its temporary histograms when Dual ISO detection fails, preventing memory accumulation during repeated frame reads.
@@ -19,6 +21,8 @@ Source (GPL-3.0-or-later): https://github.com/@REPO@/tree/@TAG@
 ## Français
 
 ### Nouveautés de @VERSION@
+
+- **Gros projets Resolve :** la préparation continue tant qu’elle progresse, sauvegarde tous les 25 plans et isole les erreurs individuelles. La roue est accompagnée de la tâche en cours, du compteur de plans et d’un pourcentage. Cinq minutes sans progression déclenchent un message explicite.
 
 - **Couleurs par groupe :** tous les plans de la timeline rejoignent All, avec CST d’entrée en Group Pre Clip et sortie Rec709-A ou Kodak à trois nœuds en Group Post Clip. Le graphe Timeline reste vide. Ce changement concerne les nouveaux projets ; les étalonnages existants sont conservés.
 

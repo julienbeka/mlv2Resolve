@@ -184,6 +184,18 @@ struct ResolveSection: View {
                 Spacer()
                 if working { ProgressView().controlSize(.small) }
             }
+            if let progress = state.resolveProjectProgress {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack {
+                        Text(verbatim: progress.task).lineLimit(2)
+                        Spacer()
+                        Text(progress.fraction, format: .percent.precision(.fractionLength(0)))
+                            .monospacedDigit()
+                    }.font(.caption).foregroundStyle(.secondary)
+                    ProgressView(value: progress.fraction)
+                        .accessibilityLabel(Text(verbatim: progress.task))
+                }
+            }
             VStack(alignment: .leading, spacing: 6) {
                 Text("Title of the project to create")
                     .font(.caption).foregroundStyle(.secondary)

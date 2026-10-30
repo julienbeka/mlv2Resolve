@@ -61,7 +61,10 @@ final class AppCore {
                          resolveScriptsDir: ResolveDesqueeze.menuScriptsDirectory,
                          prepareResolvePresets: { ResolvePresets.prepare(factors: $0) },
                          gyro: gyro,
-                         projectRunner: ResolveDesqueeze.fuscriptRunner(timeout: 120),
+                         projectRunner: ResolveDesqueeze.fuscriptRunner(timeout: 300, resetTimeoutOnOutput: true),
+                         projectRunnerFactory: { onOutput in
+                             ResolveDesqueeze.fuscriptRunner(timeout: 300, resetTimeoutOnOutput: true, onOutput: onOutput)
+                         },
                          projectProbeRunner: ResolveDesqueeze.fuscriptRunner(timeout: 2),
                          prepareProjectPresets: { ResolvePresets.prepare(sizing: $0) },
                          projectReceiptsURL: AppDataPaths.support.appendingPathComponent("resolve-project-links.log"))

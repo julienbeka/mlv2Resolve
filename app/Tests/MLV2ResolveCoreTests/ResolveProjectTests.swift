@@ -8,6 +8,19 @@ final class ResolveProjectTests: XCTestCase {
         .init(name: name, directory: "/mount/\(name)", pattern: "/mount/\(name)/\(name)_%06d.dng",
               first: 0, last: 99, wav: "/mount/\(name)/\(name).wav", width: width, height: height, factor: factor, fps: fps)
     }
+    func testProgressTracksClipsAndReservesCompletionForFinalSave() {
+        let half = RP.Progress.parse("PROGRESS 50/100 A clip with spaces")
+        XCTAssertEqual(half?.fraction ?? -1, 0.5, accuracy: 0.001)
+        XCTAssertTrue(half?.task.contains("50/100") == true)
+        XCTAssertTrue(half?.task.contains("A clip with spaces") == true)
+        XCTAssertEqual(RP.Progress.parse("PROGRESS 100/100 last")?.fraction ?? -1, 0.95, accuracy: 0.001)
+        XCTAssertEqual(RP.Progress.parse("PROGRESS saving")?.fraction, 0.95)
+        XCTAssertEqual(RP.Progress.parse("PROGRESS done")?.fraction, 1)
+        XCTAssertNil(RP.Progress.parse("PROGRESS 0/0"))
+        XCTAssertNil(RP.Progress.parse("PROGRESS 101/100 invalid"))
+        XCTAssertNil(RP.Progress.parse("WARNING some warning"))
+    }
+
     func testMajorityResolutionAndCadence() throws {
         let media = [clip("a"), clip("b"), clip("c", width: 1736, height: 2178),
                      clip("d", width: 1920, height: 1080, factor: 1, fps: 24)]
@@ -144,6 +157,30 @@ final class ResolveProjectTests: XCTestCase {
         XCTAssertTrue(output.contains("imported=1 already=0 failed=1 missing=0"), output)
         XCTAssertFalse(output.contains("ERROR"), output)
     }
+    func testLargeProjectCheckpointsAndContinuesAfterBadRush() async throws {
+        try XCTSkipUnless(ResolveDesqueeze.fuscriptURL() != nil)
+        let setup = """
+        local pm=resolve:GetProjectManager()
+        local saves=0
+        local originalSave=pm.SaveProject
+        pm.SaveProject=function(self) saves=saves+1; return originalSave(self) end
+        local p=pm:CreateProject('20261025')
+        local pool=p:GetMediaPool()
+        local originalImport=pool.ImportMedia
+        pool.ImportMedia=function(self,list)
+          if type(list[1])=='table' and list[1].FilePath:find('/bad/',1,true) then error('Broken rush') end
+          return originalImport(self,list)
+        end
+        currentName=nil
+        function verifyCheckpoints() assert(saves>=5, 'Expected periodic saves'); print('CHECKPOINTS_OK') end
+        """
+        let media = (0..<100).map { clip("clip\($0)") } + [clip("bad"), clip("last")]
+        let output = try await ResolveDesqueeze.fuscriptRunner()(fixture + "\n" + setup + "\n" + RP.script(shoots: [.init(name: "20261025", media: media)]) + "\nverifyCheckpoints()")
+        XCTAssertTrue(output.contains("imported=101 already=0 failed=1"), output)
+        XCTAssertTrue(output.contains("CHECKPOINTS_OK"), output)
+        XCTAssertTrue(output.contains("PROGRESS 102/102"), output)
+    }
+
     func testGyroProgressCountsPendingAndRunningAsUnfinished() {
         let progress = GyroProgress(states: [.pending, .running, .existing, .noLog, .failed("x"), .synced(r2: 1, log: "a", offsetMs: 0)])
         XCTAssertTrue(progress.isActive)

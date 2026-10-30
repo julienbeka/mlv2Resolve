@@ -1,6 +1,9 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- SHOOTS, APPROVED, MENU and localized TEXT are supplied by ResolveProject.swift.
 do
+-- Progress must reach the parent process immediately, including when stdout is a pipe.
+io.stdout:setvbuf('no')
+print('PROGRESS preparing')
 local function shell(s) return "'" .. s:gsub("'", "'\\''") .. "'" end
 local function apple(s) return '"' .. s:gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n'):gsub('\r', '') .. '"' end
 local function dialog(message, confirm)
@@ -105,6 +108,7 @@ local ok,err=pcall(function()
     local root=pool:GetRootFolder()
     local seen={}; visit(root,seen)
     pool:SetCurrentFolder(root)
+    print('PROGRESS models')
     local rushs,gyroTemplate,gyroSource,gyroMedia,anchor,colorGroup=nil,nil,nil,nil,nil,nil
     local modelFolderName='__mlv2Resolve_gyro_model'
     local function hasGyro(item)
@@ -204,7 +208,7 @@ local ok,err=pcall(function()
       if not rushs:SetSetting('useCustomSettings','0') then error('Could not inherit project settings') end
     end
     for _,name in ipairs(shoot.warnings) do warn(shoot.name .. ': ' .. name) end
-    for _,c in ipairs(shoot.clips) do
+    for index,c in ipairs(shoot.clips) do
       if seen[c.dir] or seen[c.nfd] then already=already+1
       else
         local success,reason=pcall(function()
@@ -260,7 +264,13 @@ local ok,err=pcall(function()
         end)
         if not success then failed=failed+1; warn(c.name .. ': ' .. tostring(reason)) end
       end
+      -- A bad rush is isolated above; checkpoint all work, including partial successes.
+      if index % 25 == 0 then
+        if not pm:SaveProject() then error(shoot.name .. ': checkpoint save refused') end
+      end
+      print(string.format('PROGRESS %d/%d %s',index,#shoot.clips,clean(c.name)))
     end
+    print('PROGRESS saving')
     if created and rushs then
       for track=1,rushs:GetTrackCount('video') do
         for _,item in ipairs(rushs:GetItemListInTrack('video',track) or {}) do
@@ -291,6 +301,7 @@ local ok,err=pcall(function()
     APPROVED=nil
     end
   end
+  print('PROGRESS done')
   print(string.format('PROJECT imported=%d already=%d failed=%d missing=%d studio=%d',imported,already,failed,missing,studio and 1 or 0))
   if MENU then
     local message=TEXT.done .. '\n' .. string.format('DNG: %d / %d',imported,already)

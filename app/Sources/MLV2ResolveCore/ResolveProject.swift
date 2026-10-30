@@ -3,6 +3,31 @@ import Foundation
 
 /// A snapshot of the mounted media; the same worker is used externally and from Resolve's Scripts menu.
 public enum ResolveProject {
+    /// Percentages describe preparation work, not elapsed time; reserve the last 5% for saving.
+    public struct Progress: Equatable, Sendable {
+        public let fraction: Double
+        public let task: String
+        public static func parse(_ line: String) -> Progress? {
+            guard line.hasPrefix("PROGRESS ") else { return nil }
+            let body = String(line.dropFirst(9))
+            switch body {
+            case "preparing": return .init(fraction: 0.02, task: text("Preparing Resolve project…", "Préparation du projet Resolve…"))
+            case "models": return .init(fraction: 0.05, task: text("Preparing timeline, color and Gyroflow…", "Préparation de la timeline, de la couleur et de Gyroflow…"))
+            case "saving": return .init(fraction: 0.95, task: text("Checking and saving project…", "Vérification et sauvegarde du projet…"))
+            case "done": return .init(fraction: 1, task: text("Project preparation complete", "Préparation du projet terminée"))
+            default:
+                let parts = body.split(separator: " ", maxSplits: 1)
+                guard let count = parts.first else { return nil }
+                let numbers = count.split(separator: "/")
+                guard numbers.count == 2, let done = Int(numbers[0]), let total = Int(numbers[1]), total > 0, done >= 0, done <= total else { return nil }
+                let name = parts.count > 1 ? String(parts[1]) : ""
+                return .init(fraction: 0.05 + 0.9 * Double(done) / Double(total),
+                             task: text("Processing clips", "Traitement des plans") + " \(done)/\(total) — " + name)
+            }
+        }
+        public init(fraction: Double, task: String) { self.fraction = fraction; self.task = task }
+    }
+
     public struct Media: Equatable, Sendable {
         public let name: String
         public let directory: String

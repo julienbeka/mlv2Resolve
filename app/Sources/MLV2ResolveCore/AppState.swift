@@ -29,6 +29,10 @@ public final class AppState: ObservableObject {
     /// A « Desqueeze in Resolve » run is in flight.
     @Published public private(set) var desqueezing = false
     @Published public private(set) var openingResolve = false
+    @Published public private(set) var resolveProjectProgress: ResolveProject.Progress?
+    private var projectProgressID: UUID?
+    public typealias ProjectRunnerFactory = (@escaping @Sendable (String) -> Void) -> ResolveDesqueeze.Runner
+    private let projectRunnerFactory: ProjectRunnerFactory?
     @Published public private(set) var waitingForResolveGyro = false
     /// Whether the last « Desqueeze in Resolve » of this session reached Resolve Studio (nil: not tried yet).
     public private(set) var resolveReachable: Bool?
@@ -132,6 +136,7 @@ public final class AppState: ObservableObject {
                 prepareResolvePresets: (([Int]) -> ResolvePresets.Preparation)? = nil,
                 gyro: GyroSyncCoordinator? = nil,
                 projectRunner: ResolveDesqueeze.Runner? = nil,
+                projectRunnerFactory: ProjectRunnerFactory? = nil,
                 projectProbeRunner: ResolveDesqueeze.Runner? = nil,
                 prepareProjectPresets: (([ResolvePresets.Sizing]) -> ResolvePresets.Preparation)? = nil,
                 projectReceiptsURL: URL? = nil) {
@@ -147,6 +152,7 @@ public final class AppState: ObservableObject {
         self.manager = manager
         self.gyro = gyro
         self.resolveRunner = resolveRunner
+        self.projectRunnerFactory = projectRunnerFactory
         self.projectRunner = projectRunner ?? resolveRunner
         self.projectProbeRunner = projectProbeRunner
         self.resolveScriptsDir = resolveScriptsDir
@@ -275,7 +281,10 @@ public final class AppState: ObservableObject {
         projectMenuAction = .create
         projectMenuTask?.cancel()
         openingResolve = true
-        defer { openingResolve = false }
+        let progressID = UUID()
+        projectProgressID = progressID
+        resolveProjectProgress = .init(fraction: 0, task: ResolveProject.text("Scanning mounted clips…", "Analyse des plans montés…"))
+        defer { openingResolve = false; projectProgressID = nil; resolveProjectProgress = nil }
         let discovered = await resolveProjectMedia()
         let media = ResolveProject.combined(discovered, name: resolvedProjectName)
         let factors = Set(media.flatMap(\.media).map(\.factor).filter { $0 > 1 }).sorted()
@@ -290,7 +299,15 @@ public final class AppState: ObservableObject {
             let names = media.flatMap(\.warnings).joined(separator: ", ")
             return (ResolveProject.text("No mounted DNG sequences were found. Mount a shoot, then try again.", "Aucune séquence DNG montée trouvée. Montez un tournage, puis réessayez.") + (names.isEmpty ? "" : "\n" + names), !media.isEmpty)
         }
-        guard let projectRunner else { return (ResolveProject.guide, false) }
+        resolveProjectProgress = .init(fraction: 0.01, task: ResolveProject.text("Waiting for Resolve…", "Connexion à Resolve…"))
+        let runner = projectRunnerFactory? { [weak self] line in
+            guard let progress = ResolveProject.Progress.parse(line) else { return }
+            Task { @MainActor [weak self] in
+                guard let self, self.projectProgressID == progressID else { return }
+                self.resolveProjectProgress = progress
+            }
+        } ?? projectRunner
+        guard let projectRunner = runner else { return (ResolveProject.guide, false) }
         if let probe = projectProbeRunner, !(await ResolveProject.waitForConnection(runner: probe)) {
             return ResolveProject.message(.unavailable)
         }

@@ -65,10 +65,20 @@ public enum ResolveDesqueeze {
         }
     }
 
-    public enum RunError: Error, Equatable {
+    public enum RunError: LocalizedError, Equatable {
         case timedOut
         case notInstalled
         case launch(String)
+
+        public var errorDescription: String? {
+            switch self {
+            case .timedOut:
+                return String(localized: "Resolve stopped reporting progress before the timeout. The project may be partially prepared; check it in Resolve before trying again.", bundle: L10n.bundle)
+            case .notInstalled:
+                return String(localized: "Resolve scripting executable was not found.", bundle: L10n.bundle)
+            case .launch(let detail): return detail
+            }
+        }
     }
 
     /// Runs a Lua script and returns everything it printed (stdout + stderr).
@@ -122,20 +132,21 @@ public enum ResolveDesqueeze {
     }
 
     /// The real runner: writes the script to a temporary file and runs `fuscript -l lua <file>`, killing it after
-    /// `timeout` seconds. Runs on a background queue, never on the caller's thread.
-    public static func fuscriptRunner(timeout: TimeInterval = defaultTimeout,
+    /// `timeout` seconds (of silence when `resetTimeoutOnOutput` is enabled). Runs off the caller's thread.
+    public static func fuscriptRunner(timeout: TimeInterval = defaultTimeout, resetTimeoutOnOutput: Bool = false,
+                                      onOutput: (@Sendable (String) -> Void)? = nil,
                                       locate: @escaping @Sendable () -> URL? = { fuscriptURL() }) -> Runner {
         { script in
             guard let fuscript = locate() else { throw RunError.notInstalled }
             return try await withCheckedThrowingContinuation { cont in
                 DispatchQueue.global(qos: .userInitiated).async {
-                    cont.resume(with: Result { try runProcess(fuscript, script: script, timeout: timeout) })
+                    cont.resume(with: Result { try runProcess(fuscript, script: script, timeout: timeout, resetTimeoutOnOutput: resetTimeoutOnOutput, onOutput: onOutput) })
                 }
             }
         }
     }
 
-    static func runProcess(_ executable: URL, script: String, timeout: TimeInterval) throws -> String {
+    static func runProcess(_ executable: URL, script: String, timeout: TimeInterval, resetTimeoutOnOutput: Bool = false, onOutput: (@Sendable (String) -> Void)? = nil) throws -> String {
         let file = FileManager.default.temporaryDirectory
             .appendingPathComponent("mlv2Resolve-desqueeze-\(UUID().uuidString).lua")
         do { try script.write(to: file, atomically: true, encoding: .utf8) } catch {
@@ -151,16 +162,36 @@ public enum ResolveDesqueeze {
         p.standardInput = FileHandle.nullDevice
         do { try p.run() } catch { throw RunError.launch(error.localizedDescription) }
         let timedOut = OSAllocatedUnfairLock(initialState: false)
-        let killer = DispatchWorkItem {
-            guard p.isRunning else { return }
+        let lastOutput = OSAllocatedUnfairLock(initialState: ProcessInfo.processInfo.systemUptime)
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global())
+        timer.schedule(deadline: .now() + timeout, repeating: min(1, timeout))
+        timer.setEventHandler {
+            guard p.isRunning,
+                  ProcessInfo.processInfo.systemUptime - lastOutput.withLock({ $0 }) >= timeout else { return }
             timedOut.withLock { $0 = true }
             p.terminate()
             DispatchQueue.global().asyncAfter(deadline: .now() + 2) { if p.isRunning { kill(p.processIdentifier, SIGKILL) } }
         }
-        DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: killer)
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        timer.resume()
+        defer { timer.cancel() }
+        var data = Data()
+        var pending = Data()
+        while true {
+            let chunk = pipe.fileHandleForReading.availableData
+            if chunk.isEmpty { break }
+            if resetTimeoutOnOutput {
+                lastOutput.withLock { $0 = ProcessInfo.processInfo.systemUptime }
+            }
+            data.append(chunk)
+            if let onOutput {
+                pending.append(chunk)
+                while let newline = pending.firstIndex(of: 10) {
+                    onOutput(String(decoding: pending[..<newline], as: UTF8.self))
+                    pending.removeSubrange(...newline)
+                }
+            }
+        }
         p.waitUntilExit()
-        killer.cancel()
         if timedOut.withLock({ $0 }) { throw RunError.timedOut }
         return String(decoding: data, as: UTF8.self)
     }

@@ -206,6 +206,62 @@ final class GyroSyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(calls, 0)
     }
 
+    func testRefusedSyncIsReusedAcrossRestartUntilInputsChangeOrRegenerated() async throws {
+        let (clip, key, _) = try makeClip("A001", atSecond: 10)
+        let log = try makeLog("t1", atSecond: 0)
+        let gate = MotionGate()
+        let c = coordinator(gate: gate, solver: { _, _, _, _ in throw SyncRefusal.notEnoughMotion })
+        _ = withLens(c)
+        await c.shootMounted(shoot([clip]), mountPoint: mountPoint, chosenFolder: chosen)
+        XCTAssertEqual(c.states[key], .notEnoughMotion)
+        c.shootUnmounted(shoot([clip]))
+        let c2 = coordinator(gate: gate, solver: { _, _, _, _ in throw SyncRefusal.notEnoughMotion })
+        await c2.shootMounted(shoot([clip]), mountPoint: mountPoint, chosenFolder: chosen)
+        XCTAssertEqual(c2.states[key], .notEnoughMotion)
+        var calls = await gate.calls
+        XCTAssertEqual(calls, 1, "Unchanged refusals must not repeat motion analysis")
+        await c2.regenerate(clip: key)
+        calls = await gate.calls
+        XCTAssertEqual(calls, 2, "Explicit regeneration bypasses the cache")
+        c2.shootUnmounted(shoot([clip]))
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(10)], ofItemAtPath: log.path)
+        await c2.shootMounted(shoot([clip]), mountPoint: mountPoint, chosenFolder: chosen)
+        calls = await gate.calls
+        XCTAssertEqual(calls, 3, "Changed logs must invalidate the refusal")
+        c2.shootUnmounted(shoot([clip]))
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(20)], ofItemAtPath: clip.files[0].path)
+        await c2.shootMounted(shoot([clip]), mountPoint: mountPoint, chosenFolder: chosen)
+        calls = await gate.calls
+        XCTAssertEqual(calls, 4, "Changed source must invalidate the refusal")
+        _ = withLens(c2, "New lens", focal: 50)
+        await c2.idle()
+        calls = await gate.calls
+        XCTAssertEqual(calls, 5, "Changed lens must invalidate the refusal")
+    }
+
+    func testPartialShootReusesSuccessAndAmbiguityButProcessesNewClip() async throws {
+        let a = try makeClip("A001", atSecond: 10)
+        let b = try makeClip("B001", atSecond: 20)
+        try makeLog("t1", atSecond: 0)
+        let gate = MotionGate()
+        let c = coordinator(gate: gate, solver: { _, _, _, _ in throw SyncRefusal.ambiguous(r2: 0.6, second: 0.55) })
+        _ = withLens(c)
+        await c.shootMounted(shoot([a.clip]), mountPoint: mountPoint, chosenFolder: chosen)
+        XCTAssertEqual(c.states[a.key], .ambiguous)
+        c.shootUnmounted(shoot([a.clip]))
+        let c2 = coordinator(gate: gate)
+        await c2.shootMounted(shoot([a.clip, b.clip]), mountPoint: mountPoint, chosenFolder: chosen)
+        XCTAssertEqual(c2.states[a.key], .ambiguous)
+        if case .synced = c2.states[b.key] {} else { XCTFail("New clip must be processed") }
+        let calls = await gate.calls
+        XCTAssertEqual(calls, 2)
+        c2.shootUnmounted(shoot([a.clip, b.clip]))
+        let c3 = coordinator(gate: gate)
+        await c3.shootMounted(shoot([a.clip, b.clip]), mountPoint: mountPoint, chosenFolder: chosen)
+        let finalCalls = await gate.calls
+        XCTAssertEqual(finalCalls, 2, "Neither completed result needs motion analysis again")
+    }
+
     func testWritesGyroflowNextToMLV() async throws {
         let (clip, key, dir) = try makeClip("A001", atSecond: 10)
         try makeLog("t1", atSecond: 0)

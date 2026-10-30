@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import Combine
+import CryptoKit
 import Foundation
 
 /// Gyro sync state of one clip, keyed by its standardized MLV path.
@@ -44,6 +45,7 @@ public enum LensProfileKind: String, Sendable {
 /// - `gyroShootLens` / `gyroClipLens`: `[path: lens UUID string]` (shoot folder / MLV path).
 /// - `gyroShootPosition` / `gyroClipPosition`: `[path: MountingPosition.rawValue]`.
 /// - `gyroDefaultPosition`: `MountingPosition.rawValue`, for shoots without their own position (default `.top`).
+/// - `gyroSyncRefusalsV1`: unchanged no-log/motion/ambiguity outcomes, keyed by input fingerprints.
 /// - `gyroWritten`: `[String]`, MLV paths whose `.gyroflow` mlv2Resolve wrote.
 /// - `gyroWrittenMeta`: `[MLV path: ["r2": Double, "log": String, "offsetMs": Double, "profile": String]]`, to
 ///   restore `.synced` and tell which lens profile was used (`profile`: `LensProfileKind.rawValue`).
@@ -67,6 +69,7 @@ public final class GyroSyncCoordinator: ObservableObject {
         static let defaultPosition = "gyroDefaultPosition"
         static let written = "gyroWritten"
         static let meta = "gyroWrittenMeta"
+        static let refusals = "gyroSyncRefusalsV1"
     }
 
     @Published public private(set) var states: [String: ClipGyroState] = [:]
@@ -356,7 +359,8 @@ public final class GyroSyncCoordinator: ObservableObject {
         if !exists && written.contains(clip) { unrecordWritten(clip) }  // our file is gone: forget it
         if exists && !force {
             guard written.contains(clip) else { states[clip] = .existing; return }
-            states[clip] = .running
+            // This is validation/migration of an existing result, not another motion analysis.
+            states[clip] = meta(clip) ?? .existing
             let backup = backupsRoot.appendingPathComponent(MountPaths.sanitize(ctx.shoot.name), isDirectory: true)
             let migration = Task.detached { try GyroLogExcerpt.migrate(at: dest, backupDirectory: backup) }
             let result = await withTaskCancellationHandler(operation: { await migration.result },
@@ -373,9 +377,20 @@ public final class GyroSyncCoordinator: ObservableObject {
             states[clip] = .failed(String(localized: "Choose a lens for this shoot", bundle: L10n.bundle))
             return
         }
-        states[clip] = .running
         let folderKey = AppState.key(ctx.chosenFolder)
         let position = position(forClip: clip)
+        let logEntries = Array((logIndex[folderKey] ?? [:]).values)
+        let sourceFiles = ctx.shoot.clips.first(where: { $0.files.first == mlv })?.files ?? [mlv]
+        let signature = await Self.offMain {
+            Self.refusalSignature(files: sourceFiles, lens: lens, position: position,
+                                  squeezeFix: squeezeFix, logs: logEntries)
+        }
+        guard !Task.isCancelled, contexts[AppState.key(ctx.shoot.folder)] != nil else { return }
+        if !force, let signature, let cached = cachedRefusal(clip, signature: signature) {
+            states[clip] = cached
+            return
+        }
+        states[clip] = .running
         let logs = (logIndex[folderKey] ?? [:]).values.map(\.log).sorted { $0.url.path < $1.url.path }
         let job = Job(mlv: mlv, squeezeFix: squeezeFix, clipDir: clipDir, dest: dest, force: force, lens: lens, position: position,
                       logs: logs, decodedLogs: decodedLogs, skew: skews[folderKey],
@@ -392,6 +407,7 @@ public final class GyroSyncCoordinator: ObservableObject {
         }
         // Recorded first, so views refreshed by `states` read the new profile kind.
         if case .synced = outcome.state { recordWritten(clip, outcome.state, profile: outcome.profile) }
+        storeRefusal(clip, state: outcome.state, signature: signature)
         states[clip] = outcome.state
         if let entry = outcome.skewEntry {
             syncedByFolder[folderKey, default: []].append(entry)
@@ -425,6 +441,54 @@ public final class GyroSyncCoordinator: ObservableObject {
     }
 
     // MARK: Persistence
+
+    /// Only deterministic refusals are cached; transient failures and cancellations are retried.
+    private func cachedRefusal(_ clip: String, signature: String) -> ClipGyroState? {
+        guard let entry = defaults.dictionary(forKey: Key.refusals)?[clip] as? [String: String],
+              entry["signature"] == signature else { return nil }
+        switch entry["state"] {
+        case "noLog": return .noLog
+        case "notEnoughMotion": return .notEnoughMotion
+        case "ambiguous": return .ambiguous
+        default: return nil
+        }
+    }
+
+    private func storeRefusal(_ clip: String, state: ClipGyroState, signature: String?) {
+        var entries = defaults.dictionary(forKey: Key.refusals) ?? [:]
+        let name: String?
+        switch state {
+        case .noLog: name = "noLog"
+        case .notEnoughMotion: name = "notEnoughMotion"
+        case .ambiguous: name = "ambiguous"
+        default: name = nil
+        }
+        if let name, let signature { entries[clip] = ["signature": signature, "state": name] }
+        else { entries[clip] = nil }
+        defaults.set(entries, forKey: Key.refusals)
+    }
+
+    /// Size/date checks avoid reading RAW data; all split MLV segments and candidate logs participate.
+    nonisolated private static func refusalSignature(files: [URL], lens: Lens, position: MountingPosition,
+                                                      squeezeFix: Int?, logs: [LogIndexEntry]) -> String? {
+        var components: [String] = ["1", position.rawValue, String(squeezeFix ?? 0)]
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        guard let lensData = try? encoder.encode(lens) else { return nil }
+        components.append(lensData.base64EncodedString())
+        for file in files.sorted(by: { $0.path < $1.path }) {
+            // URL resource values may be cached on a reused Shoot; always stat a fresh URL.
+            guard let attrs = try? URL(fileURLWithPath: file.path).resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]),
+                  let size = attrs.fileSize, let date = attrs.contentModificationDate else { return nil }
+            components += [file.path, String(size), String(date.timeIntervalSince1970)]
+        }
+        for entry in logs.sorted(by: { $0.log.url.path < $1.log.url.path }) {
+            guard let date = entry.modified, entry.size >= 0 else { return nil }
+            components += [entry.log.url.path, String(entry.size), String(date.timeIntervalSince1970)]
+        }
+        guard let data = try? encoder.encode(components) else { return nil }
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
 
     private var written: Set<String> { Set(defaults.stringArray(forKey: Key.written) ?? []) }
 

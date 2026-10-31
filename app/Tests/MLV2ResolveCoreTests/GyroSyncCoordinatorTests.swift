@@ -346,6 +346,35 @@ final class GyroSyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(out["output_width"] as? Int, 1600)
     }
 
+    func testMountRepairsMovedExcerptWithoutLocalOwnershipOrMotionAnalysis() async throws {
+        let (clip, key, dir) = try makeClip("A001", atSecond: 10)
+        let log = try makeLog("t1", atSecond: 0)
+        let dest = gyroflow(dir)
+        let data = try JSONSerialization.data(withJSONObject: [
+            "gyro_source": ["filepath": log.absoluteString],
+            "offsets": ["15000000": -10_000.0],
+            "video_info": ["num_frames": 250, "fps": 25]
+        ] as [String: Any])
+        let result = try GyroLogExcerpt.prepare(data, destination: dest)
+        try result.persistLog()
+        var project = try XCTUnwrap(JSONSerialization.jsonObject(with: result.projectData) as? [String: Any])
+        var source = try XCTUnwrap(project["gyro_source"] as? [String: Any])
+        let local = try XCTUnwrap(URL(string: try XCTUnwrap(source["filepath"] as? String)))
+        source["filepath"] = "file:///previous/disk/.mlv2resolve-gyro/" + local.lastPathComponent
+        project["gyro_source"] = source
+        try JSONSerialization.data(withJSONObject: project).write(to: dest)
+        let gate = MotionGate()
+        let c = coordinator(gate: gate)
+        await c.shootMounted(shoot([clip]), mountPoint: mountPoint, chosenFolder: chosen)
+        let repaired = try XCTUnwrap(try json(dest)["gyro_source"] as? [String: Any])
+        let repairedURL = try XCTUnwrap(URL(string: try XCTUnwrap(repaired["filepath"] as? String)))
+        XCTAssertEqual(repairedURL.standardizedFileURL, local.standardizedFileURL)
+        XCTAssertEqual(c.states[key], .existing)
+        let calls = await gate.calls
+        XCTAssertEqual(calls, 0)
+        XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: backups.path).isEmpty)
+    }
+
     func testSkipsExisting() async throws {
         let (clip, key, dir) = try makeClip("A001", atSecond: 10)
         try makeLog("t1", atSecond: 0)

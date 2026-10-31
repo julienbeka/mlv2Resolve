@@ -43,6 +43,9 @@ enum GyroLogExcerpt {
               let path = source["filepath"] as? String, let url = URL(string: path), url.isFileURL,
               url.host == nil || url.host == "" || url.host == "localhost"
         else { throw Failure.invalidProject }
+        if let rebased = try rebaseExcerpt(data, destination: destination) {
+            return Prepared(projectData: rebased, logURL: nil, logData: nil)
+        }
         let logURL = URL(fileURLWithPath: url.path).standardizedFileURL
         let storage = destination.deletingLastPathComponent().appendingPathComponent(".mlv2resolve-gyro", isDirectory: true)
         if logURL.deletingLastPathComponent() == storage.standardizedFileURL {
@@ -75,6 +78,33 @@ enum GyroLogExcerpt {
         p["offsets"] = adjusted
         return Prepared(projectData: try JSONSerialization.data(withJSONObject: p, options: [.prettyPrinted, .withoutEscapingSlashes]),
                         logURL: target, logData: excerpt)
+    }
+
+    /// Recognize our content-addressed excerpts after a folder move, even on another Mac.
+    /// Never substitute a similarly named original session log or change sync/lens settings.
+    private static func rebaseExcerpt(_ data: Data, destination: URL) throws -> Data? {
+        guard var project = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              var source = project["gyro_source"] as? [String: Any],
+              let path = source["filepath"] as? String, let old = URL(string: path), old.isFileURL,
+              old.host == nil || old.host == "" || old.host == "localhost" else { return nil }
+        let original = URL(fileURLWithPath: old.path).standardizedFileURL
+        guard original.deletingLastPathComponent().lastPathComponent == ".mlv2resolve-gyro" else { return nil }
+        let storage = destination.deletingLastPathComponent().appendingPathComponent(".mlv2resolve-gyro", isDirectory: true)
+        let local = storage.appendingPathComponent(original.lastPathComponent).standardizedFileURL
+        guard original != local else { return nil }
+        let base = destination.deletingPathExtension().lastPathComponent + "-"
+        let name = original.deletingPathExtension().lastPathComponent
+        guard original.pathExtension == "bin", name.hasPrefix(base) else { return nil }
+        let digest = String(name.dropFirst(base.count))
+        guard digest.count == 20, digest.allSatisfy({ "0123456789abcdef".contains($0) }) else { return nil }
+        guard FileManager.default.fileExists(atPath: local.path) else { throw Failure.missingExcerpt }
+        try Task.checkCancellation()
+        let bytes = try Data(contentsOf: local)
+        let actual = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+        guard actual.hasPrefix(digest) else { throw Failure.invalidChecksum }
+        source["filepath"] = GyroflowProject.fileURL(local.path)
+        project["gyro_source"] = source
+        return try JSONSerialization.data(withJSONObject: project, options: [.prettyPrinted, .withoutEscapingSlashes])
     }
 
     /// All sensor bytes and checksums stay intact. Markers do not count as samples.
@@ -126,9 +156,15 @@ enum GyroLogExcerpt {
 
     /// Called only for sidecars owned by mlv2Resolve. No motion analysis or lens changes.
     @discardableResult
-    static func migrate(at destination: URL, backupDirectory: URL) throws -> Bool {
+    static func migrate(at destination: URL, backupDirectory: URL, relocateOnly: Bool = false) throws -> Bool {
         let before = try Data(contentsOf: destination)
-        let result = try prepare(before, destination: destination)
+        let result: Prepared
+        if relocateOnly {
+            guard let rebased = try rebaseExcerpt(before, destination: destination) else { return false }
+            result = Prepared(projectData: rebased, logURL: nil, logData: nil)
+        } else {
+            result = try prepare(before, destination: destination)
+        }
         guard result.projectData != before else { return false }
         try result.persistLog()
         try Task.checkCancellation()

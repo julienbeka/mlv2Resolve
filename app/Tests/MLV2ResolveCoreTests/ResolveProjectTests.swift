@@ -39,7 +39,7 @@ final class ResolveProjectTests: XCTestCase {
         let result = await RP.open(link: link, runner: { _ in "OPENED\nNEW_CLIPS 2" },
                                    confirmSwitch: { _,_ in XCTFail("No project switch requested"); return false },
                                    confirmAddClips: { count, name in
-            XCTAssertEqual(count, 2); XCTAssertEqual(name, "Existing"); confirmations += 1; return false
+            XCTAssertEqual(count, 2); XCTAssertEqual(name, "Existing"); confirmations += 1; return .skip
         })
         XCTAssertFalse(result.isError)
         XCTAssertTrue(result.text.contains("Existing"))
@@ -70,6 +70,88 @@ final class ResolveProjectTests: XCTestCase {
         XCTAssertTrue(output.contains("OPEN_IMPORT_VERIFIED"), output)
         XCTAssertTrue(output.contains("imported=1"), output)
         XCTAssertFalse(output.contains("ERROR"), output)
+    }
+
+    func testLinkedTimelineOptionAppendsOnlyNewClipsWithProcessing() async throws {
+        try XCTSkipUnless(ResolveDesqueeze.fuscriptURL() != nil, "Resolve Lua interpreter unavailable")
+        let create = RP.script(shoots: [.init(name: "20261025", media: [clip("a")])])
+        let setup = """
+        existing=true
+        local p=resolve:GetProjectManager():GetCurrentProject()
+        local timeline=p:GetTimelineByIndex(1)
+        timeline.GetName=function() return 'All shots' end
+        p.GetTimelineCount=function() return 1 end
+        p.GetTimelineByIndex=function() return timeline end
+        """
+        let add = RP.script(shoots: [.init(name: "20261025", media: [clip("a"),clip("b")])],
+                            linkedUpdate: true, approvedNewClips: true, appendToAllShots: true)
+        let output = try await ResolveDesqueeze.fuscriptRunner()(fixture + "\n" + create + "\n" + setup + "\n" + add +
+            "\nassert(appended==2 and gyroCopied==2 and sizingAppliedCount==2 and imports==4); print('APPEND_VERIFIED')")
+        XCTAssertTrue(output.contains("APPEND_VERIFIED"), output)
+        XCTAssertTrue(output.contains("imported=1 already=1"), output)
+        XCTAssertFalse(output.contains("ERROR"), output)
+    }
+
+    func testLinkedTimelineOptionFailsBeforeImportWhenTargetIsMissing() async throws {
+        try XCTSkipUnless(ResolveDesqueeze.fuscriptURL() != nil, "Resolve Lua interpreter unavailable")
+        let setup = """
+        existing=true; currentName='20261025'
+        resolve:GetProjectManager():GetCurrentProject().GetTimelineCount=function() return 0 end
+        """
+        let script = RP.script(shoots: [.init(name: "20261025", media: [clip("a")])],
+                               linkedUpdate: true, approvedNewClips: true, appendToAllShots: true)
+        let output = try await ResolveDesqueeze.fuscriptRunner()(fixture + "\n" + setup + "\n" + script +
+            "\nassert(imports==0); print('NO_IMPORT')")
+        XCTAssertTrue(output.contains("All shots timeline not found"), output)
+        XCTAssertTrue(output.contains("NO_IMPORT"), output)
+    }
+
+    func testLinkedImportAssignsAllGroupEvenWithEmptyTimeline() async throws {
+        try XCTSkipUnless(ResolveDesqueeze.fuscriptURL() != nil, "Resolve Lua interpreter unavailable")
+        for groupExists in [true, false] {
+            let setup = """
+            existing=true; currentName='20261025'
+            local p=resolve:GetProjectManager():GetCurrentProject()
+            local target=p:GetTimelineByIndex(1)
+            target.GetName=function() return 'All shots' end
+            p.GetTimelineCount=function() return 1 end
+            p.GetTimelineByIndex=function() return target end
+            p.GetColorGroupsList=function() return \(groupExists ? "{colorGroupFixture}" : "{}") end
+            p.AddColorGroup=function(self,name) assert(name=='All'); return colorGroupFixture end
+            function verifyAllGroup()
+              local clips=target:GetItemListInTrack('video',1)
+              assert(#clips==1 and clips[1]:GetColorGroup()==colorGroupFixture)
+              print('ALL_GROUP_VERIFIED')
+            end
+            """
+            let script = RP.script(shoots: [.init(name: "20261025", media: [clip("a")])],
+                                   linkedUpdate: true, approvedNewClips: true, appendToAllShots: true)
+            let output = try await ResolveDesqueeze.fuscriptRunner()(fixture + "\n" + setup + "\n" + script + "\nverifyAllGroup()")
+            XCTAssertTrue(output.contains("ALL_GROUP_VERIFIED"), output)
+            XCTAssertTrue(output.contains("imported=1 already=0 failed=0"), output)
+            XCTAssertFalse(output.contains("ERROR"), output)
+        }
+    }
+
+    func testDiscoveryReportsEveryClipIncludingUnreadableOnes() {
+        let clips = ["missing-a", "missing-b"].map { Clip(name: $0, files: [], bytes: 0) }
+        let shoot = Shoot(name: "Test", folder: URL(fileURLWithPath: "/missing"), volumeName: "Test", clips: clips)
+        var counts: [Int] = [], names: [String] = []
+        let discovered = RP.discover(shoot, mount: URL(fileURLWithPath: "/missing-mount"), corrections: [:]) { done, total, name in
+            XCTAssertEqual(total, 2)
+            counts.append(done); names.append(name)
+        }
+        XCTAssertEqual(counts, [0, 1, 1, 2])
+        XCTAssertEqual(names, ["missing-a", "missing-a", "missing-b", "missing-b"])
+        XCTAssertEqual(discovered.warnings, ["missing-a", "missing-b"])
+    }
+
+    func testOpeningAndMediaCheckHaveDistinctProgressStages() {
+        let opening = RP.Progress.parse("PROGRESS opening")
+        let checking = RP.Progress.parse("PROGRESS opened")
+        XCTAssertNotNil(opening)
+        XCTAssertNotNil(checking)
+        XCTAssertNotEqual(opening?.task, checking?.task)
     }
 
     func testProgressTracksClipsAndReservesCompletionForFinalSave() {
@@ -423,7 +505,9 @@ final class ResolveProjectTests: XCTestCase {
       DeleteTimelines=function() modelRemoved=true; return true end,
       DeleteClips=function(self,clips) assert(#clips==1 and clips[1]==modelMedia); modelMediaRemoved=true; return true end,
       AppendToTimeline=function(self,clips)
+        appended=(appended or 0)+#clips
         local x={GetNodeGraph=function(self) return {GetNumNodes=function() return 1 end,GetToolsInNode=function() return self.gyro and {'OFX: Gyroflow(Niyien)'} or {} end} end,
+          CopyGrades=function(self,targets) gyroCopied=(gyroCopied or 0)+#targets; for _,t in ipairs(targets) do t.gyro=self.gyro end; return true end,
           AssignToColorGroup=function(self,g) assert(g==colorGroupFixture); self.group=g; return true end,
           GetColorGroup=function(self) return self.group end,
           SetProperty=function(self,k,v) zoom=v; return true end}

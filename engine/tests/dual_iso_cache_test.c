@@ -27,6 +27,7 @@ void close_chunks(FILE **chunk_files, uint32_t chunk_count) { (void)chunk_files;
 static int failures = 0;
 static int decode_calls = 0;
 static int last_decode_mode = -1;
+static size_t frame_bytes = 16;
 
 #define CHECK(cond, ...) do { if (cond) { printf("ok: " __VA_ARGS__); printf("\n"); } \
                               else { printf("FAIL: " __VA_ARGS__); printf("\n"); failures++; } } while (0)
@@ -35,8 +36,8 @@ static int last_decode_mode = -1;
 static int fake_decode(struct image_buffer *b)
 {
     decode_calls++;
-    last_decode_mode = dual_iso_mode();
-    b->size = 16;
+    last_decode_mode = b->dual_iso;
+    b->size = frame_bytes;
     b->data = malloc(b->size);
     b->header = malloc(4);
     b->header_size = 4;
@@ -126,6 +127,51 @@ int main(void)
     CHECK(get_image_buffer_count() == before - 1, "H1's stale buffer purged once unreferenced (%d -> %d)",
           before, get_image_buffer_count());
     release_image_buffer(l3);
+
+    /* A playback read-ahead window must be reusable, rather than decoded again per read. */
+    frame_bytes = 1024 * 1024;
+    struct image_buffer *window[24];
+    int calls_before = decode_calls;
+    for (int i = 0; i < 24; i++) {
+        char name[64]; snprintf(name, sizeof(name), "/clip/window_%06d.dng", i);
+        window[i] = get(name);
+    }
+    for (int i = 0; i < 24; i++) {
+        lock_image_buffer_data(window[i], fake_decode);
+        unlock_image_buffer_data(window[i]);
+    }
+    CHECK(decode_calls - calls_before == 24, "24-frame playback window decoded once (got %d)", decode_calls - calls_before);
+    for (int i = 0; i < 24; i++) release_image_buffer(window[i]);
+    frame_bytes = 8 * 1024 * 1024;
+
+    /* Resolve can retain thousands of open DNG handles after reading thumbnails. */
+    struct image_buffer *held[64];
+    for (int i = 0; i < 64; i++) {
+        char name[64]; snprintf(name, sizeof(name), "/clip/retained_%06d.dng", i);
+        held[i] = get(name);
+    }
+    int decoded = 0;
+    for (int i = 0; i < 64; i++) if (held[i] && held[i]->data) decoded++;
+    CHECK(decoded <= 32, "open handles keep decoded frames within 256 MiB (got %d x 8 MiB)", decoded);
+    /* Re-reading an older retained frame makes it hot; insertion age must not evict it. */
+    lock_image_buffer_data(held[33], fake_decode);
+    unlock_image_buffer_data(held[33]);
+    struct image_buffer *pressure = get("/clip/lru_pressure.dng");
+    CHECK(held[33]->data != NULL && held[34]->data == NULL, "recently reread frame survives while older idle data is evicted");
+    release_image_buffer(pressure);
+    /* Evicted data can be regenerated in the handle's original mode after a live switch. */
+    int expected = held[0]->dual_iso;
+    kill(getpid(), expected == 1 ? SIGUSR2 : SIGUSR1);
+    dual_iso_poll();
+    lock_image_buffer_data(held[0], fake_decode);
+    CHECK(data_mode(held[0]) == expected, "evicted open handle redecodes in its original mode");
+    for (int i = 0; i < 32; i++) {
+        char name[64]; snprintf(name, sizeof(name), "/clip/other_%06d.dng", i);
+        struct image_buffer *other = get(name); release_image_buffer(other);
+    }
+    CHECK(data_mode(held[0]) == expected, "active reader survives cache eviction pressure");
+    unlock_image_buffer_data(held[0]);
+    for (int i = 0; i < 64; i++) release_image_buffer(held[i]);
 
     free_all_image_buffers();
     printf("%d failures\n", failures);

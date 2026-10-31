@@ -37,12 +37,12 @@
 #define INIT_LOCK(x) pthread_mutex_init(&(x), NULL)
 #define DESTROY_LOCK(x) pthread_mutex_destroy(&(x))
 
-#define MAX_UNUSED_IMAGE_BUFFER_COUNT 4
-#define MAX_TOTAL_IMAGE_BUFFER_COUNT 16
+#define MAX_UNUSED_IMAGE_BUFFER_COUNT 64
+#define MAX_IDLE_IMAGE_BUFFER_BYTES ((size_t)256 * 1024 * 1024)
 
 CREATE_MUTEX(image_buffer_mutex)
 
-static void image_buffer_cleanup();
+static void image_buffer_cleanup(struct image_buffer *keep);
 
 static struct image_buffer * image_buffers = NULL;
 
@@ -73,14 +73,16 @@ static void purge_stale_image_buffers(unsigned generation)
     }
 }
 
-static struct image_buffer * new_image_buffer(const char * dng_filename, unsigned generation)
+static struct image_buffer * new_image_buffer(const char * dng_filename, unsigned generation, int mode)
 {
-    image_buffer_cleanup();
+    image_buffer_cleanup(NULL);
     struct image_buffer * new_buffer = malloc(sizeof(struct image_buffer));
     if(new_buffer == NULL) return NULL;
     
-    image_buffer_count++;
     memset(new_buffer, 0, sizeof(struct image_buffer));
+    new_buffer->dng_filename = strdup(dng_filename);
+    if (!new_buffer->dng_filename) { free(new_buffer); return NULL; }
+    image_buffer_count++;
     
     if(image_buffers == NULL)
     {
@@ -95,14 +97,8 @@ static struct image_buffer * new_image_buffer(const char * dng_filename, unsigne
         }
         current->next = new_buffer;
     }
-    new_buffer->dng_filename = malloc((sizeof(char) * (strlen(dng_filename) + 2)));
-    if (!new_buffer->dng_filename)
-    {
-        free(new_buffer);
-        return NULL;
-    }
-    strcpy(new_buffer->dng_filename, dng_filename);
     new_buffer->generation = generation;
+    new_buffer->dual_iso = mode;
     INIT_LOCK(new_buffer->mutex);
     return new_buffer;
 }
@@ -113,7 +109,8 @@ struct image_buffer * get_or_create_image_buffer(const char * path, int(*new_buf
     *was_created = 0;
     
     /* read before the frame callback reads the mode: a buffer is never tagged newer than the mode it was decoded in */
-    unsigned generation = dual_iso_generation();
+    unsigned generation; int mode;
+    dual_iso_state(&mode, &generation);
 
     RELOCK(image_buffer_mutex)
     {
@@ -122,7 +119,7 @@ struct image_buffer * get_or_create_image_buffer(const char * path, int(*new_buf
         image_buffer = get_image_buffer(path, generation);
         if(!image_buffer)
         {
-            image_buffer = new_image_buffer(path, generation);
+            image_buffer = new_image_buffer(path, generation, mode);
             if(image_buffer) *was_created = 1;
         }
         /* the caller's reference: nothing frees the buffer until release_image_buffer() */
@@ -137,16 +134,34 @@ struct image_buffer * get_or_create_image_buffer(const char * path, int(*new_buf
     return image_buffer;
 }
 
-void ensure_image_buffer_data(struct image_buffer * image_buffer, int(*new_buffer_cbr)(struct image_buffer *))
+void lock_image_buffer_data(struct image_buffer *b, int(*decode)(struct image_buffer *))
 {
-    RELOCK(image_buffer->mutex)
-    {
-        if(!image_buffer->data)
-        {
-            new_buffer_cbr(image_buffer);
-        }
+    pthread_mutex_lock(&b->mutex);
+    if (!b->data) decode(b);
+}
+
+void unlock_image_buffer_data(struct image_buffer *b)
+{
+    pthread_mutex_unlock(&b->mutex);
+    pthread_mutex_lock(&image_buffer_mutex);
+    /* Recently read frames move to the tail, independent of when Resolve opened their handles. */
+    struct image_buffer **link = &image_buffers;
+    while (*link && *link != b) link = &(*link)->next;
+    if (*link && b->next) {
+        *link = b->next;
+        struct image_buffer *tail = image_buffers;
+        while (tail->next) tail = tail->next;
+        tail->next = b;
+        b->next = NULL;
     }
-    UNLOCK(image_buffer->mutex)
+    image_buffer_cleanup(b);
+    pthread_mutex_unlock(&image_buffer_mutex);
+}
+
+void ensure_image_buffer_data(struct image_buffer *b, int(*decode)(struct image_buffer *))
+{
+    lock_image_buffer_data(b, decode);
+    unlock_image_buffer_data(b);
 }
 
 static void free_image_buffer(struct image_buffer * image_buffer)
@@ -223,7 +238,7 @@ int get_image_buffer_count()
  * MAX_UNUSED_IMAGE_BUFFER_COUNT. A referenced buffer is never freed: a handle may be reading it.
  * Caller holds image_buffer_mutex.
  */
-static void image_buffer_cleanup()
+static void image_buffer_cleanup(struct image_buffer *keep)
 {
     while (get_image_buffer_count() > MAX_UNUSED_IMAGE_BUFFER_COUNT)
     {
@@ -235,9 +250,23 @@ static void image_buffer_cleanup()
         if(!victim) break;
         free_image_buffer(victim);
     }
-    if (get_image_buffer_count() > MAX_TOTAL_IMAGE_BUFFER_COUNT)
-    {
-        err_printf("%d image buffers still referenced (open handles)\n", get_image_buffer_count());
+    /* An open NFS/FUSE handle must not retain decoded pixels indefinitely. Busy readers
+       hold the per-buffer mutex and are skipped; their unlock trims again. */
+    size_t idle_bytes = 0;
+    for (struct image_buffer *b = image_buffers; b; b = b->next) {
+        if (pthread_mutex_trylock(&b->mutex) != 0) continue;
+        if (b->data) idle_bytes += b->size + b->header_size;
+        pthread_mutex_unlock(&b->mutex);
+    }
+    for (struct image_buffer *b = image_buffers; b && idle_bytes > MAX_IDLE_IMAGE_BUFFER_BYTES; b = b->next) {
+        if (pthread_mutex_trylock(&b->mutex) != 0) continue;
+        if (b->data && b != keep) {
+            idle_bytes -= b->size + b->header_size;
+            free(b->data); b->data = NULL;
+            free(b->header); b->header = NULL;
+            b->size = b->header_size = 0;
+        }
+        pthread_mutex_unlock(&b->mutex);
     }
 }
 

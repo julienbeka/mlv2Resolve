@@ -358,16 +358,18 @@ public final class GyroSyncCoordinator: ObservableObject {
         let exists = FileManager.default.fileExists(atPath: dest.path)
         if !exists && written.contains(clip) { unrecordWritten(clip) }  // our file is gone: forget it
         if exists && !force {
-            guard written.contains(clip) else { states[clip] = .existing; return }
+            let owned = written.contains(clip)
+            // Files moved from another folder/Mac may not be in the local ownership registry.
+            // Only rebase verified mlv2Resolve excerpts in that case; leave other sidecars alone.
             // This is validation/migration of an existing result, not another motion analysis.
-            states[clip] = meta(clip) ?? .existing
+            states[clip] = owned ? (meta(clip) ?? .existing) : .existing
             let backup = backupsRoot.appendingPathComponent(MountPaths.sanitize(ctx.shoot.name), isDirectory: true)
-            let migration = Task.detached { try GyroLogExcerpt.migrate(at: dest, backupDirectory: backup) }
+            let migration = Task.detached { try GyroLogExcerpt.migrate(at: dest, backupDirectory: backup, relocateOnly: !owned) }
             let result = await withTaskCancellationHandler(operation: { await migration.result },
                                                           onCancel: { migration.cancel() })
             guard !Task.isCancelled, contexts[AppState.key(ctx.shoot.folder)] != nil else { return }
             switch result {
-            case .success: states[clip] = meta(clip) ?? .existing
+            case .success: states[clip] = owned ? (meta(clip) ?? .existing) : .existing
             case .failure(let error):
                 states[clip] = .failed(String(localized: "Couldn't optimize the gyro log: \(error.localizedDescription)", bundle: L10n.bundle))
             }

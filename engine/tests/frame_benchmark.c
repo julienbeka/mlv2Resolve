@@ -39,7 +39,7 @@ int main(int argc,char **argv) {
     for(int i=0;i<frames;i++) {
         int c=i%clips, frame=(i/clips)%counts[c];
         char path[4096]; snprintf(path,sizeof(path),"/%s/%s_%06d.dng",names[c],names[c],frame);
-        struct image_buffer image={0}; image.dng_filename=path;
+        struct image_buffer image={0}; image.dng_filename=path; image.dual_iso=mode;
         double t=seconds(); int ok=process_frame(&image); times[i]=seconds()-t;
         if(!ok || !image.data || !image.header) { fprintf(stderr,"FAILED %s\n",path); return 4; }
         bytes+=image.size; done++; free(image.data); free(image.header);

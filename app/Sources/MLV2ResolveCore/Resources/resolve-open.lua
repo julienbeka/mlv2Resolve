@@ -1,4 +1,6 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
+io.stdout:setvbuf('no')
+print('PROGRESS opening')
 local function clean(s) return tostring(s):gsub('[\r\n]',' ') end
 local r=resolve
 if not r then local ok,v=pcall(function() return Resolve() end); if ok then r=v end end
@@ -53,6 +55,7 @@ local ok,err=pcall(function()
   for _,name in ipairs(pm:GetProjectListInCurrentFolder() or {}) do if name==TARGET then exists=true end end
   if not exists then error('Linked project not found: ' .. TARGET) end
   if not pm:LoadProject(TARGET) then error('Could not open linked project: ' .. TARGET) end
+  print('PROGRESS opened')
   LINK_OPENED=true
   print('OPENED')
 end)

@@ -118,6 +118,8 @@ local ok,err=pcall(function()
         if not MENU then print('NEW_CLIPS ' .. pending); return end
         TEXT.open=TEXT.add
         if not dialog(string.format(TEXT.newClips,pending),true) then return end
+        TEXT.cancel=TEXT.mediaOnly; TEXT.open=TEXT.allShots
+        APPEND_TO_ALL_SHOTS=dialog(TEXT.timeline,true)
       end
     end
     pool:SetCurrentFolder(root)
@@ -159,7 +161,7 @@ local ok,err=pcall(function()
         end
       end
     end
-    -- Existing projects receive media only. Never create or modify a timeline on a later run.
+    -- Existing projects receive media only unless appending to All shots was explicitly selected.
     if created then
       -- An existing empty timeline anchors the chosen project cadence during DRT imports.
       anchor=pool:CreateEmptyTimeline('__mlv2Resolve_format_anchor')
@@ -220,6 +222,35 @@ local ok,err=pcall(function()
       -- The project owns format, cadence and colour. Imported models must inherit it.
       if not rushs:SetSetting('useCustomSettings','0') then error('Could not inherit project settings') end
     end
+    if LINKED_UPDATE and APPEND_TO_ALL_SHOTS then
+      -- Resolve's current timeline may be another edit. Select the named target explicitly.
+      for index=1,project:GetTimelineCount() do
+        local candidate=project:GetTimelineByIndex(index)
+        if candidate and candidate:GetName()=='All shots' then
+          if rushs then error('Multiple All shots timelines found; import cancelled') end
+          rushs=candidate
+        end
+      end
+      if not rushs then error('All shots timeline not found; import cancelled') end
+      if not project:SetCurrentTimeline(rushs) then error('Could not open All shots timeline') end
+      -- Reuse the target timeline's processing model and group without touching existing items.
+      for track=1,rushs:GetTrackCount('video') do
+        for _,item in ipairs(rushs:GetItemListInTrack('video',track) or {}) do
+          local group=item:GetColorGroup()
+          if group and group:GetName()=='All' and not colorGroup then colorGroup=group end
+          if not gyroSource and hasGyro(item) then gyroSource=item end
+        end
+      end
+      -- Empty timelines have no member clip from which to recover the project group.
+      if not colorGroup then
+        for _,group in ipairs(project:GetColorGroupsList() or {}) do
+          if group:GetName()=='All' then colorGroup=group; break end
+        end
+      end
+      if not colorGroup then colorGroup=project:AddColorGroup('All') end
+      if not colorGroup or colorGroup:GetName()~='All' then error('Could not prepare color group All; import cancelled') end
+      if not gyroSource then warn('All shots: no existing Gyroflow model found') end
+    end
     for _,name in ipairs(shoot.warnings) do warn(shoot.name .. ': ' .. name) end
     for index,c in ipairs(shoot.clips) do
       if seen[c.dir] or seen[c.nfd] then already=already+1
@@ -260,9 +291,14 @@ local ok,err=pcall(function()
             local timelineItems=pool:AppendToTimeline({video}) or {}
             if #timelineItems==0 then warn(c.name .. ': timeline append refused') end
             for _,item in ipairs(timelineItems) do
-              if not item:AssignToColorGroup(colorGroup) then error(c.name .. ': color group assignment refused') end
               if gyroSource and (not gyroSource:CopyGrades({item}) or not hasGyro(item)) then
                 warn(c.name .. ': Gyroflow(NiYien) node could not be applied')
+              end
+              -- Assign after copying clip processing, then verify membership on the new item.
+              if colorGroup and not item:AssignToColorGroup(colorGroup) then error(c.name .. ': color group assignment refused') end
+              if LINKED_UPDATE then
+                local assigned=item:GetColorGroup()
+                if not assigned or assigned:GetName()~='All' then error(c.name .. ': color group All assignment not retained') end
               end
               local rawFit=math.min(targetWidth/c.width,targetHeight/c.height)
               local zoom=math.min(1,math.min(targetWidth/(c.width*c.factor),targetHeight/c.height)/rawFit)

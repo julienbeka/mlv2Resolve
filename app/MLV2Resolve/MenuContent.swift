@@ -56,8 +56,12 @@ enum MenuActions {
                 alert.informativeText = String(localized: "Add \(count) new clips to “\(project)” and apply the same processing, including desqueeze?")
                 alert.addButton(withTitle: String(localized: "Open Without Adding"))
                 alert.addButton(withTitle: String(localized: "Add Clips"))
+                let timeline = NSButton(checkboxWithTitle: String(localized: "Also add to the All shots timeline"), target: nil, action: nil)
+                timeline.state = .off
+                alert.accessoryView = timeline
                 NSApp.activate(ignoringOtherApps: true)
-                return alert.runModal() == .alertSecondButtonReturn
+                guard alert.runModal() == .alertSecondButtonReturn else { return .skip }
+                return timeline.state == .on ? .allShots : .mediaOnly
             })
             if let result { showDetail(result.text, style: result.isError ? .warning : .informational) {} }
         }

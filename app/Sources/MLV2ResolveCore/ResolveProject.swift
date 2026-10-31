@@ -11,6 +11,8 @@ public enum ResolveProject {
             guard line.hasPrefix("PROGRESS ") else { return nil }
             let body = String(line.dropFirst(9))
             switch body {
+            case "opening": return .init(fraction: 0.01, task: text("Opening Resolve project…", "Ouverture du projet Resolve…"))
+            case "opened": return .init(fraction: 0.03, task: text("Checking clips already in the project…", "Vérification des plans déjà dans le projet…"))
             case "preparing": return .init(fraction: 0.02, task: text("Preparing Resolve project…", "Préparation du projet Resolve…"))
             case "models": return .init(fraction: 0.05, task: text("Preparing timeline, color and Gyroflow…", "Préparation de la timeline, de la couleur et de Gyroflow…"))
             case "saving": return .init(fraction: 0.95, task: text("Checking and saving project…", "Vérification et sauvegarde du projet…"))
@@ -150,9 +152,11 @@ public enum ResolveProject {
     }
 
     /// Blocking filesystem/header work; callers run this off the main actor. Uses the mount's correction map.
-    public static func discover(_ shoot: Shoot, mount: URL, corrections: [String: Int]) -> ShootMedia {
+    public static func discover(_ shoot: Shoot, mount: URL, corrections: [String: Int], progress: ((Int, Int, String) -> Void)? = nil) -> ShootMedia {
         var media: [Media] = [], warnings: [String] = []
-        for clip in shoot.clips {
+        for (index, clip) in shoot.clips.enumerated() {
+            progress?(index, shoot.clips.count, clip.name)
+            defer { progress?(index + 1, shoot.clips.count, clip.name) }
             guard let mlv = clip.files.first,
                   let directory = GyroSyncCoordinator.clipDir(mountPoint: mount, mlv: mlv),
                   let seq = sequence(in: directory), let metadata = MLVHeader.videoFormat(of: mlv) else {
@@ -166,7 +170,7 @@ public enum ResolveProject {
         return ShootMedia(name: shoot.name, media: media, warnings: warnings, source: shoot.folder.standardizedFileURL.path)
     }
 
-    public static func script(shoots: [ShootMedia], approvedCurrent: String? = nil, menu: Bool = false, timelineSize: ResolveTimelineSize = .automatic, createOnly: Bool = false, receiptsURL: URL? = nil, includeAllShots: Bool = true, timelineName: String = "All shots", frameRate: Double? = nil, colorManagement: ResolveColorManagement = .conversionRec709A, linkedUpdate: Bool = false, approvedNewClips: Bool = false) -> String {
+    public static func script(shoots: [ShootMedia], approvedCurrent: String? = nil, menu: Bool = false, timelineSize: ResolveTimelineSize = .automatic, createOnly: Bool = false, receiptsURL: URL? = nil, includeAllShots: Bool = true, timelineName: String = "All shots", frameRate: Double? = nil, colorManagement: ResolveColorManagement = .conversionRec709A, linkedUpdate: Bool = false, approvedNewClips: Bool = false, appendToAllShots: Bool = false) -> String {
         let quote = ResolveDesqueeze.luaString
         var lua = "local SHOOTS = {\n"
         for shoot in shoots {
@@ -186,15 +190,15 @@ public enum ResolveProject {
             lua += "},warnings={\((shoot.warnings + cadenceWarnings).map(quote).joined(separator: ","))}},\n"
         }
         lua += "}\nlocal APPROVED = \(approvedCurrent.map(quote) ?? "nil")\nlocal MENU = \(menu)\n"
-        lua += "local TEXT = {add=\(quote(text("Add clips", "Ajouter les plans"))),newClips=\(quote(text("%d new clips detected. Add them to this project and apply the same processing, including desqueeze?", "%d nouveaux plans détectés. Les ajouter à ce projet et appliquer les mêmes traitements, dont le desqueeze ?"))),switch=\(quote(text("Switch Resolve project?", "Changer de projet Resolve ?"))),cancel=\(quote(text("Cancel", "Annuler"))),open=\(quote(text("Open", "Ouvrir"))),guide=\(quote(guide)),done=\(quote(text("Project preparation finished. See the console for details.", "Préparation terminée. Consultez la console pour le détail.")))}\n"
+        lua += "local TEXT = {timeline=\(quote(text("Also add the new clips to the All shots timeline?", "Ajouter aussi les nouveaux plans à la timeline All shots ?"))),mediaOnly=\(quote(text("Media Pool only", "Media Pool uniquement"))),allShots=\(quote(text("Add to All shots", "Ajouter à All shots"))),add=\(quote(text("Add clips", "Ajouter les plans"))),newClips=\(quote(text("%d new clips detected. Add them to this project and apply the same processing, including desqueeze?", "%d nouveaux plans détectés. Les ajouter à ce projet et appliquer les mêmes traitements, dont le desqueeze ?"))),switch=\(quote(text("Switch Resolve project?", "Changer de projet Resolve ?"))),cancel=\(quote(text("Cancel", "Annuler"))),open=\(quote(text("Open", "Ouvrir"))),guide=\(quote(guide)),done=\(quote(text("Project preparation finished. See the console for details.", "Préparation terminée. Consultez la console pour le détail.")))}\n"
         lua += "local TIMELINE_TEMPLATE = \(quote(colorManagement.timelineTemplateURL.path))\nlocal COLOR_TEMPLATE = \(quote(colorManagement.colorTemplateURL.path))\nlocal INCLUDE_ALL_SHOTS = \(includeAllShots)\nlocal TIMELINE_NAME = \(quote(timelineName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "All shots" : timelineName.trimmingCharacters(in: .whitespacesAndNewlines)))\nlocal CREATE_ONLY = \(createOnly)\nlocal RECEIPTS = \(receiptsURL.map { quote($0.path) } ?? "nil")\n"
-        lua += "local LINKED_UPDATE = \(linkedUpdate)\nlocal ADD_APPROVED = \(approvedNewClips)\n"
+        lua += "local LINKED_UPDATE = \(linkedUpdate)\nlocal ADD_APPROVED = \(approvedNewClips)\nlocal APPEND_TO_ALL_SHOTS = \(appendToAllShots)\n"
         lua += "local COLOR_POST_NODE_COUNT = \(colorManagement.nodeCount)\nlocal COLOR_LUT = \(colorManagement.lutPath.map(quote) ?? "nil")\n"
         let url = Bundle.module.url(forResource: "resolve-project", withExtension: "lua")!
         return lua + (try! String(contentsOf: url, encoding: .utf8))
     }
 
-    public static func openScript(link: ResolveProjectStore.Link, approvedCurrent: String? = nil, menu: Bool = false, shoots: [ShootMedia] = [], approvedNewClips: Bool = false) -> String {
+    public static func openScript(link: ResolveProjectStore.Link, approvedCurrent: String? = nil, menu: Bool = false, shoots: [ShootMedia] = [], approvedNewClips: Bool = false, appendToAllShots: Bool = false) -> String {
         let q = ResolveDesqueeze.luaString
         let prefix = """
         local TARGET = \(q(link.name))
@@ -207,23 +211,30 @@ public enum ResolveProject {
         let url = Bundle.module.url(forResource: "resolve-open", withExtension: "lua")!
         let opening = "local LINK_OPENED = false\ndo\n" + prefix + "\n" + (try! String(contentsOf: url, encoding: .utf8)) + "\nend\n"
         guard !shoots.isEmpty else { return opening }
-        return opening + "if not LINK_OPENED then return end\n" + script(shoots: combined(shoots, name: link.name), menu: menu, linkedUpdate: true, approvedNewClips: approvedNewClips)
+        return opening + "if not LINK_OPENED then return end\n" + script(shoots: combined(shoots, name: link.name), menu: menu, linkedUpdate: true, approvedNewClips: approvedNewClips, appendToAllShots: appendToAllShots)
     }
+
+    public enum NewClipsChoice: Sendable { case skip, mediaOnly, allShots }
 
     @MainActor
     public static func open(link: ResolveProjectStore.Link, runner: ResolveDesqueeze.Runner,
                             confirmSwitch: (String, String) async -> Bool, shoots: [ShootMedia] = [],
-                            confirmAddClips: (Int, String) async -> Bool = { _,_ in false }) async -> (text: String, isError: Bool) {
+                            confirmAddClips: (Int, String) async -> NewClipsChoice = { _,_ in .skip }) async -> (text: String, isError: Bool) {
         var approved: String?
         var approvedNewClips = false
+        var appendToAllShots = false
         for _ in 0..<4 {
             do {
-                let output = try await runner(openScript(link: link, approvedCurrent: approved, shoots: shoots, approvedNewClips: approvedNewClips))
+                let output = try await runner(openScript(link: link, approvedCurrent: approved, shoots: shoots, approvedNewClips: approvedNewClips, appendToAllShots: appendToAllShots))
                 let lines = output.split(whereSeparator: \.isNewline)
                 if lines.contains(where: { $0.hasPrefix("ERROR ") || $0.hasPrefix("PROJECT ") }) { return message(parse(output)) }
                 if let pending = lines.first(where: { $0.hasPrefix("NEW_CLIPS ") }), let count = Int(pending.dropFirst(10)) {
-                    if await confirmAddClips(count, link.name) { approvedNewClips = true; approved = link.name; continue }
-                    return (text("Project opened: ", "Projet ouvert : ") + link.name, false)
+                    let choice = await confirmAddClips(count, link.name)
+                    if case .skip = choice { return (text("Project opened: ", "Projet ouvert : ") + link.name, false) }
+                    approvedNewClips = true
+                    appendToAllShots = choice == .allShots
+                    approved = link.name
+                    continue
                 }
                 if output.split(whereSeparator: \.isNewline).contains("OPENED") {
                     return (text("Project opened: ", "Projet ouvert : ") + link.name, false)

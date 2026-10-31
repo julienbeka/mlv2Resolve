@@ -259,18 +259,47 @@ public final class AppState: ObservableObject {
     }
 
     /// Rebuild a fresh mounted-media snapshot off the UI thread, including clips added since mounting.
-    public func resolveProjectMedia() async -> [ResolveProject.ShootMedia] {
+    public func resolveProjectMedia(progressID: UUID? = nil, sources: Set<String>? = nil) async -> [ResolveProject.ShootMedia] {
         let snapshot = mounted.sorted().compactMap { k -> (String, Shoot, URL, [String: Int])? in
-            guard let record = resolveShoots[k], let mount = mountPoints[k] else { return nil }
+            guard let record = resolveShoots[k], let mount = mountPoints[k],
+                  sources == nil || sources!.contains(record.shoot.folder.standardizedFileURL.path) else { return nil }
             return (k, record.shoot, mount, record.corrections)
         }
+        let emit: @Sendable (ResolveProject.Progress) -> Void = { [weak self] progress in
+            guard let progressID else { return }
+            Task { @MainActor [weak self] in self?.publishProjectProgress(progress, id: progressID) }
+        }
         let result = await Task.detached {
-            snapshot.map { key, shoot, mount, corrections in
-                let refreshed = (try? ShootScanner.scan(shoot.folder))?.first { $0.folder.standardizedFileURL == shoot.folder.standardizedFileURL } ?? shoot
-                return (key, ResolveProject.discover(refreshed, mount: mount, corrections: corrections))
+            let refreshed = snapshot.enumerated().map { index, entry in
+                let (key, shoot, mount, corrections) = entry
+                emit(.init(fraction: 0.05 * Double(index) / Double(max(1, snapshot.count)),
+                           task: ResolveProject.text("Listing source folder: ", "Inventaire du dossier source : ") + shoot.name))
+                let fresh = (try? ShootScanner.scan(shoot.folder))?.first { $0.folder.standardizedFileURL == shoot.folder.standardizedFileURL } ?? shoot
+                return (key, fresh, mount, corrections)
+            }
+            let total = refreshed.reduce(0) { $0 + $1.1.clips.count }
+            var completed = 0
+            return refreshed.map { key, shoot, mount, corrections in
+                let offset = completed
+                let media = ResolveProject.discover(shoot, mount: mount, corrections: corrections) { done, _, name in
+                    let count = offset + done
+                    emit(.init(fraction: 0.05 + 0.55 * Double(count) / Double(max(1, total)),
+                               task: ResolveProject.text("Scanning mounted clips", "Analyse des plans montés") + " \(count)/\(total) — " + name))
+                }
+                completed += shoot.clips.count
+                return (key, media)
             }
         }.value
+        if let progressID {
+            publishProjectProgress(.init(fraction: 0.6, task: ResolveProject.text("Preparing Resolve scripts and presets…", "Préparation des scripts et préréglages Resolve…")), id: progressID)
+        }
         return result.filter { mounted.contains($0.0) }.map { $0.1 }
+    }
+
+    private func publishProjectProgress(_ progress: ResolveProject.Progress, id: UUID) {
+        guard projectProgressID == id,
+              progress.fraction >= (resolveProjectProgress?.fraction ?? 0) else { return }
+        resolveProjectProgress = progress
     }
 
     /// Launch is supplied by the AppKit shell; all filesystem and Resolve work remains asynchronous.
@@ -285,7 +314,7 @@ public final class AppState: ObservableObject {
         projectProgressID = progressID
         resolveProjectProgress = .init(fraction: 0, task: ResolveProject.text("Scanning mounted clips…", "Analyse des plans montés…"))
         defer { openingResolve = false; projectProgressID = nil; resolveProjectProgress = nil }
-        let discovered = await resolveProjectMedia()
+        let discovered = await resolveProjectMedia(progressID: progressID)
         let media = ResolveProject.combined(discovered, name: resolvedProjectName)
         let factors = Set(media.flatMap(\.media).map(\.factor).filter { $0 > 1 }).sorted()
         let presets = ResolveProject.sizingPresets(shoots: media, timelineSize: timelineSize)
@@ -299,12 +328,11 @@ public final class AppState: ObservableObject {
             let names = media.flatMap(\.warnings).joined(separator: ", ")
             return (ResolveProject.text("No mounted DNG sequences were found. Mount a shoot, then try again.", "Aucune séquence DNG montée trouvée. Montez un tournage, puis réessayez.") + (names.isEmpty ? "" : "\n" + names), !media.isEmpty)
         }
-        resolveProjectProgress = .init(fraction: 0.01, task: ResolveProject.text("Waiting for Resolve…", "Connexion à Resolve…"))
+        resolveProjectProgress = .init(fraction: 0.65, task: ResolveProject.text("Waiting for Resolve…", "Connexion à Resolve…"))
         let runner = projectRunnerFactory? { [weak self] line in
             guard let progress = ResolveProject.Progress.parse(line) else { return }
             Task { @MainActor [weak self] in
-                guard let self, self.projectProgressID == progressID else { return }
-                self.resolveProjectProgress = progress
+                self?.publishProjectProgress(.init(fraction: 0.7 + 0.3 * progress.fraction, task: progress.task), id: progressID)
             }
         } ?? projectRunner
         guard let projectRunner = runner else { return (ResolveProject.guide, false) }
@@ -327,13 +355,16 @@ public final class AppState: ObservableObject {
 
     public func openLinkedProject(_ link: ResolveProjectStore.Link, launch: () async throws -> Void,
                                   confirmSwitch: (String, String) async -> Bool,
-                                  confirmAddClips: (Int, String) async -> Bool = { _,_ in false }) async -> (text: String, isError: Bool)? {
+                                  confirmAddClips: (Int, String) async -> ResolveProject.NewClipsChoice = { _,_ in .skip }) async -> (text: String, isError: Bool)? {
         guard !openingResolve, !desqueezing, !waitingForResolveGyro else { return nil }
         projectMenuAction = .open(link)
         projectMenuTask?.cancel()
         openingResolve = true
-        defer { openingResolve = false }
-        let media = await linkedProjectMedia(link)
+        let progressID = UUID()
+        projectProgressID = progressID
+        resolveProjectProgress = .init(fraction: 0, task: ResolveProject.text("Scanning mounted clips…", "Analyse des plans montés…"))
+        defer { openingResolve = false; projectProgressID = nil; resolveProjectProgress = nil }
+        let media = await linkedProjectMedia(link, progressID: progressID)
         let preparation = prepareProjectPresets?(ResolveProject.sizingPresets(shoots: media))
             ?? prepareResolvePresets?(Set(media.flatMap(\.media).map(\.factor).filter { $0 > 1 }).sorted())
         do {
@@ -343,7 +374,14 @@ public final class AppState: ObservableObject {
             }
             try await launch()
         } catch { return (error.localizedDescription, true) }
-        guard let projectRunner else { return (ResolveProject.guide, false) }
+        resolveProjectProgress = .init(fraction: 0.65, task: ResolveProject.text("Waiting for Resolve…", "Connexion à Resolve…"))
+        let runner = projectRunnerFactory? { [weak self] line in
+            guard let progress = ResolveProject.Progress.parse(line) else { return }
+            Task { @MainActor [weak self] in
+                self?.publishProjectProgress(.init(fraction: 0.7 + 0.3 * progress.fraction, task: progress.task), id: progressID)
+            }
+        } ?? projectRunner
+        guard let projectRunner = runner else { return (ResolveProject.guide, false) }
         if let probe = projectProbeRunner, !(await ResolveProject.waitForConnection(runner: probe)) { return ResolveProject.message(.unavailable) }
         var result = await ResolveProject.open(link: link, runner: projectRunner, confirmSwitch: confirmSwitch,
                                               shoots: media, confirmAddClips: confirmAddClips)
@@ -351,11 +389,11 @@ public final class AppState: ObservableObject {
         return result
     }
 
-    private func linkedProjectMedia(_ link: ResolveProjectStore.Link) async -> [ResolveProject.ShootMedia] {
+    private func linkedProjectMedia(_ link: ResolveProjectStore.Link, progressID: UUID? = nil) async -> [ResolveProject.ShootMedia] {
         let sources = Set(projects.links.filter {
             $0.name == link.name && $0.database == link.database && $0.folder == link.folder
         }.map(\.source) + [link.source])
-        return await resolveProjectMedia().filter { sources.contains($0.source) }
+        return await resolveProjectMedia(progressID: progressID, sources: sources)
     }
 
     public func clearResolveProjectLinks() {

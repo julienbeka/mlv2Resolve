@@ -40,6 +40,7 @@ struct image_buffer
     uint16_t * data;
     LOCK_T mutex;
     int ref_count; /* open handles / in-flight reads; guarded by the image buffer list mutex */
+    int dual_iso; /* mode snapshot used when an evicted frame is decoded again */
     unsigned generation; /* dual ISO mode generation the buffer was created in */
 };
 
@@ -49,8 +50,11 @@ int create_preview(struct image_buffer * image_buffer);
    (decoding it with new_buffer_cbr if needed; NULL = do not decode yet). Every successful call needs
    one release_image_buffer(). */
 struct image_buffer * get_or_create_image_buffer(const char * path, int(*new_buffer_cbr)(struct image_buffer *), int * was_created);
-/* Decodes a referenced buffer with new_buffer_cbr if it has no data yet (serialised per buffer). */
+/* Decode convenience for single-threaded callers. Concurrent readers must lock data through their copy. */
 void ensure_image_buffer_data(struct image_buffer * image_buffer, int(*new_buffer_cbr)(struct image_buffer *));
+/* Hold the data mutex through the entire copy to the reader; open handles pin metadata only. */
+void lock_image_buffer_data(struct image_buffer *, int(*decode)(struct image_buffer *));
+void unlock_image_buffer_data(struct image_buffer *);
 void free_all_image_buffers();
 void release_image_buffer(struct image_buffer * image_buffer);
 int get_image_buffer_ref_count(struct image_buffer * image_buffer);

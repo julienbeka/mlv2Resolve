@@ -2956,6 +2956,16 @@
           }
         }
       }
+    },
+    "Also add to the All shots timeline": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ajouter aussi à la timeline All shots"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

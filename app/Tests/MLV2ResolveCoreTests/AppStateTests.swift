@@ -590,6 +590,34 @@ extension AppStateTests {
 }
 
 extension AppStateTests {
+    func testLinkedOpenPublishesProgressUntilRunnerCompletes() async throws {
+        @MainActor final class Observation {
+            var state: AppState?
+            var progress: ResolveProject.Progress?
+        }
+        let observation = Observation()
+        let state = AppState(manager: makeManager(), defaults: defaults, scan: ShootScanner.scan,
+                         projectRunnerFactory: { onOutput in
+            { _ in
+                await MainActor.run { XCTAssertNotNil(observation.state?.resolveProjectProgress) }
+                onOutput("PROGRESS 1/2 New clip")
+                try await Task.sleep(for: .milliseconds(20))
+                onOutput("PROGRESS preparing") // Late/retried stage must not rewind the bar.
+                try await Task.sleep(for: .milliseconds(20))
+                await MainActor.run { observation.progress = observation.state?.resolveProjectProgress }
+                return "OPENED"
+            }
+        })
+        observation.state = state
+        let link = ResolveProjectStore.Link(source: "/shoot", name: "Linked", database: "Disk||Test", folder: [])
+        let result = await state.openLinkedProject(link, launch: {}, confirmSwitch: { _,_ in true })
+        XCTAssertEqual(result?.isError, false)
+        XCTAssertTrue(observation.progress?.task.contains("1/2") == true)
+        XCTAssertEqual(observation.progress?.fraction ?? -1, 0.85, accuracy: 0.001)
+        XCTAssertNil(state.resolveProjectProgress)
+        XCTAssertFalse(state.openingResolve)
+    }
+
     func testSettingsRefreshKeepsLinkedOpenActionAndClearRemovesIt() async throws {
         let scripts = tmp.appendingPathComponent("resolve-scripts")
         let state = AppState(manager: makeManager(), defaults: defaults, scan: ShootScanner.scan,

@@ -99,6 +99,50 @@ final class GyroLogExcerptTests: XCTestCase {
         XCTAssertThrowsError(try GyroLogExcerpt.prepare(JSONSerialization.data(withJSONObject: p), destination: dest))
     }
 
+    func testMovedExcerptRebasesOnlyItsPathAndKeepsTiming() throws {
+        let (dest, data) = try fixture()
+        let prepared = try GyroLogExcerpt.prepare(data, destination: dest)
+        try prepared.persistLog()
+        try prepared.projectData.write(to: dest)
+        let moved = root.appendingPathComponent("moved")
+        try FileManager.default.createDirectory(at: moved, withIntermediateDirectories: true)
+        try FileManager.default.moveItem(at: logURL(prepared.projectData).deletingLastPathComponent(),
+                                         to: moved.appendingPathComponent(".mlv2resolve-gyro"))
+        let newDest = moved.appendingPathComponent(dest.lastPathComponent)
+        try FileManager.default.moveItem(at: dest, to: newDest)
+        XCTAssertTrue(try GyroLogExcerpt.migrate(at: newDest, backupDirectory: root.appendingPathComponent("backups"), relocateOnly: true))
+        let after = try Data(contentsOf: newDest)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: try logURL(after).path))
+        var beforeJSON = try json(prepared.projectData), afterJSON = try json(after)
+        beforeJSON.removeValue(forKey: "gyro_source"); afterJSON.removeValue(forKey: "gyro_source")
+        XCTAssertEqual(beforeJSON as NSDictionary, afterJSON as NSDictionary)
+        XCTAssertFalse(try GyroLogExcerpt.migrate(at: newDest, backupDirectory: root.appendingPathComponent("backups")))
+    }
+
+    func testRelocationLeavesForeignSidecarsUntouched() throws {
+        let (dest, data) = try fixture()
+        for content in [data, Data("foreign sidecar".utf8)] {
+            try content.write(to: dest)
+            XCTAssertFalse(try GyroLogExcerpt.migrate(at: dest, backupDirectory: root.appendingPathComponent("backups"), relocateOnly: true))
+            XCTAssertEqual(try Data(contentsOf: dest), content)
+        }
+    }
+
+    func testRelocationRejectsTamperedExcerptWithoutChangingProject() throws {
+        let (dest, data) = try fixture()
+        let prepared = try GyroLogExcerpt.prepare(data, destination: dest)
+        try prepared.persistLog()
+        var project = try json(prepared.projectData)
+        var source = try XCTUnwrap(project["gyro_source"] as? [String: Any])
+        source["filepath"] = "file:///old/.mlv2resolve-gyro/" + (try logURL(prepared.projectData)).lastPathComponent
+        project["gyro_source"] = source
+        let before = try JSONSerialization.data(withJSONObject: project)
+        try before.write(to: dest)
+        try Data("bad log".utf8).write(to: logURL(prepared.projectData))
+        XCTAssertThrowsError(try GyroLogExcerpt.migrate(at: dest, backupDirectory: root.appendingPathComponent("backups"), relocateOnly: true))
+        XCTAssertEqual(try Data(contentsOf: dest), before)
+    }
+
     func testOldExcerptRemainsValidAfterRegeneration() throws {
         let (dest, first) = try fixture()
         let a = try GyroLogExcerpt.prepare(first, destination: dest); try a.persistLog()

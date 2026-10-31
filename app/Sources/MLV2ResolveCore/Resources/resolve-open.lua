@@ -53,6 +53,7 @@ local ok,err=pcall(function()
   for _,name in ipairs(pm:GetProjectListInCurrentFolder() or {}) do if name==TARGET then exists=true end end
   if not exists then error('Linked project not found: ' .. TARGET) end
   if not pm:LoadProject(TARGET) then error('Could not open linked project: ' .. TARGET) end
+  LINK_OPENED=true
   print('OPENED')
 end)
 if not ok then

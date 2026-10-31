@@ -8,6 +8,70 @@ final class ResolveProjectTests: XCTestCase {
         .init(name: name, directory: "/mount/\(name)", pattern: "/mount/\(name)/\(name)_%06d.dng",
               first: 0, last: 99, wav: "/mount/\(name)/\(name).wav", width: width, height: height, factor: factor, fps: fps)
     }
+    @MainActor
+    func testLinkedImportFailureIsReportedAfterOpening() async {
+        let link = ResolveProjectStore.Link(source: "/shoot", name: "Existing", database: "db", folder: [])
+        let result = await RP.open(link: link, runner: { _ in "OPENED\nERROR DNG import refused" }, confirmSwitch: { _,_ in false })
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.text.contains("DNG import refused"))
+    }
+
+    func testLinkedUpdateRequiresConsentAndOnlyProcessesMissingClips() async throws {
+        try XCTSkipUnless(ResolveDesqueeze.fuscriptURL() != nil, "Resolve Lua interpreter unavailable")
+        let media = [RP.ShootMedia(name: "20261025", media: [clip("a"), clip("b")])]
+        let setup = "existing=true; currentName='20261025'\n"
+        let probe = RP.script(shoots: media, linkedUpdate: true)
+        let add = RP.script(shoots: media, linkedUpdate: true, approvedNewClips: true)
+        let output = try await ResolveDesqueeze.fuscriptRunner()(fixture + "\n" + setup + probe +
+            "\nassert(imports==0 and settings==0 and rushs==0)\n" + add +
+            "\nassert(imports==4 and syncs==2 and settings==0 and rushs==0 and sizingAppliedCount==2)\n" + probe +
+            "\nassert(imports==4); print('LINKED_VERIFIED')")
+        XCTAssertTrue(output.contains("NEW_CLIPS 2"), output)
+        XCTAssertEqual(output.components(separatedBy: "NEW_CLIPS ").count - 1, 1, output)
+        XCTAssertTrue(output.contains("LINKED_VERIFIED"), output)
+        XCTAssertFalse(output.contains("ERROR"), output)
+    }
+
+    @MainActor
+    func testLinkedOpenDeclinesNewClipsAndStillOpensProject() async {
+        let link = ResolveProjectStore.Link(source: "/shoot", name: "Existing", database: "db", folder: [])
+        var confirmations = 0
+        let result = await RP.open(link: link, runner: { _ in "OPENED\nNEW_CLIPS 2" },
+                                   confirmSwitch: { _,_ in XCTFail("No project switch requested"); return false },
+                                   confirmAddClips: { count, name in
+            XCTAssertEqual(count, 2); XCTAssertEqual(name, "Existing"); confirmations += 1; return false
+        })
+        XCTAssertFalse(result.isError)
+        XCTAssertTrue(result.text.contains("Existing"))
+        XCTAssertEqual(confirmations, 1)
+    }
+
+    func testLinkedMenuDeclineDoesNotImport() async throws {
+        try XCTSkipUnless(ResolveDesqueeze.fuscriptURL() != nil, "Resolve Lua interpreter unavailable")
+        let script = RP.script(shoots: [.init(name: "20261025", media: [clip("a")])], menu: true, linkedUpdate: true)
+        let output = try await ResolveDesqueeze.fuscriptRunner()(fixture + "\nexisting=true; currentName='20261025'; os.execute=function() return 1 end\n" + script + "\nassert(imports==0 and settings==0 and rushs==0); print('DECLINED')")
+        XCTAssertTrue(output.contains("DECLINED"), output)
+        XCTAssertFalse(output.contains("ERROR"), output)
+    }
+
+    func testLinkedOpenScriptLoadsExactProjectBeforeImporting() async throws {
+        try XCTSkipUnless(ResolveDesqueeze.fuscriptURL() != nil, "Resolve Lua interpreter unavailable")
+        let link = ResolveProjectStore.Link(source: "/shoot", name: "20261025", database: "Disk||Local", folder: ["Work"])
+        let setup = """
+        existing=true; currentName='20261025'
+        local pm=resolve:GetProjectManager()
+        pm.GetCurrentDatabase=function() return {DbType='Disk',DbName='Local'} end
+        pm.GotoRootFolder=function() return true end
+        pm.OpenFolder=function(self,name) assert(name=='Work'); return true end
+        """
+        let script = RP.openScript(link: link, approvedCurrent: link.name,
+                                   shoots: [.init(name: "folder", media: [clip("a")])], approvedNewClips: true)
+        let output = try await ResolveDesqueeze.fuscriptRunner()(fixture + "\n" + setup + "\n" + script + "\nassert(imports==2 and sizingAppliedCount==1 and rushs==0); print('OPEN_IMPORT_VERIFIED')")
+        XCTAssertTrue(output.contains("OPEN_IMPORT_VERIFIED"), output)
+        XCTAssertTrue(output.contains("imported=1"), output)
+        XCTAssertFalse(output.contains("ERROR"), output)
+    }
+
     func testProgressTracksClipsAndReservesCompletionForFinalSave() {
         let half = RP.Progress.parse("PROGRESS 50/100 A clip with spaces")
         XCTAssertEqual(half?.fraction ?? -1, 0.5, accuracy: 0.001)
@@ -329,7 +393,7 @@ final class ResolveProjectTests: XCTestCase {
         SetLUT=function(self,n,path) assert(n==2); selectedLUT=path; return true end,GetLUT=function() return selectedLUT end} end}
     local function item(path)
       return {GetClipProperty=function(self,k) if k=='File Path' then return path else return '' end end,
-              SetClipProperty=function(self,k,v) assert(k=='Input Sizing Preset' and v=='mlv2Resolve 1x3'); return true end}
+              SetClipProperty=function(self,k,v) assert(k=='Input Sizing Preset' and v=='mlv2Resolve 1x3'); sizingAppliedCount=(sizingAppliedCount or 0)+1; return true end}
     end
     local root={GetClipList=function() return items end, GetSubFolderList=function() return {__flags=256} end}
     local pool={GetRootFolder=function() return root end, SetCurrentFolder=function() return true end,

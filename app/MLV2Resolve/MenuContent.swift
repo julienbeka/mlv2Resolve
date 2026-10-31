@@ -50,7 +50,15 @@ enum MenuActions {
         Task {
             let result = await state.openLinkedProject(link, launch: {
                 _ = try await NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
-            }, confirmSwitch: confirmSwitch)
+            }, confirmSwitch: confirmSwitch, confirmAddClips: { count, project in
+                let alert = NSAlert()
+                alert.messageText = String(localized: "New clips detected")
+                alert.informativeText = String(localized: "Add \(count) new clips to “\(project)” and apply the same processing, including desqueeze?")
+                alert.addButton(withTitle: String(localized: "Open Without Adding"))
+                alert.addButton(withTitle: String(localized: "Add Clips"))
+                NSApp.activate(ignoringOtherApps: true)
+                return alert.runModal() == .alertSecondButtonReturn
+            })
             if let result { showDetail(result.text, style: result.isError ? .warning : .informational) {} }
         }
     }

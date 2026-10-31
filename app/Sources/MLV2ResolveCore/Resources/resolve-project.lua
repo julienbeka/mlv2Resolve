@@ -82,6 +82,7 @@ local ok,err=pcall(function()
       currentName=nil
     end
     local project,created
+    if LINKED_UPDATE and currentName~=shoot.name then error('Linked project changed; import cancelled') end
     if currentName==shoot.name then project=current; created=false
     else
       local exists=false
@@ -107,6 +108,18 @@ local ok,err=pcall(function()
     local pool=project:GetMediaPool()
     local root=pool:GetRootFolder()
     local seen={}; visit(root,seen)
+    if LINKED_UPDATE then
+      local pending=0
+      for _,c in ipairs(shoot.clips) do
+        if not seen[c.dir] and not seen[c.nfd] then pending=pending+1 end
+      end
+      if pending==0 then return end
+      if not ADD_APPROVED then
+        if not MENU then print('NEW_CLIPS ' .. pending); return end
+        TEXT.open=TEXT.add
+        if not dialog(string.format(TEXT.newClips,pending),true) then return end
+      end
+    end
     pool:SetCurrentFolder(root)
     print('PROGRESS models')
     local rushs,gyroTemplate,gyroSource,gyroMedia,anchor,colorGroup=nil,nil,nil,nil,nil,nil
@@ -237,7 +250,7 @@ local ok,err=pcall(function()
             local preset=property(video,'Input Sizing Preset')
             if preset=='' or preset=='None' then
               sizingApplied=video:SetClipProperty('Input Sizing Preset',wanted)
-              if not sizingApplied and not INCLUDE_ALL_SHOTS then warn(c.name .. ': sizing preset missing ' .. wanted) end
+              if not sizingApplied and (not INCLUDE_ALL_SHOTS or not rushs) then warn(c.name .. ': sizing preset missing ' .. wanted) end
             else
               sizingApplied=true -- Preserve a user's custom input sizing.
               if preset~=wanted then warn(c.name .. ': existing sizing preset kept') end

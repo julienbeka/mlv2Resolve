@@ -2916,6 +2916,46 @@
           }
         }
       }
+    },
+    "New clips detected": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nouveaux plans détectés"
+          }
+        }
+      }
+    },
+    "Open Without Adding": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvrir sans ajouter"
+          }
+        }
+      }
+    },
+    "Add Clips": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ajouter les plans"
+          }
+        }
+      }
+    },
+    "Add %lld new clips to “%@” and apply the same processing, including desqueeze?": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ajouter %lld nouveaux plans à « %@ » et appliquer les mêmes traitements, dont le desqueeze ?"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

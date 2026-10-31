@@ -2,6 +2,8 @@
 
 ### Changes in @VERSION@
 
+- **New clips in existing Resolve projects:** opening a linked project now offers to import missing clips and apply desqueeze and audio sync. Declining opens the project without adding clips; existing media, timelines and settings are preserved.
+
 - **Kodak Group Post Clip:** the preset now contains only the DWG/Intermediate → Rec.709/Cineon CST and Kodak 2383 D60 LUT. The final Rec.709-A conversion node is removed. Forward and Inverse OOTF are disabled; White Point Adaptation remains enabled. Applies to newly created projects.
 
 - **Faster Gyro sync remounts:** unchanged no-log, insufficient-motion and ambiguous results are remembered across restarts. New clips are processed normally; changes to source files, gyro logs or settings invalidate the cached result. Regenerate always forces a new attempt. Existing synchronized clips no longer appear to undergo motion analysis during validation.
@@ -25,6 +27,8 @@ Source (GPL-3.0-or-later): https://github.com/@REPO@/tree/@TAG@
 ## Français
 
 ### Nouveautés de @VERSION@
+
+- **Nouveaux plans dans les projets Resolve existants :** à l’ouverture d’un projet lié, une modale propose d’importer les plans manquants avec désanamorphosage et synchronisation audio. En cas de refus, le projet s’ouvre sans ajout ; les médias existants, timelines et réglages sont conservés.
 
 - **Group Post Clip Kodak :** le preset conserve uniquement le CST DWG/Intermediate → Rec.709/Cineon et la LUT Kodak 2383 D60. Le dernier nœud de conversion Rec.709-A est supprimé. Forward et Inverse OOTF sont désactivés ; White Point Adaptation reste activée. Ce changement concerne les nouveaux projets.
 

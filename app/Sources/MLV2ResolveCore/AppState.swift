@@ -326,22 +326,36 @@ public final class AppState: ObservableObject {
     }
 
     public func openLinkedProject(_ link: ResolveProjectStore.Link, launch: () async throws -> Void,
-                                  confirmSwitch: (String, String) async -> Bool) async -> (text: String, isError: Bool)? {
+                                  confirmSwitch: (String, String) async -> Bool,
+                                  confirmAddClips: (Int, String) async -> Bool = { _,_ in false }) async -> (text: String, isError: Bool)? {
         guard !openingResolve, !desqueezing, !waitingForResolveGyro else { return nil }
         projectMenuAction = .open(link)
         projectMenuTask?.cancel()
         openingResolve = true
         defer { openingResolve = false }
+        let media = await linkedProjectMedia(link)
+        let preparation = prepareProjectPresets?(ResolveProject.sizingPresets(shoots: media))
+            ?? prepareResolvePresets?(Set(media.flatMap(\.media).map(\.factor).filter { $0 > 1 }).sorted())
         do {
             if let dir = resolveScriptsDir {
                 try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-                try ResolveProject.openScript(link: link, menu: true).write(to: dir.appendingPathComponent(ResolveProject.menuScriptName), atomically: true, encoding: .utf8)
+                try ResolveProject.openScript(link: link, menu: true, shoots: media).write(to: dir.appendingPathComponent(ResolveProject.menuScriptName), atomically: true, encoding: .utf8)
             }
             try await launch()
         } catch { return (error.localizedDescription, true) }
         guard let projectRunner else { return (ResolveProject.guide, false) }
         if let probe = projectProbeRunner, !(await ResolveProject.waitForConnection(runner: probe)) { return ResolveProject.message(.unavailable) }
-        return await ResolveProject.open(link: link, runner: projectRunner, confirmSwitch: confirmSwitch)
+        var result = await ResolveProject.open(link: link, runner: projectRunner, confirmSwitch: confirmSwitch,
+                                              shoots: media, confirmAddClips: confirmAddClips)
+        if preparation == .manual { result.text += "\n\n" + ResolvePresets.manualMessage() }
+        return result
+    }
+
+    private func linkedProjectMedia(_ link: ResolveProjectStore.Link) async -> [ResolveProject.ShootMedia] {
+        let sources = Set(projects.links.filter {
+            $0.name == link.name && $0.database == link.database && $0.folder == link.folder
+        }.map(\.source) + [link.source])
+        return await resolveProjectMedia().filter { sources.contains($0.source) }
     }
 
     public func clearResolveProjectLinks() {
@@ -362,10 +376,15 @@ public final class AppState: ObservableObject {
         projectMenuTask?.cancel()
         switch projectMenuAction {
         case .open(let link):
-            do {
-                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-                try ResolveProject.openScript(link: link, menu: true).write(to: dir.appendingPathComponent(ResolveProject.menuScriptName), atomically: true, encoding: .utf8)
-            } catch { alert = error.localizedDescription }
+            projectMenuTask = Task { [weak self] in
+                guard let self else { return }
+                let media = await self.linkedProjectMedia(link)
+                guard !Task.isCancelled, case .open(let selected) = self.projectMenuAction, selected == link else { return }
+                do {
+                    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                    try ResolveProject.openScript(link: link, menu: true, shoots: media).write(to: dir.appendingPathComponent(ResolveProject.menuScriptName), atomically: true, encoding: .utf8)
+                } catch { self.alert = error.localizedDescription }
+            }
             return
         case .idle:
             try? "print('Choose an action in mlv2Resolve first.')".write(to: dir.appendingPathComponent(ResolveProject.menuScriptName), atomically: true, encoding: .utf8)

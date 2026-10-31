@@ -166,7 +166,7 @@ public enum ResolveProject {
         return ShootMedia(name: shoot.name, media: media, warnings: warnings, source: shoot.folder.standardizedFileURL.path)
     }
 
-    public static func script(shoots: [ShootMedia], approvedCurrent: String? = nil, menu: Bool = false, timelineSize: ResolveTimelineSize = .automatic, createOnly: Bool = false, receiptsURL: URL? = nil, includeAllShots: Bool = true, timelineName: String = "All shots", frameRate: Double? = nil, colorManagement: ResolveColorManagement = .conversionRec709A) -> String {
+    public static func script(shoots: [ShootMedia], approvedCurrent: String? = nil, menu: Bool = false, timelineSize: ResolveTimelineSize = .automatic, createOnly: Bool = false, receiptsURL: URL? = nil, includeAllShots: Bool = true, timelineName: String = "All shots", frameRate: Double? = nil, colorManagement: ResolveColorManagement = .conversionRec709A, linkedUpdate: Bool = false, approvedNewClips: Bool = false) -> String {
         let quote = ResolveDesqueeze.luaString
         var lua = "local SHOOTS = {\n"
         for shoot in shoots {
@@ -186,14 +186,15 @@ public enum ResolveProject {
             lua += "},warnings={\((shoot.warnings + cadenceWarnings).map(quote).joined(separator: ","))}},\n"
         }
         lua += "}\nlocal APPROVED = \(approvedCurrent.map(quote) ?? "nil")\nlocal MENU = \(menu)\n"
-        lua += "local TEXT = {switch=\(quote(text("Switch Resolve project?", "Changer de projet Resolve ?"))),cancel=\(quote(text("Cancel", "Annuler"))),open=\(quote(text("Open", "Ouvrir"))),guide=\(quote(guide)),done=\(quote(text("Project preparation finished. See the console for details.", "Préparation terminée. Consultez la console pour le détail.")))}\n"
+        lua += "local TEXT = {add=\(quote(text("Add clips", "Ajouter les plans"))),newClips=\(quote(text("%d new clips detected. Add them to this project and apply the same processing, including desqueeze?", "%d nouveaux plans détectés. Les ajouter à ce projet et appliquer les mêmes traitements, dont le desqueeze ?"))),switch=\(quote(text("Switch Resolve project?", "Changer de projet Resolve ?"))),cancel=\(quote(text("Cancel", "Annuler"))),open=\(quote(text("Open", "Ouvrir"))),guide=\(quote(guide)),done=\(quote(text("Project preparation finished. See the console for details.", "Préparation terminée. Consultez la console pour le détail.")))}\n"
         lua += "local TIMELINE_TEMPLATE = \(quote(colorManagement.timelineTemplateURL.path))\nlocal COLOR_TEMPLATE = \(quote(colorManagement.colorTemplateURL.path))\nlocal INCLUDE_ALL_SHOTS = \(includeAllShots)\nlocal TIMELINE_NAME = \(quote(timelineName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "All shots" : timelineName.trimmingCharacters(in: .whitespacesAndNewlines)))\nlocal CREATE_ONLY = \(createOnly)\nlocal RECEIPTS = \(receiptsURL.map { quote($0.path) } ?? "nil")\n"
+        lua += "local LINKED_UPDATE = \(linkedUpdate)\nlocal ADD_APPROVED = \(approvedNewClips)\n"
         lua += "local COLOR_POST_NODE_COUNT = \(colorManagement.nodeCount)\nlocal COLOR_LUT = \(colorManagement.lutPath.map(quote) ?? "nil")\n"
         let url = Bundle.module.url(forResource: "resolve-project", withExtension: "lua")!
         return lua + (try! String(contentsOf: url, encoding: .utf8))
     }
 
-    public static func openScript(link: ResolveProjectStore.Link, approvedCurrent: String? = nil, menu: Bool = false) -> String {
+    public static func openScript(link: ResolveProjectStore.Link, approvedCurrent: String? = nil, menu: Bool = false, shoots: [ShootMedia] = [], approvedNewClips: Bool = false) -> String {
         let q = ResolveDesqueeze.luaString
         let prefix = """
         local TARGET = \(q(link.name))
@@ -204,16 +205,26 @@ public enum ResolveProject {
         local TEXT = {switch=\(q(text("Save current project and open", "Enregistrer le projet actuel et ouvrir"))),cancel=\(q(text("Cancel", "Annuler"))),open=\(q(text("Open", "Ouvrir")))}
         """
         let url = Bundle.module.url(forResource: "resolve-open", withExtension: "lua")!
-        return prefix + "\n" + (try! String(contentsOf: url, encoding: .utf8))
+        let opening = "local LINK_OPENED = false\ndo\n" + prefix + "\n" + (try! String(contentsOf: url, encoding: .utf8)) + "\nend\n"
+        guard !shoots.isEmpty else { return opening }
+        return opening + "if not LINK_OPENED then return end\n" + script(shoots: combined(shoots, name: link.name), menu: menu, linkedUpdate: true, approvedNewClips: approvedNewClips)
     }
 
     @MainActor
     public static func open(link: ResolveProjectStore.Link, runner: ResolveDesqueeze.Runner,
-                            confirmSwitch: (String, String) async -> Bool) async -> (text: String, isError: Bool) {
+                            confirmSwitch: (String, String) async -> Bool, shoots: [ShootMedia] = [],
+                            confirmAddClips: (Int, String) async -> Bool = { _,_ in false }) async -> (text: String, isError: Bool) {
         var approved: String?
+        var approvedNewClips = false
         for _ in 0..<4 {
             do {
-                let output = try await runner(openScript(link: link, approvedCurrent: approved))
+                let output = try await runner(openScript(link: link, approvedCurrent: approved, shoots: shoots, approvedNewClips: approvedNewClips))
+                let lines = output.split(whereSeparator: \.isNewline)
+                if lines.contains(where: { $0.hasPrefix("ERROR ") || $0.hasPrefix("PROJECT ") }) { return message(parse(output)) }
+                if let pending = lines.first(where: { $0.hasPrefix("NEW_CLIPS ") }), let count = Int(pending.dropFirst(10)) {
+                    if await confirmAddClips(count, link.name) { approvedNewClips = true; approved = link.name; continue }
+                    return (text("Project opened: ", "Projet ouvert : ") + link.name, false)
+                }
                 if output.split(whereSeparator: \.isNewline).contains("OPENED") {
                     return (text("Project opened: ", "Projet ouvert : ") + link.name, false)
                 }

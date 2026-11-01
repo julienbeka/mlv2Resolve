@@ -2,6 +2,8 @@
 
 ### Changes in @VERSION@
 
+- **Virtual WAV headers:** correct RIFF and PCM chunk lengths, which previously announced eight bytes beyond the virtual file boundaries and produced Resolve audio-size warnings. PCM samples are unchanged. This fixes the confirmed header defect; Resolve crashes, scripting connection failures and first-pass playback latency remain under investigation.
+
 - **Playback cache:** replace the four-frame limit with a 256 MiB idle-frame budget and least-recently-used eviction. Resolve’s read-ahead window can be reused without retaining every open DNG frame indefinitely.
 
 - **Detailed preparation progress:** mounted DNG discovery now reports each clip and a counter, followed by script preparation, Resolve connection and project opening. Progress no longer moves backwards between phases. Linked projects scan only their associated mounted folders.
@@ -36,6 +38,8 @@ Source (GPL-3.0-or-later): https://github.com/@REPO@/tree/@TAG@
 ## Français
 
 ### Nouveautés de @VERSION@
+
+- **En-têtes WAV virtuels :** correction des tailles RIFF et PCM, qui annonçaient huit octets au-delà des limites du fichier virtuel et provoquaient des avertissements audio dans Resolve. Les échantillons PCM sont inchangés. Cette correction traite le défaut d’en-tête confirmé ; les plantages de Resolve, l’échec de connexion aux scripts et les ralentissements à la première lecture restent en cours d’investigation.
 
 - **Cache de lecture :** la limite de quatre images est remplacée par un budget de 256 Mio pour les images inactives, avec éviction des moins récemment lues. Les lectures anticipées de Resolve sont réutilisées sans retenir indéfiniment toutes les images des DNG ouverts.
 

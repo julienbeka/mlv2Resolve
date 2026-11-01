@@ -87,7 +87,16 @@ $(CACHE_TEST_ASAN_BIN): $(CACHE_TEST_SRCS) $(HDRS)
 	$(CC) $(CFLAGS) -O1 -g -fsanitize=address,undefined $(CACHE_TEST_SRCS) -pthread -o $@
 
 clean:
-	rm -f mlvfs-bin mlvmotion-bin $(OBJS) $(TEST_BIN) $(RESOLVE_TEST_BIN) $(SIDECAR_TEST_BIN) $(CACHE_TEST_BIN) $(CACHE_TEST_ASAN_BIN) ../build/engine/dual_iso_preview_test ../build/engine/frame_benchmark
+	rm -f mlvfs-bin mlvmotion-bin $(OBJS) $(TEST_BIN) $(RESOLVE_TEST_BIN) $(SIDECAR_TEST_BIN) $(CACHE_TEST_BIN) $(CACHE_TEST_ASAN_BIN) ../build/engine/dual_iso_preview_test ../build/engine/frame_benchmark ../build/engine/wav_header_test
+
+# Virtual WAV headers must describe the exact RIFF and PCM boundaries.
+.PHONY: wav-header-test
+wav-header-test: ../build/engine/wav_header_test
+	$(TIMEOUT) $<
+
+../build/engine/wav_header_test: tests/wav_header_test.c $(SRC)/wav.c $(HDRS)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -O1 -g -fsanitize=undefined -ffunction-sections -fdata-sections -Wl,-dead_strip tests/wav_header_test.c -o $@
 
 # Preview rejection must release its per-frame histograms.
 .PHONY: dual-iso-preview-test

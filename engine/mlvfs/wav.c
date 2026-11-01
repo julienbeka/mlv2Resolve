@@ -228,7 +228,8 @@ size_t wav_get_data_direct(FILE ** chunk_files, mlv_xref_hdr_t * block_xref, mlv
     struct wav_header header =
     {
         .RIFF = "RIFF",
-        .file_size = (uint32_t)file_size,
+        /* RIFF excludes its eight-byte chunk identifier and length field. */
+        .file_size = (uint32_t)(file_size - 8),
         .WAVE = "WAVE",
         .bext_id = "bext",
         .bext_size = sizeof(struct wav_bext),
@@ -244,7 +245,8 @@ size_t wav_get_data_direct(FILE ** chunk_files, mlv_xref_hdr_t * block_xref, mlv
         .block_align = 4,
         .bits_per_sample = wavi_hdr->bitsPerSample,
         .data = "data",
-        .subchunk2_size = (uint32_t)(file_size - sizeof(struct wav_header) + 8),
+        /* The data chunk length counts PCM only, excluding its header too. */
+        .subchunk2_size = (uint32_t)(file_size - sizeof(struct wav_header)),
     };
     
     char temp[33];

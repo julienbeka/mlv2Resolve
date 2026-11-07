@@ -38,7 +38,7 @@ DNG sequences appear in `~/MLV Mounts/<shoot>`. Keep the folders mounted while e
 
 ## Resolve workflow
 
-With **Resolve Studio**, enable **Preferences → System → General → External scripting using: Local**. With **Resolve Free**, choose the action in mlv2Resolve, then run **Workspace → Scripts → mlv2Resolve** inside Resolve.
+With **Resolve Studio**, enable **Preferences → System → General → External scripting using: Local**. With **Resolve Free**, choose the action in mlv2Resolve, then run **Workspace → Scripts → mlv2Resolve** inside Resolve. See [Resolve Free vs Studio](docs/resolve-free-vs-studio.md) for the full comparison.
 
 | Action | Result |
 | --- | --- |

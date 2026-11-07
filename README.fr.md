@@ -38,7 +38,7 @@ Les séquences DNG apparaissent dans `~/MLV Mounts/<tournage>`. Gardez les dossi
 
 ## Workflow Resolve
 
-Avec **Resolve Studio**, activez **Preferences → System → General → External scripting using: Local**. Avec **Resolve gratuit**, choisissez l’action dans mlv2Resolve puis lancez **Workspace → Scripts → mlv2Resolve** dans Resolve.
+Avec **Resolve Studio**, activez **Preferences → System → General → External scripting using: Local**. Avec **Resolve gratuit**, choisissez l’action dans mlv2Resolve puis lancez **Workspace → Scripts → mlv2Resolve** dans Resolve. Voir [Resolve gratuit ou Studio](docs/resolve-free-vs-studio.fr.md) pour la comparaison complète.
 
 | Action | Résultat |
 | --- | --- |
